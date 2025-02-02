@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+option go_package = "github.com/cc-0000/indeq/common/api";
+
+package api;
+
+service QueryService {
+    rpc MakeQuery(QueryRequest) returns (QueryResponse);
+}
+
+message QueryRequest {
+    string userID = 1;
+    string query = 2;
+}
+
+message QueryResponse {
+    string userID = 1;
+    string response = 2;
+}
