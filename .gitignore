@@ -13,7 +13,6 @@
 *.test
 *.out
 /vendor/
-go.work
 
 # IDE specific
 .idea/
