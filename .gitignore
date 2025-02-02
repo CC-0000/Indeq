@@ -1,0 +1,42 @@
+# Generated Protocol Buffer files
+*.pb.go
+*.pb.gw.go
+
+# Go specific
+/bin/
+/pkg/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+/vendor/
+go.work
+
+# IDE specific
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Protocol Buffer compiler
+/protoc/
+/protoc-gen-go
+/protoc-gen-go-grpc
+
+# Build output
+/dist/
+/build/
+
+# Environment variables
+.env
+.env.local
+
+# Log files
+*.log
+
+# Cache directories
+.cache/
