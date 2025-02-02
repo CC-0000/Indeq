@@ -1,0 +1,29 @@
+services:
+  query:
+    image: query-service
+    build:
+      context: .
+      dockerfile: query/Dockerfile
+    environment:
+      GRPC_ADDRESS: ":50051"
+    networks:
+      - indeq-net
+
+  gateway:
+    image: gateway-service
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      HTTP_PORT: ":8080"
+      GRPC_ADDRESS: "query:50051" # Uses Docker DNS to find the other service
+    depends_on:
+      - query
+    networks:
+      - indeq-net
+
+networks:
+  indeq-net:
+    driver: bridge
