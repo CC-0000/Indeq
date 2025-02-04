@@ -39,3 +39,5 @@
 
 # Cache directories
 .cache/
+
+package-lock.json
