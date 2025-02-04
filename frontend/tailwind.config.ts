@@ -5,7 +5,15 @@ export default {
 	content: ['./src/**/*.{html,js,svelte,ts}'],
 
 	theme: {
-		extend: {}
+		extend: {
+			fontFamily: {
+				sans: ["Work Sans", "sans-serif"],
+			},
+			colors: {
+				primary: "#6b8aed", // A professional light blue color
+				secondary: "#f8f9fa", // Light background color
+			},
+		}
 	},
 
 	plugins: [typography]
