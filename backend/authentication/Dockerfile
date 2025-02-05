@@ -16,28 +16,27 @@ COPY query/go.mod query/go.sum ./query/
 COPY authentication/go.mod authentication/go.sum ./authentication/
 
 # Download dependencies
-RUN cd gateway && go mod download
+RUN cd authentication && go mod download
 
 # Copy proto files
-COPY common/api/query.proto ./common/api/
-RUN protoc --go_out=. --go-grpc_out=. common/api/query.proto
+COPY common/api/authentication.proto ./common/api/
+RUN protoc --go_out=. --go-grpc_out=. common/api/authentication.proto
 
 # Copy source code
-COPY gateway/ ./gateway/
+COPY authentication/ ./authentication/
 COPY common/ ./common/
-COPY query/ ./query/
 
 # Build binary with module replacement
-RUN cd gateway && \
-    CGO_ENABLED=0 GOOS=linux go build -o ../gateway-service .
+RUN cd authentication && \
+    CGO_ENABLED=0 GOOS=linux go build -o ../authentication-service .
 
 # Runtime stage  
 FROM alpine:latest
 RUN apk --no-cache add ca-certificates
 
 WORKDIR /app/
-COPY --from=builder /app/gateway-service .
+COPY --from=builder /app/authentication-service .
 COPY --from=builder /app/common/config/.env . 
 
-EXPOSE 8080
-CMD ["./gateway-service"]
+EXPOSE 50052
+CMD ["./authentication-service"]
