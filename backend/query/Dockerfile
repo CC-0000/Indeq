@@ -13,6 +13,7 @@ COPY go.work go.work.sum ./
 COPY gateway/go.mod gateway/go.sum ./gateway/
 COPY common/go.mod common/go.sum ./common/
 COPY query/go.mod query/go.sum ./query/
+COPY authentication/go.mod authentication/go.sum ./authentication/
 
 # Download dependencies
 RUN cd query && go mod download
@@ -35,7 +36,7 @@ RUN apk --no-cache add ca-certificates
 
 WORKDIR /app/
 COPY --from=builder /app/query-service .
-COPY --from=builder /app/query/.env .env 
+COPY --from=builder /app/common/config/.env . 
 
 EXPOSE 50051
 CMD ["./query-service"]
