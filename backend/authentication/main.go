@@ -114,6 +114,9 @@ func validateEmail(email string) error {
     if len(email) > MaxEmailLength {
         return fmt.Errorf("email must not exceed %d characters", MaxEmailLength)
     }
+    if len(email) <= 0 {
+        return fmt.Errorf("email must not be blank")
+    }
     return nil
 }
 

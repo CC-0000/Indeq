@@ -95,8 +95,12 @@ func handleRegisterGenerator(clients *ServiceClients) http.HandlerFunc {
 			return
 		}
 
+		httpResponse := &RegisterResponse{
+			Success: res.GetSuccess(),
+			Error: res.GetError(),
+		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(res)
+		json.NewEncoder(w).Encode(httpResponse)
 	}
 }
 
@@ -119,8 +123,12 @@ func handleLoginGenerator(clients *ServiceClients) http.HandlerFunc {
 			return
 		}
 
+		httpResponse := &LoginResponse{
+			Token: res.Token,
+			Error: res.Error,
+		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(res)
+		json.NewEncoder(w).Encode(httpResponse)
 	}
 }
 
