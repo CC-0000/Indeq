@@ -6,7 +6,7 @@
     <!-- Centered Search Box -->
     <div class="w-full max-w-3xl p-8 text-center">
       <!-- Header -->
-      <h1 class="text-3xl text-gray-900 mb-3">Indeq</h1>
+      <h1 class="text-4xl text-gray-900 mb-3">Indeq</h1>
       <p class="text-gray-600 mb-6">Crawl your content in seconds, so you can spend more time on what matters.</p>
   
       <!-- Search Input -->
