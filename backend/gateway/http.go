@@ -6,7 +6,6 @@ type HelloResponse struct {
 }
 
 type QueryRequest struct {
-	UserID string `json:"userId"`
 	Query  string `json:"query"`
 }
 

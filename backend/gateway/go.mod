@@ -15,7 +15,10 @@ require (
 	google.golang.org/protobuf v1.35.2 // indirect
 )
 
-require github.com/cc-0000/indeq/common v0.0.0
+require (
+	github.com/cc-0000/indeq/common v0.0.0
+	github.com/rabbitmq/amqp091-go v1.10.0
+)
 
 replace (
 	github.com/cc-0000/indeq/common => ../common
