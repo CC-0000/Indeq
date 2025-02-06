@@ -17,27 +17,27 @@ COPY authentication/go.mod authentication/go.sum ./authentication/
 COPY integration/go.mod integration/go.sum ./integration/
 
 # Download dependencies
-RUN cd authentication && go mod download
+RUN cd integration && go mod download
 
 # Copy proto files
-COPY common/api/authentication.proto ./common/api/
-RUN protoc --go_out=. --go-grpc_out=. common/api/authentication.proto
+COPY common/api/integration.proto ./common/api/
+RUN protoc --go_out=. --go-grpc_out=. common/api/integration.proto
 
 # Copy source code
-COPY authentication/ ./authentication/
+COPY integration/ ./integration/
 COPY common/ ./common/
 
 # Build binary with module replacement
-RUN cd authentication && \
-    CGO_ENABLED=0 GOOS=linux go build -o ../authentication-service .
+RUN cd integration && \
+    CGO_ENABLED=0 GOOS=linux go build -o ../integration-service .
 
 # Runtime stage  
 FROM alpine:latest
 RUN apk --no-cache add ca-certificates
 
 WORKDIR /app/
-COPY --from=builder /app/authentication-service .
+COPY --from=builder /app/integration-service .
 COPY --from=builder /app/common/config/.env . 
 
-EXPOSE 50052
-CMD ["./authentication-service"]
+EXPOSE 50053
+CMD ["./integration-service"]

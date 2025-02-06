@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+option go_package = "github.com/cc-0000/indeq/common/api";
+
+package api;
+
+service IntegrationService {
+    rpc Connect(ConnectRequest) returns (ConnectResponse);
+}
+
+message ConnectRequest {
+    string provider = 1;
+    string user_id = 2;
+}
+
+message ConnectResponse {
+    bool success = 1;
+    string message = 2;
+}

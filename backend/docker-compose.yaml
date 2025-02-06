@@ -29,7 +29,16 @@ services:
       - query
     networks:
       - indeq-net
-
+  
+  integration:
+    image: integration-service
+    build:
+      context: .
+      dockerfile: integration/Dockerfile
+    depends_on:
+      - authentication
+    networks:
+      - indeq-net
   passwordDB:
     image: postgres:latest
     env_file:
