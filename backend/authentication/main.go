@@ -15,7 +15,6 @@ import (
 	"time"
 
 	pb "github.com/cc-0000/indeq/common/api"
-	"github.com/cc-0000/indeq/common/config"
 	"github.com/golang-jwt/jwt/v5"
 	_ "github.com/lib/pq"
 	"golang.org/x/crypto/argon2"
@@ -358,10 +357,6 @@ func (s *authServer) Verify(ctx context.Context, req *pb.VerifyRequest) (*pb.Ver
 func main() {
 	log.Println("Starting the auth server...")
 	// Load all environmental variables
-    err := config.LoadSharedConfig()
-	if err != nil {
-		log.Fatalf("Error loading .env file: %v", err)
-	}
     if err := loadPasswordSettings(); err != nil {
         log.Fatalf("Failed to initialize password encryption settings: %v", err)
     }
@@ -408,6 +403,8 @@ func main() {
     if err != nil {
         log.Fatalf("Failed to create email index: %v", err)
     }
+
+    fmt.Println("Database setup completed: users table is ready.")
 
     listener, err := net.Listen("tcp", grpcAddress)
     if err != nil {

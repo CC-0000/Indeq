@@ -4,6 +4,8 @@ services:
     build:
       context: .
       dockerfile: query/Dockerfile
+    env_file:
+      - ./query/.env
     networks:
       - indeq-net
 
@@ -12,6 +14,8 @@ services:
     build:
       context: .
       dockerfile: authentication/Dockerfile
+    env_file:
+      - ./authentication/.env
     depends_on:
       passwordDB:
         condition: service_healthy
@@ -23,6 +27,8 @@ services:
     build:
       context: .
       dockerfile: gateway/Dockerfile
+    env_file:
+      - ./gateway/.env
     ports:
       - "8080:8080"
     depends_on:
@@ -35,6 +41,8 @@ services:
     build:
       context: .
       dockerfile: integration/Dockerfile
+    env_file:
+      - ./integration/.env
     depends_on:
       integrationDB:
         condition: service_healthy
@@ -43,9 +51,7 @@ services:
   integrationDB:
     image: postgres:latest
     env_file:
-      - ./common/config/.env
-    environment:
-      POSTGRES_DB: "${INTEGRATION_POSTGRES_DB}"
+      - ./integration/.env
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
@@ -63,9 +69,7 @@ services:
   passwordDB:
     image: postgres:latest
     env_file:
-      - ./common/config/.env
-    environment:
-      POSTGRES_DB: "${AUTH_POSTGRES_DB}"
+      - ./authentication/.env
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s

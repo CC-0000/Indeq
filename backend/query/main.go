@@ -7,7 +7,6 @@ import (
 	"os"
 
 	pb "github.com/cc-0000/indeq/common/api"
-	"github.com/cc-0000/indeq/common/config"
 	"google.golang.org/grpc"
 )
 
@@ -26,11 +25,6 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 
 func main() {
 	log.Println("Starting the server...")
-	err := config.LoadSharedConfig()
-	if err != nil {
-		log.Fatal("Error loading .env file")
-	}
-
 	grpcAddress := os.Getenv("QUERY_PORT")
 
 	listener, err := net.Listen("tcp", grpcAddress)

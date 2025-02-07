@@ -2,7 +2,10 @@ module github.com/cc-0000/indeq/integration
 
 go 1.23.5
 
-require google.golang.org/grpc v1.70.0
+require (
+	github.com/lib/pq v1.10.9
+	google.golang.org/grpc v1.70.0
+)
 
 require (
 	golang.org/x/net v0.32.0 // indirect

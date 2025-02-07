@@ -10,7 +10,6 @@ import (
     "time"
 
 	pb "github.com/cc-0000/indeq/common/api"
-	"github.com/cc-0000/indeq/common/config"
 	_ "github.com/lib/pq"
 	"google.golang.org/grpc"
 )
@@ -24,10 +23,6 @@ func main() {
     log.Println("Starting the integration server...")
     
     // Load all environmetal variables
-    err := config.LoadSharedConfig()
-    if err != nil {
-        log.Fatalf("Error loading .env file: %v", err)
-    }
 
     dbURL := os.Getenv("INTEGRATION_DATABASE_URL")
     if dbURL == "" {
@@ -73,7 +68,7 @@ func main() {
     // Pull in GRPC address
     grpcAddress := os.Getenv("INTEGRATION_PORT")
     if grpcAddress == "" {
-        log.Fatalf("INTEGRATION_SERVICE_PORT environment variable is required")
+        log.Fatalf("INTEGRATION_PORT environment variable is required")
     }
 
     listener, err := net.Listen("tcp", grpcAddress)
