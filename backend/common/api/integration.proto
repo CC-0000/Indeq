@@ -5,15 +5,46 @@ option go_package = "github.com/cc-0000/indeq/common/api";
 package api;
 
 service IntegrationService {
-    rpc Connect(ConnectRequest) returns (ConnectResponse);
+    rpc ConnectIntegration(ConnectIntegrationRequest) returns (ConnectIntegrationResponse);
+    rpc RefreshToken(RefreshTokenRequest) returns (RefreshTokenResponse);
+    rpc DisconnectIntegration(DisconnectIntegrationRequest) returns (DisconnectIntegrationResponse);
 }
 
-message ConnectRequest {
-    string provider = 1;
-    string user_id = 2;
+enum Provider {
+    GOOGLE = 0;
+    MICROSOFT = 1;
+    NOTION = 2;
 }
 
-message ConnectResponse {
+message ConnectIntegrationRequest {
+    string user_id = 1;
+    Provider provider = 2;
+    string auth_code = 3;
+}
+
+message ConnectIntegrationResponse {
+    bool success = 1;
+    string message = 2;
+    string error_details = 3;
+}
+
+message RefreshTokenRequest {
+    string user_id = 1;
+    Provider provider = 2;
+}
+
+message RefreshTokenResponse {
+    bool success = 1;
+    string new_access_token = 2;
+    string new_refresh_token = 3;
+}
+
+message DisconnectIntegrationRequest {
+    string user_id = 1;
+    Provider provider = 2;
+}
+
+message DisconnectIntegrationResponse {
     bool success = 1;
     string message = 2;
 }

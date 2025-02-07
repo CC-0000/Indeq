@@ -368,9 +368,9 @@ func main() {
 
 	grpcAddress := os.Getenv("AUTH_PORT")
 
-    dbURL := os.Getenv("DATABASE_URL")
+    dbURL := os.Getenv("AUTH_DATABASE_URL")
     if dbURL == "" {
-        log.Fatal("DATABASE_URL environment variable is required")
+        log.Fatal("AUTH_DATABASE_URL environment variable is required")
     }
 
     jwtSecret := []byte(os.Getenv("JWT_SECRET"))
