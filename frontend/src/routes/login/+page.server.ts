@@ -1,4 +1,4 @@
-import { fail, redirect } from '@sveltejs/kit';
+import { fail } from '@sveltejs/kit';
 import type { Actions } from './$types';
 import { GO_BACKEND_URL } from '$env/static/private';
 
@@ -31,15 +31,14 @@ export const actions = {
             }
 
             const response = await res.json();
+            cookies.set('session', response.token, { path: '/', maxAge: 60 * 60 * 24 * 30 });
 
-            if (response.success) {
+            if (response.error === '') {
                 return { success: true };
             } else {
                 return fail(400, { errorMessage: response.error });
             }
 
-            // Redirect to chat if login succeeded
-            throw redirect(302, '/chat');
         } catch (error) {
             return fail(400, {
                 error: 'Invalid credentials',

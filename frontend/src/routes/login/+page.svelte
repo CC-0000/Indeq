@@ -4,6 +4,18 @@
     import { Input } from "$lib/components/ui/input/index.js";
     import { Button } from "$lib/components/ui/button/index.js";
     import { enhance } from "$app/forms";
+    import { toast } from "svelte-sonner";
+    import { goto } from "$app/navigation";
+
+    // Check for success or error in the server response
+    $: if (form?.success) {
+        toast.success("Welcome back!");
+        goto('/chat');
+    }
+
+    $: if (form?.error) {
+        toast.error(form.error);
+    }
 
     export let form;
 </script>
@@ -17,7 +29,7 @@
 			</Card.Header>
 			<form method="POST" use:enhance>
 				<Card.Content class="grid gap-4">
-					<Button variant="outline" type="button">
+					<Button variant="outline" type="button" on:click={() => toast.loading('In development...')}>
 						<img src="/google.svg" alt="Google logo" class="mr-2 h-6 w-6" />
 						Login with Google
 					</Button>
