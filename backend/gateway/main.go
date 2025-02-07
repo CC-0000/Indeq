@@ -11,6 +11,7 @@ import (
 
 	pb "github.com/cc-0000/indeq/common/api"
 	"github.com/cc-0000/indeq/common/config"
+	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -53,7 +54,7 @@ func helloHandler(w http.ResponseWriter, r *http.Request) {
 
 func handleGetQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-
+		log.Println("received event stream request")
 		// NOTE: expects authentication middleware to have already verified the token!!!
 		// Grab the token --> userId
 		auth_header := r.Header.Get("Authorization")
@@ -61,6 +62,11 @@ func handleGetQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 		verifyRes, _ := clients.authClient.Verify(clients.ctx, &pb.VerifyRequest{
 			Token: auth_token,
 		})
+
+		// Get the query parameters
+		queryParams := r.URL.Query()
+		incomingId := queryParams.Get("conversationId") 
+		conversationId := fmt.Sprintf("%s-%s", verifyRes.UserId, incomingId)
 
 		// Add context cancellation
 		ctx, cancel := context.WithCancel(r.Context())
@@ -92,13 +98,15 @@ func handleGetQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 		defer channel.Close()
 
 		queue, err := channel.QueueDeclare(
-            verifyRes.UserId, // name
+            conversationId, // name
             false,           // durable
-            false,           // delete when unused
+            true,           // delete when unused
             false,           // exclusive
             false,           // no-wait
-            nil,            // arguments
-        )
+			amqp.Table{ 		// arguments
+				"x-expires": 300000, // 5 minutes in milliseconds
+			},
+		)
 		if err != nil {
             http.Error(w, "Failed to declare queue", http.StatusInternalServerError)
             return
@@ -108,8 +116,8 @@ func handleGetQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 			queue.Name,
 			"",    // consumer
 			true,  // auto-ack
-			true, // exclusive - set to true to ensure only one consumer
-			false,
+			false, // exclusive
+			false, // no-local
 			false,
 			nil,
 		)
@@ -118,6 +126,7 @@ func handleGetQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 			return
 		}
 
+		log.Print("Starting to read...")
 		for {
 			select {
 			case msg, ok := <-msgs:
@@ -156,6 +165,10 @@ func handlePostQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 			Token: auth_token,
 		})
 
+		// Generate a per-user UUID
+		newId := uuid.New()
+		conversationId := fmt.Sprintf("%s-%s", verifyRes.UserId, newId.String()) // concatenate the user+id
+
 		// Grab the query
 		var queryRequest QueryRequest
 		if err := json.NewDecoder(r.Body).Decode(&queryRequest); err != nil {
@@ -166,7 +179,7 @@ func handlePostQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 		// Send the query in a goroutine
 		go func() {
 			_, err := clients.queryClient.MakeQuery(clients.ctx, &pb.QueryRequest{
-				UserID: verifyRes.UserId,
+				ConversationId: conversationId,
 				Query:  queryRequest.Query,
 			})
 			if err != nil {
@@ -174,7 +187,11 @@ func handlePostQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 			}
 		}()
 
-		w.WriteHeader(http.StatusAccepted)
+		httpReponse := &QueryResponse{
+			ConversationId: newId.String(),
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(httpReponse)
 	}
 }
 

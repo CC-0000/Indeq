@@ -23,7 +23,7 @@ type queryServer struct {
 }
 
 func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.QueryResponse, error) {
-
+	// Make a request to the llm
 	log.Println("attempting to make request to llm")
 	llmReq, _ := http.NewRequest("POST", os.Getenv("OLLAMA_URL"), strings.NewReader(fmt.Sprintf(`{
         "model": "%s",
@@ -50,37 +50,41 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 
 
     queue, err := channel.QueueDeclare(
-        req.UserID, // queue name
-        false,     // durable
-        false,     // delete when unused
-        false,     // exclusive
-        false,     // no-wait
-        nil,       // arguments
+        req.ConversationId, // queue name
+        false,     			// durable
+        true,     			// delete when unused
+        false,     			// exclusive
+        false,     			// no-wait
+        amqp.Table{ 		// arguments
+            "x-expires": 300000, // 5 minutes in milliseconds
+        },
     )
     if err != nil {
         log.Fatal(err)
     }
 
+	// Read each token and publish it to the queue
 	for scanner.Scan() {
         var result map[string]interface{}
         json.Unmarshal(scanner.Bytes(), &result)
 		// stream it to a rabbitMQ message queue
-		response, ok := result["response"].(string)
+		token, ok := result["response"].(string)
 		if !ok {
 			log.Printf("Error: response field is not a string")
 			continue
 		}
 
-		err = channel.Publish(
-			"",     // exchange
-			queue.Name, // routing key
-			false,  // mandatory
-			false,  // immediate
+		err = channel.PublishWithContext(
+			ctx,
+			"",     		// exchange
+			queue.Name, 	// routing key
+			false,  		// mandatory
+			false,  		// immediate
 			amqp.Publishing{
 				ContentType: "text/plain",
-				Body:       []byte(response),
+				Body:       []byte(token),
 			})
-			log.Printf("writing: %v", response)
+			log.Printf("writing: %v", token)
 		if err != nil {
 			log.Printf("Error publishing message: %v", err)
 			continue
@@ -89,7 +93,7 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 
 	return &pb.QueryResponse{
 		Success: true,
-		}, nil
+	}, nil
 }
 
 

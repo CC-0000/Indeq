@@ -17,6 +17,7 @@ require (
 
 require (
 	github.com/cc-0000/indeq/common v0.0.0
+	github.com/google/uuid v1.6.0
 	github.com/rabbitmq/amqp091-go v1.10.0
 )
 

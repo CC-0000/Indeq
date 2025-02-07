@@ -9,6 +9,10 @@ type QueryRequest struct {
 	Query  string `json:"query"`
 }
 
+type QueryResponse struct {
+	ConversationId string `json:"conversation_id"`
+}
+
 /* register route */
 type RegisterRequest struct {
 	Email    string `json:"email"`
