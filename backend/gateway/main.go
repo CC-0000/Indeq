@@ -303,8 +303,8 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /hello", helloHandler)
-	mux.HandleFunc("POST /query", authMiddleware(handlePostQueryGenerator(serviceClients), serviceClients))
-	mux.HandleFunc("GET /query", authMiddleware(handleGetQueryGenerator(serviceClients), serviceClients))
+	mux.HandleFunc("POST /api/query", authMiddleware(handlePostQueryGenerator(serviceClients), serviceClients))
+	mux.HandleFunc("GET /api/query", authMiddleware(handleGetQueryGenerator(serviceClients), serviceClients))
 	mux.HandleFunc("POST /api/register", handleRegisterGenerator(serviceClients))
 	mux.HandleFunc("POST /api/login", handleLoginGenerator(serviceClients))
 
