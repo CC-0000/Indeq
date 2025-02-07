@@ -190,11 +190,11 @@ func handlePostQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 			}
 		}()
 
-		httpReponse := &QueryResponse{
+		httpResponse := &QueryResponse{
 			ConversationId: newId.String(),
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(httpReponse)
+		json.NewEncoder(w).Encode(httpResponse)
 	}
 }
 
