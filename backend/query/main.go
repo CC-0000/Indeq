@@ -123,12 +123,10 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 					ContentType: "text/plain",
 					Body:       []byte(token),
 				})
-				log.Printf("writing: %v", token)
 			if err != nil {
 				log.Printf("Error publishing message: %v", err)
 				continue
 			}
-	
 		}
     }
 

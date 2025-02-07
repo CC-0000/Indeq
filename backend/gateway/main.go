@@ -132,7 +132,6 @@ func handleGetQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 					}
 					// parse the message into json
 					thisMsg := string(msg.Body)
-					log.Printf("reading: %v", thisMsg)
 					jsonData, _ := json.Marshal(struct {
 						Type string `json:"type"`
 						Data string `json:"data"`
