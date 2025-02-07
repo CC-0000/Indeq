@@ -24,8 +24,12 @@ type queryServer struct {
 
 func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.QueryResponse, error) {
 	// Make a request to the llm
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// Send req to llm
 	log.Println("attempting to make request to llm")
-	llmReq, _ := http.NewRequest("POST", os.Getenv("OLLAMA_URL"), strings.NewReader(fmt.Sprintf(`{
+	llmReq, _ := http.NewRequestWithContext(ctx, "POST", os.Getenv("OLLAMA_URL"), strings.NewReader(fmt.Sprintf(`{
         "model": "%s",
         "prompt": "%s",
         "stream": true
@@ -48,7 +52,20 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 	}
 	defer channel.Close()
 
-
+	// Create notification channels for when the client closes the channel --> cancel the context
+	notifyClose := channel.NotifyClose(make(chan *amqp.Error, 1))
+	notifyCancel := channel.NotifyCancel(make(chan string, 1))
+    go func() {
+        select {
+        case <-notifyClose:
+            log.Println("Channel closed")
+            cancel()
+        case <-notifyCancel:
+            log.Println("Channel cancelled")
+            cancel()
+        }
+    }()
+	
     queue, err := channel.QueueDeclare(
         req.ConversationId, // queue name
         false,     			// durable
@@ -63,31 +80,55 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
         log.Fatal(err)
     }
 
-	// Read each token and publish it to the queue
+	// Keeps on reading until there are no more tokens
 	for scanner.Scan() {
-        var result map[string]interface{}
-        json.Unmarshal(scanner.Bytes(), &result)
-		// stream it to a rabbitMQ message queue
-		token, ok := result["response"].(string)
-		if !ok {
-			log.Printf("Error: response field is not a string")
-			continue
-		}
-
-		err = channel.PublishWithContext(
-			ctx,
-			"",     		// exchange
-			queue.Name, 	// routing key
-			false,  		// mandatory
-			false,  		// immediate
-			amqp.Publishing{
-				ContentType: "text/plain",
-				Body:       []byte(token),
-			})
-			log.Printf("writing: %v", token)
-		if err != nil {
-			log.Printf("Error publishing message: %v", err)
-			continue
+		select {
+		case <- ctx.Done():
+			return &pb.QueryResponse{
+				Success: false,
+			}, fmt.Errorf("client has disconnected")
+		default:
+			_, err := channel.QueueDeclarePassive(
+				req.ConversationId, // queue name
+				false,     			// durable
+				true,     			// delete when unused
+				false,     			// exclusive
+				false,     			// no-wait
+				amqp.Table{ 		// arguments
+					"x-expires": 300000, // 5 minutes in milliseconds
+				},
+			)
+			if err != nil {
+				log.Println("Queue gone, aborting processing")
+				cancel()
+				break
+			}
+			
+			var result map[string]interface{}
+			json.Unmarshal(scanner.Bytes(), &result)
+			// stream it to a rabbitMQ message queue
+			token, ok := result["response"].(string)
+			if !ok {
+				log.Printf("Error: response field is not a string")
+				continue
+			}
+	
+			err = channel.PublishWithContext(
+				ctx,
+				"",     		// exchange
+				queue.Name, 	// routing key
+				false,  		// mandatory
+				false,  		// immediate
+				amqp.Publishing{
+					ContentType: "text/plain",
+					Body:       []byte(token),
+				})
+				log.Printf("writing: %v", token)
+			if err != nil {
+				log.Printf("Error publishing message: %v", err)
+				continue
+			}
+	
 		}
     }
 

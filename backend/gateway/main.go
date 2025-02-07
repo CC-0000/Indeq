@@ -21,7 +21,6 @@ type ServiceClients struct {
 	queryClient pb.QueryServiceClient
 	authClient pb.AuthenticationServiceClient
 	rabbitMQConn *amqp.Connection
-	ctx context.Context
 }
 
 func authMiddleware(next http.HandlerFunc, clients *ServiceClients) http.HandlerFunc {
@@ -34,7 +33,7 @@ func authMiddleware(next http.HandlerFunc, clients *ServiceClients) http.Handler
         }
 		auth_token := strings.TrimPrefix(auth_header, "Bearer ")
 
-		res, err := clients.authClient.Verify(clients.ctx, &pb.VerifyRequest{
+		res, err := clients.authClient.Verify(r.Context(), &pb.VerifyRequest{
 			Token: auth_token,
 		})
 
@@ -55,11 +54,16 @@ func helloHandler(w http.ResponseWriter, r *http.Request) {
 func handleGetQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		log.Println("received event stream request")
+
+		// Set up context with cancellation
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+
 		// NOTE: expects authentication middleware to have already verified the token!!!
 		// Grab the token --> userId
 		auth_header := r.Header.Get("Authorization")
 		auth_token := strings.TrimPrefix(auth_header, "Bearer ")
-		verifyRes, _ := clients.authClient.Verify(clients.ctx, &pb.VerifyRequest{
+		verifyRes, _ := clients.authClient.Verify(ctx, &pb.VerifyRequest{
 			Token: auth_token,
 		})
 
@@ -67,22 +71,12 @@ func handleGetQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 		queryParams := r.URL.Query()
 		incomingId := queryParams.Get("conversationId") 
 		conversationId := fmt.Sprintf("%s-%s", verifyRes.UserId, incomingId)
-
-		// Add context cancellation
-		ctx, cancel := context.WithCancel(r.Context())
-		defer cancel()
-
-		// Handle client disconnection
-		go func() {
-			<-ctx.Done()
-			// Cleanup code here if needed
-		}()
 		
 		// Handle SSE connection
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Origin", "*") // this should be updated in the future to only allow frontend connections
 
 		flusher, ok := w.(http.Flusher)
 		if !ok {
@@ -90,7 +84,7 @@ func handleGetQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 			return
 		}
 
-		// Create a channel
+		// Create a rabbitMQ channel
 		channel, err := clients.rabbitMQConn.Channel()
 		if err != nil {
 			log.Fatal(err)
@@ -129,26 +123,31 @@ func handleGetQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 		log.Print("Starting to read...")
 		for {
 			select {
-			case msg, ok := <-msgs:
-				if !ok {
+				case <-ctx.Done():
+					log.Print("Closing connection from gateway...")
 					return
-				}
-				thisMsg := string(msg.Body)
-				log.Printf("reading: %v", thisMsg)
-				jsonData, _ := json.Marshal(struct {
-					Type string `json:"type"`
-					Data string `json:"data"`
-				}{
-					Type: "message",
-					Data: thisMsg,
-				})
-				fmt.Fprintf(w, "data: %s\n\n", jsonData)
-				flusher.Flush()
-				if thisMsg == "" {
-					return
-				}
-			case <-ctx.Done():
-				return
+				case msg, ok := <-msgs: // there is a message in the channel
+					if !ok {
+						return
+					}
+					// parse the message into json
+					thisMsg := string(msg.Body)
+					log.Printf("reading: %v", thisMsg)
+					jsonData, _ := json.Marshal(struct {
+						Type string `json:"type"`
+						Data string `json:"data"`
+					}{
+						Type: "message",
+						Data: thisMsg,
+					})
+					// write it out to the response
+					fmt.Fprintf(w, "data: %s\n\n", jsonData)
+					flusher.Flush()
+	
+					// if the message is blank there are no more messages
+					if thisMsg == "" {
+						return
+					}
 			}
 		}
 	}
@@ -157,17 +156,20 @@ func handleGetQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 func handlePostQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
+		// Set up context
+		ctx := r.Context()
+
 		// NOTE: expects authentication middleware to have already verified the token!!!
 		// Grab the token --> userId
 		auth_header := r.Header.Get("Authorization")
 		auth_token := strings.TrimPrefix(auth_header, "Bearer ")
-		verifyRes, _ := clients.authClient.Verify(clients.ctx, &pb.VerifyRequest{
+		verifyRes, _ := clients.authClient.Verify(ctx, &pb.VerifyRequest{
 			Token: auth_token,
 		})
 
-		// Generate a per-user UUID
+		// Generate a per-request UUID
 		newId := uuid.New()
-		conversationId := fmt.Sprintf("%s-%s", verifyRes.UserId, newId.String()) // concatenate the user+id
+		conversationId := fmt.Sprintf("%s-%s", verifyRes.UserId, newId.String())
 
 		// Grab the query
 		var queryRequest QueryRequest
@@ -178,7 +180,9 @@ func handlePostQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 
 		// Send the query in a goroutine
 		go func() {
-			_, err := clients.queryClient.MakeQuery(clients.ctx, &pb.QueryRequest{
+			detachedCtx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			_, err := clients.queryClient.MakeQuery(detachedCtx, &pb.QueryRequest{
 				ConversationId: conversationId,
 				Query:  queryRequest.Query,
 			})
@@ -206,7 +210,7 @@ func handleRegisterGenerator(clients *ServiceClients) http.HandlerFunc {
 		}
 
 		// Call the register service
-		res, err := clients.authClient.Register(clients.ctx, &pb.RegisterRequest{
+		res, err := clients.authClient.Register(r.Context(), &pb.RegisterRequest{
 			Email: registerRequest.Email,
 			Name: registerRequest.Name,
 			Password: registerRequest.Password,
@@ -235,7 +239,7 @@ func handleLoginGenerator(clients *ServiceClients) http.HandlerFunc {
 		}
 
 		// Call the login service
-		res, err := clients.authClient.Login(clients.ctx, &pb.LoginRequest{
+		res, err := clients.authClient.Login(r.Context(), &pb.LoginRequest{
 			Email: loginRequest.Email,
 			Password: loginRequest.Password,
 		})
@@ -295,7 +299,6 @@ func main() {
 		queryClient: queryServiceClient, 
 		authClient: authServiceClient,
 		rabbitMQConn: rabbitMQConn,
-		ctx: context.Background(),
 	}
 	log.Print("Server has established connection with other services")
 
