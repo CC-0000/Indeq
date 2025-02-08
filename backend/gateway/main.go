@@ -102,7 +102,7 @@ func handleGetQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 			},
 		)
 		if err != nil {
-            http.Error(w, "Failed to declare queue", http.StatusInternalServerError)
+            http.Error(w, "Internal Server Error", http.StatusInternalServerError)
             return
         }
 
@@ -116,7 +116,7 @@ func handleGetQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 			nil,
 		)
 		if err != nil {
-			http.Error(w, "Failed to register consumer", http.StatusInternalServerError)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 			return
 		}
 
@@ -173,7 +173,11 @@ func handlePostQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 		// Grab the query
 		var queryRequest QueryRequest
 		if err := json.NewDecoder(r.Body).Decode(&queryRequest); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			http.Error(w, "Invalid Formatting", http.StatusBadRequest)
+			return
+		}
+		if queryRequest.Query == "" {
+			http.Error(w, "Invalid Formatting", http.StatusBadRequest)
 			return
 		}
 
