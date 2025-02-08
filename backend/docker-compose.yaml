@@ -4,6 +4,40 @@ services:
     build:
       context: .
       dockerfile: query/Dockerfile
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - indeq-net
+
+  # this docker setup doesn't utilize the GPU
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    environment:
+      - OLLAMA_NUM_PARALLEL=4 # Number of threads to utilize
+    mem_limit: 16g
+    networks:
+      - indeq-net
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    env_file:
+      - ./common/config/.env
+    ports:
+      - 5672:5672 # AMQP protocol port
+      - 15672:15672 # Management UI port
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     networks:
       - indeq-net
 
@@ -26,7 +60,10 @@ services:
     ports:
       - "8080:8080"
     depends_on:
-      - query
+      query:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
     networks:
       - indeq-net
 
@@ -51,6 +88,8 @@ services:
 
 volumes:
   postgres_data:
+  ollama_models:
+  rabbitmq_data:
 
 networks:
   indeq-net:
