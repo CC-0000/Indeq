@@ -7,21 +7,14 @@
     <h1 class="text-3xl font-bold mb-4">Privacy Policy</h1>
     <p class="text-sm mb-6 italic">Last Updated: {lastUpdated}</p>
   
-    <!-- Disclaimer -->
-    <div class="bg-yellow-100 border-l-4 border-yellow-400 p-4 mb-6">
-      <p class="text-sm">
-        <strong>Disclaimer:</strong> The following Privacy Policy is provided for 
-        informational purposes only and does not constitute legal advice. You should 
-        consult with a qualified attorney to ensure that this policy complies with 
-        all applicable laws and regulations in the relevant jurisdictions.
-      </p>
-    </div>
-  
-    <!-- Introduction -->
+      <!-- Introduction -->
     <p class="mb-6">
-      Welcome to Indeq (“Company,” “we,” “us,” or “our”). 
-      We are committed to protecting your privacy. This Privacy Policy explains how 
-      we collect, use, disclose, and safeguard your personal information when you 
+      Welcome to Indeq (“Company,” “we,” “us,” or “our”). Your privacy is of the utmost
+      importance to us, and we are committed to protecting it. 
+      We only process data that is absolutely necessary for the operation of our services and 
+      never sell your data to 3rd parties. 
+      This Privacy Policy explains 
+      how we collect, use, disclose, and safeguard your personal information when you 
       use our services, including our website, application, and any related services 
       (collectively, the “Platform”).
     </p>
@@ -49,6 +42,11 @@
         <strong>Communications</strong>: If you contact us (e.g., via email or support channels), 
         we collect the information you provide in that communication.
       </li>
+      <li>
+        <strong>Payments</strong>: When you sign up for any of the paid plans that we offer, 
+        we collect payment information for the purpose of providing you that service, issuing refunds, and for
+        accounting purpose.  
+      </li>
     </ul>
   
     <p class="mb-4 font-medium">1.2 Information Collected Automatically</p>
@@ -70,11 +68,7 @@
     <ul class="list-disc ml-6 mb-6">
       <li>
         <strong>Service Providers</strong>: We may receive additional information about you 
-        from service providers that help us operate the Platform or provide analytics.
-      </li>
-      <li>
-        <strong>Other Sources</strong>: We may also obtain information from public databases, 
-        social media platforms, or other third parties, where permitted by law.
+        from service providers (e.g. AWS, GCP, Azure, etc.) that help us operate our platform. 
       </li>
     </ul>
   
@@ -94,10 +88,6 @@
       <li>
         <strong>Ensure Security and Compliance</strong>: Detect, investigate, and prevent fraud, 
         unauthorized access, or other illegal activities, and enforce our Terms of Service.
-      </li>
-      <li>
-        <strong>Personalization and Analytics</strong>: Tailor content to your preferences and 
-        perform data analytics to understand how users interact with the Platform.
       </li>
     </ul>
   
@@ -176,38 +166,29 @@
     <!-- 7. International Transfers -->
     <h2 class="text-2xl font-semibold mt-8 mb-4">7. International Transfers</h2>
     <p class="mb-6">
-      Your information may be transferred to and processed in countries other than your own, where 
+      Our servers are primarily hosted in the US. As such, your information may be transferred to and processed in countries other than your own, where 
       data protection laws may differ. By using the Platform, you consent to such transfers and 
       processing in these locations.
     </p>
-  
-    <!-- 8. Children’s Privacy -->
-    <h2 class="text-2xl font-semibold mt-8 mb-4">8. Children’s Privacy</h2>
-    <p class="mb-6">
-      The Platform is not directed to children under 13 (or the age of majority in your 
-      jurisdiction, if higher). We do not knowingly collect personal information from children 
-      without verifiable parental consent. If you believe we have collected information from a 
-      child, contact us so we can take appropriate action.
-    </p>
-  
-    <!-- 9. Third-Party Links and Services -->
-    <h2 class="text-2xl font-semibold mt-8 mb-4">9. Third-Party Links and Services</h2>
+    
+    <!-- 8. Third-Party Links and Services -->
+    <h2 class="text-2xl font-semibold mt-8 mb-4">8. Third-Party Links and Services</h2>
     <p class="mb-6">
       The Platform may contain links to third-party websites or services not operated by us. We 
       encourage you to review the privacy policies of those sites. We are not responsible for 
       their content, privacy policies, or practices.
     </p>
   
-    <!-- 10. Changes to This Privacy Policy -->
-    <h2 class="text-2xl font-semibold mt-8 mb-4">10. Changes to This Privacy Policy</h2>
+    <!-- 9. Changes to This Privacy Policy -->
+    <h2 class="text-2xl font-semibold mt-8 mb-4">9. Changes to This Privacy Policy</h2>
     <p class="mb-6">
       We may update this Privacy Policy from time to time. Any changes will be posted with an 
       updated “Last Updated” date. Your continued use of the Platform after any changes indicates 
       your acceptance of the revised policy.
     </p>
   
-    <!-- 11. Contact Us -->
-    <h2 class="text-2xl font-semibold mt-8 mb-4">11. Contact Us</h2>
+    <!-- 10. Contact Us -->
+    <h2 class="text-2xl font-semibold mt-8 mb-4">10. Contact Us</h2>
     <p class="mb-6">
       If you have any questions, concerns, or comments about this Privacy Policy or our data 
       practices, please contact us at: support@indeq.ai
