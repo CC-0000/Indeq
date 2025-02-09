@@ -60,7 +60,7 @@
       </li>
       <li>
         <strong>Cookies and Similar Technologies</strong>: We may use cookies, web beacons, and other 
-        tracking technologies to collect information about your activity on the Platform, including 
+        session storage technologies to collect information about your activity on the Platform, including 
         session data, pages visited, and time spent on each page. You can manage your cookie 
         preferences through your browser settings.
       </li>
