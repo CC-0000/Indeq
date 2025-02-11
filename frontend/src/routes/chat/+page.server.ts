@@ -7,6 +7,6 @@ export const load: PageServerLoad = async ({ cookies }) => {
     // No user, redirect to login
     throw redirect(302, '/login');
   }
-  // Else proceed, maybe fetch chat data
+  
   return {};
 };
