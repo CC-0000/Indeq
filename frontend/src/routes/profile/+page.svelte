@@ -1,6 +1,38 @@
+<h1>Profile</h1>
+
 <script>
-  import * as Card from "$lib/components/ui/card/index.js";
-  import { Button } from "$lib/components/ui/button/index.js";
+    import Integration_Button from '../../components/integration-button.svelte';
+</script>
+  
+<main>
+    <div class="card">
+      <Integration_Button company="Google" />
+    </div>
+  
+    <div class="card">
+      <Integration_Button company="Microsoft" />
+    </div>
+  
+    <div class="card">
+      <Integration_Button company="Notion" />
+    </div>
+</main>
+  
+<style>
+    main {
+      padding: 20px;
+      max-width: 600px;
+      margin: 0 auto;
+    }
+  
+    .card {
+      margin-bottom: 16px;
+    }
+</style>
+
+<!-- <script>
+  //import * as Card from "$lib/components/ui/card/index.js";
+  //import { Button } from "$lib/components/ui/button/index.js";
   import Integration_Button from '../../components/integration-button.svelte';
 
   let activeSection = 'integrations';
@@ -23,7 +55,6 @@
       </Card.Header>
       <Card.Content>
         <div class="flex gap-6">
-          <!-- Navigation Buttons -->
           <div class="w-48 space-y-2">
             {#each Object.entries(sections) as [key, section]}
               <Button
@@ -36,7 +67,6 @@
             {/each}
           </div>
 
-          <!-- Content Section -->
           <div class="flex-1 border-l pl-6">
             <h2 class="text-xl font-semibold mb-4">
               Integrations
@@ -57,4 +87,4 @@
       </Card.Content>
     </Card.Root>
   </div>
-</main>
+</main> -->

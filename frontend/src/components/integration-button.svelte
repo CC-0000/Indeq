@@ -2,8 +2,8 @@
 
     export let company = "Fill";
     export let isIntegrated = false;
-    import {Button} from "$lib/components/ui/button/index.js";
-    import { toast } from "svelte-sonner";
+    //import {Button} from "$lib/components/ui/button/index.js";
+    //import { toast } from "svelte-sonner";
 
 
     function authenticate() {
@@ -24,7 +24,23 @@
     }
 </script>
 
-{#if company === 'NOTION'}
+<button on:click={authenticate} class={company.toUpperCase()}>
+    <img src={getLogo()} alt="{company} logo" class="logo">
+    <span class="company-name">
+        {#if isIntegrated}
+            Connected to {company}
+        {:else}
+            Login with {company}
+        {/if}
+    </span>
+    {#if isIntegrated}
+        <span class="check-mark">✓</span>
+    {:else}
+        <span class="plus-mark">+</span>
+    {/if}
+</button>
+
+<!-- {#if company === 'NOTION'}
     <Button variant="outline" on:click={() => toast.loading('In development...')}>
         <img src={getLogo()} alt={`${company} logo`} class="mr-2 h-6 w-6">
         <span class="company-name">
@@ -46,4 +62,4 @@
             {/if}
         </span>
     </Button>
-{/if}
+{/if} -->
