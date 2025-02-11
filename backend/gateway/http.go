@@ -32,3 +32,25 @@ type LoginResponse struct {
 	Token string `json:"token"`
 	Error string `json:"error"`
 }
+
+/* connect integration route */
+type ConnectIntegrationRequest struct {
+	Provider string `json:"provider"`
+	AuthCode string `json:"authCode"`
+}
+
+type ConnectIntegrationResponse struct {
+	Success      bool   `json:"success"`
+	Message      string `json:"message"`
+	ErrorDetails string `json:"errorDetails,omitempty"`
+}
+
+/* disconnect integration route */
+type DisconnectIntegrationRequest struct {
+	Provider string `json:"provider"`
+}
+
+type DisconnectIntegrationResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+}

@@ -16,6 +16,7 @@ import (
 type ServiceClients struct {
 	queryClient pb.QueryServiceClient
 	authClient pb.AuthenticationServiceClient
+	integrationClient pb.IntegrationServiceClient
 	ctx context.Context
 }
 
@@ -50,7 +51,6 @@ func helloHandler(w http.ResponseWriter, r *http.Request) {
 func handleMakeQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 	return func (w http.ResponseWriter, r *http.Request) {
 		var queryRequest QueryRequest
-		log.Printf("Received query request \n")
 		if err := json.NewDecoder(r.Body).Decode(&queryRequest); err != nil {
 			http.Error(w, "Bad Request", http.StatusBadRequest)
 			return
@@ -61,7 +61,6 @@ func handleMakeQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 			UserID: queryRequest.UserID,
 			Query: queryRequest.Query,
 		})
-
 		if err != nil {
 			http.Error(w, "Failed to make query", http.StatusInternalServerError)
             return
@@ -71,6 +70,12 @@ func handleMakeQueryGenerator(clients *ServiceClients) http.HandlerFunc {
         json.NewEncoder(w).Encode(res)
 	}
 }
+
+func handleConnectIntegrationGenerator(clients *ServiceClients) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+	}
+}
+
 
 func handleRegisterGenerator(clients *ServiceClients) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -154,10 +159,22 @@ func main() {
 	defer authConn.Close()
 	authServiceClient := pb.NewAuthenticationServiceClient(authConn)
 
+	// Connect to the integration service
+	integrationConn, err := grpc.NewClient(
+		os.Getenv("INTEGRATION_ADDRESS"),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		log.Fatalf("Failed to establish connection with integration-service: %v", err)
+	}
+	defer integrationConn.Close()
+	integrationServiceClient := pb.NewIntegrationServiceClient(integrationConn)
+
 	// Save the service clients for future use
 	serviceClients := &ServiceClients{
 		queryClient: queryServiceClient, 
 		authClient: authServiceClient,
+		integrationClient: integrationServiceClient,
 		ctx: context.Background(),
 	}
 	log.Print("Server has established connection with other services")
@@ -167,6 +184,7 @@ func main() {
 	mux.HandleFunc("POST /query", authMiddleware(handleMakeQueryGenerator(serviceClients), serviceClients))
 	mux.HandleFunc("POST /api/register", handleRegisterGenerator(serviceClients))
 	mux.HandleFunc("POST /api/login", handleLoginGenerator(serviceClients))
+	mux.HandleFunc("POST /api/connect", authMiddleware(handleConnectIntegrationGenerator(serviceClients), serviceClients))
 
 	httpPort := os.Getenv("GATEWAY_ADDRESS")
 	server := &http.Server{

@@ -6,7 +6,6 @@ package api;
 
 service IntegrationService {
     rpc ConnectIntegration(ConnectIntegrationRequest) returns (ConnectIntegrationResponse);
-    rpc RefreshToken(RefreshTokenRequest) returns (RefreshTokenResponse);
     rpc DisconnectIntegration(DisconnectIntegrationRequest) returns (DisconnectIntegrationResponse);
 }
 
@@ -17,9 +16,8 @@ enum Provider {
 }
 
 message ConnectIntegrationRequest {
-    string user_id = 1;
-    Provider provider = 2;
-    string auth_code = 3;
+    Provider provider = 1;
+    string auth_code = 2;
 }
 
 message ConnectIntegrationResponse {
@@ -28,20 +26,8 @@ message ConnectIntegrationResponse {
     string error_details = 3;
 }
 
-message RefreshTokenRequest {
-    string user_id = 1;
-    Provider provider = 2;
-}
-
-message RefreshTokenResponse {
-    bool success = 1;
-    string new_access_token = 2;
-    string new_refresh_token = 3;
-}
-
 message DisconnectIntegrationRequest {
-    string user_id = 1;
-    Provider provider = 2;
+    Provider provider = 1;
 }
 
 message DisconnectIntegrationResponse {

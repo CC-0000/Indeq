@@ -7,7 +7,11 @@ import (
 	"log"
 	"net"
 	"os"
-    "time"
+    "encoding/json"
+	"errors"
+	"net/http"
+	"strings"
+	"time"
 
 	pb "github.com/cc-0000/indeq/common/api"
 	_ "github.com/lib/pq"
@@ -17,6 +21,255 @@ import (
 type integrationServer struct {
     pb.UnimplementedIntegrationServiceServer
     db *sql.DB // integration database
+}
+
+// TokenResponse represents the OAuth token response from our providers
+type TokenResponse struct {
+	AccessToken string 
+	RefreshToken string
+	ExpiresIn int
+	ExpiresAt time.Time
+}
+
+// OAuthProviderConfig represents the token exchange and refresh
+type OAuthProviderConfig struct {
+	TokenURL string
+	ClientID string
+	ClientSecret string
+	RedirectURI string
+}
+
+// OAuth provider configurations
+var providers = map[string]OAuthProviderConfig{
+	"GOOGLE": {
+		TokenURL:     "https://oauth2.googleapis.com/token",
+		ClientID:     "your_google_client_id",
+		ClientSecret: "your_google_client_secret",
+		RedirectURI:  "your_redirect_uri",
+	},
+	"MICROSOFT": {
+		TokenURL:     "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+		ClientID:     "your_microsoft_client_id",
+		ClientSecret: "your_microsoft_client_secret",
+		RedirectURI:  "your_redirect_uri",
+	},
+	"NOTION": {
+		TokenURL:     "https://api.notion.com/v1/oauth/token",
+		ClientID:     "your_notion_client_id",
+		ClientSecret: "your_notion_client_secret",
+		RedirectURI:  "your_redirect_uri",
+	},
+}
+
+// Exchanges an auth code for access & refresh token
+func ExchangeAuthCodeForToken(provider string, authCode string) (*TokenResponse, error) {
+	config, exists := providers[provider]
+	if !exists {
+		return nil, errors.New("unsupported provider")
+	}
+
+	data := fmt.Sprintf(
+		"client_id=%s&client_secret=%s&code=%s&grant_type=authorization_code&redirect_uri=%s",
+		config.ClientID, config.ClientSecret, authCode, config.RedirectURI,
+	)
+
+	req, err := http.NewRequest("POST", config.TokenURL, strings.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to exchange auth code: %s", resp.Status)
+	}
+
+	var tokenRes TokenResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tokenRes); err != nil {
+		return nil, err
+	}
+
+	tokenRes.ExpiresAt = time.Now().Add(time.Duration(tokenRes.ExpiresIn) * time.Second)
+	return &tokenRes, nil
+}
+
+// Refresh an expired access token
+func RefreshOAuthToken(provider string, refreshToken string) (*TokenResponse, error) {
+	config, exists := providers[provider]
+	if !exists {
+		return nil, errors.New("unsupported provider")
+	}
+
+	data := fmt.Sprintf(
+		"client_id=%s&client_secret=%s&refresh_token=%s&grant_type=refresh_token",
+		config.ClientID, config.ClientSecret, refreshToken,
+	)
+
+	req, err := http.NewRequest("POST", config.TokenURL, strings.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to refresh token: %s", resp.Status)
+	}
+
+	var tokenRes TokenResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tokenRes); err != nil {
+		return nil, err
+	}
+
+	tokenRes.ExpiresAt = time.Now().Add(time.Duration(tokenRes.ExpiresIn) * time.Second)
+	return &tokenRes, nil
+}
+
+func startTokenRefreshWorker(db *sql.DB) {
+	ticker := time.NewTicker(1 * time.Minute)
+	go func() {
+		defer ticker.Stop()
+		for {
+			<-ticker.C
+			log.Println("Refreshing all expired tokens...")
+			refreshAllExpiredTokens(db)
+		}
+	}()
+}
+
+func refreshAllExpiredTokens(db *sql.DB) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10 * time.Second)
+	defer cancel()
+
+	rows, err := db.QueryContext(ctx, `
+		SELECT user_id, provider, refresh_token
+		FROM oauth_tokens
+		WHERE expires_at < NOW()
+	`)
+	
+	if err != nil {
+		log.Printf("Error querying expired tokens: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var userID string
+		var provider string
+		var refreshToken string
+
+		if err := rows.Scan(&userID, &provider, &refreshToken); err != nil {
+			log.Printf("Error scanning token row: %v", err)
+			continue
+		}
+
+		tokenData, err := RefreshOAuthToken(provider, refreshToken)
+
+		if err != nil {
+			log.Printf("Error refreshing token for user %s: %v", userID, err)
+			continue
+		}
+
+		_, err = db.ExecContext(ctx, `
+			UPDATE oauth_tokens
+			SET access_token = $1, refresh_token = $2, expires_at = $3, updated_at = NOW()
+			WHERE user_id = $4 AND provider = $5
+		`, tokenData.AccessToken, tokenData.RefreshToken, tokenData.ExpiresAt, userID, provider)
+		
+		if err != nil {
+			log.Printf("Error updating token for user %s: %v", userID, err)
+			continue
+		}
+
+		log.Printf("Successfully refreshed token for user %s", userID)
+	}
+	
+}
+func (s *integrationServer) ConnectIntegration(ctx context.Context, req *pb.ConnectIntegrationRequest) (*pb.ConnectIntegrationResponse, error) {
+	// log.Printf("Processing a user integration request for UserID: %s, Provider: %s\n", req.UserId, req.Provider)
+
+	// if req.UserId == "" {
+	// 	return &pb.ConnectIntegrationResponse{
+	// 		Success:      false,
+	// 		Message:      "Unauthorized: Missing UserID",
+	// 		ErrorDetails: "user id is required for integration",
+	// 	}, status.Error(codes.Unauthenticated, "missing user ID")
+	// }
+
+	// tokenData, err := ExchangeAuthCodeForToken(req.Provider.String(), req.AuthCode)
+	// if err != nil {
+	// 	return &pb.ConnectIntegrationResponse{
+	// 		Success:      false,
+	// 		Message:      "OAuth exchange failed",
+	// 		ErrorDetails: err.Error(),
+	// 	}, status.Error(codes.Internal, "OAuth exchange failed")
+	// }
+
+	// _, err = s.db.ExecContext(ctx, `INSERT INTO oauth_tokens (user_id, provider, access_token, refresh_token, expires_at)
+    //                                 VALUES ($1, $2, $3, $4, $5)
+    //                                 ON CONFLICT (user_id, provider)  
+    //                                 DO UPDATE SET access_token = $3, refresh_token = $4, expires_at = $5, updated_at = NOW()`,
+	// 	req.UserId, req.Provider.String(), tokenData.AccessToken, tokenData.RefreshToken, tokenData.ExpiresAt)
+
+	// if err != nil {
+	// 	return &pb.ConnectIntegrationResponse{
+	// 		Success:      false,
+	// 		Message:      "Database error",
+	// 		ErrorDetails: err.Error(),
+	// 	}, nil
+	// }
+
+	// log.Printf("Successfully connected UserID: %s, Provider: %s\n", req.UserId, req.Provider.String())
+
+	return &pb.ConnectIntegrationResponse{Success: true, Message: "Connected successfully"}, nil
+}
+
+func (s *integrationServer) DisconnectIntegration(ctx context.Context, req *pb.DisconnectIntegrationRequest) (*pb.DisconnectIntegrationResponse, error) {
+    log.Println("Processing a disconnect integration request...")
+
+	// if req.UserId == "" {
+    //     return &pb.DisconnectIntegrationResponse{
+    //         Success: false,
+    //         Message: "Unauthorized: Missing User ID",
+    //     }, status.Error(codes.Unauthenticated, "missing user ID")
+    // }
+
+    // result, err := s.db.Exec(`DELETE FROM oauth_tokens WHERE user_id = $1 AND provider = $2`, req.UserId, req.Provider.String())
+
+	// if err != nil {
+    //     log.Printf("Database error while deleting token for UserID: %s, Provider: %s, Error: %v\n", req.UserId, req.Provider, err)
+    //     return &pb.DisconnectIntegrationResponse{
+    //         Success: false,
+    //         Message: "Database error",
+    //     }, status.Error(codes.Internal, "database operation failed")
+    // }
+
+	// rowsAffected, _ := result.RowsAffected()
+    // if rowsAffected == 0 {
+    //     log.Printf("No integration found for UserID: %s, Provider: %s\n", req.UserId, req.Provider)
+    //     return &pb.DisconnectIntegrationResponse{
+    //         Success: false,
+    //         Message: "No integration found to disconnect",
+    //     }, status.Error(codes.NotFound, "no integration found")
+    // }
+
+    // log.Printf("Successfully disconnected integration for UserID: %s, Provider: %s\n", req.UserId, req.Provider)
+
+	return &pb.DisconnectIntegrationResponse{Success: true, Message: "Disconnected successfully"}, nil
 }
 
 func main() {
@@ -64,6 +317,7 @@ func main() {
     }
 
     fmt.Println("Database setup completed: oauth_tokens table is ready.")
+	startTokenRefreshWorker(db)
     
     // Pull in GRPC address
     grpcAddress := os.Getenv("INTEGRATION_PORT")
