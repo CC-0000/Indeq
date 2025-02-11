@@ -200,75 +200,10 @@ func refreshAllExpiredTokens(db *sql.DB) {
 	
 }
 func (s *integrationServer) ConnectIntegration(ctx context.Context, req *pb.ConnectIntegrationRequest) (*pb.ConnectIntegrationResponse, error) {
-	// log.Printf("Processing a user integration request for UserID: %s, Provider: %s\n", req.UserId, req.Provider)
-
-	// if req.UserId == "" {
-	// 	return &pb.ConnectIntegrationResponse{
-	// 		Success:      false,
-	// 		Message:      "Unauthorized: Missing UserID",
-	// 		ErrorDetails: "user id is required for integration",
-	// 	}, status.Error(codes.Unauthenticated, "missing user ID")
-	// }
-
-	// tokenData, err := ExchangeAuthCodeForToken(req.Provider.String(), req.AuthCode)
-	// if err != nil {
-	// 	return &pb.ConnectIntegrationResponse{
-	// 		Success:      false,
-	// 		Message:      "OAuth exchange failed",
-	// 		ErrorDetails: err.Error(),
-	// 	}, status.Error(codes.Internal, "OAuth exchange failed")
-	// }
-
-	// _, err = s.db.ExecContext(ctx, `INSERT INTO oauth_tokens (user_id, provider, access_token, refresh_token, expires_at)
-    //                                 VALUES ($1, $2, $3, $4, $5)
-    //                                 ON CONFLICT (user_id, provider)  
-    //                                 DO UPDATE SET access_token = $3, refresh_token = $4, expires_at = $5, updated_at = NOW()`,
-	// 	req.UserId, req.Provider.String(), tokenData.AccessToken, tokenData.RefreshToken, tokenData.ExpiresAt)
-
-	// if err != nil {
-	// 	return &pb.ConnectIntegrationResponse{
-	// 		Success:      false,
-	// 		Message:      "Database error",
-	// 		ErrorDetails: err.Error(),
-	// 	}, nil
-	// }
-
-	// log.Printf("Successfully connected UserID: %s, Provider: %s\n", req.UserId, req.Provider.String())
-
 	return &pb.ConnectIntegrationResponse{Success: true, Message: "Connected successfully"}, nil
 }
 
 func (s *integrationServer) DisconnectIntegration(ctx context.Context, req *pb.DisconnectIntegrationRequest) (*pb.DisconnectIntegrationResponse, error) {
-    log.Println("Processing a disconnect integration request...")
-
-	// if req.UserId == "" {
-    //     return &pb.DisconnectIntegrationResponse{
-    //         Success: false,
-    //         Message: "Unauthorized: Missing User ID",
-    //     }, status.Error(codes.Unauthenticated, "missing user ID")
-    // }
-
-    // result, err := s.db.Exec(`DELETE FROM oauth_tokens WHERE user_id = $1 AND provider = $2`, req.UserId, req.Provider.String())
-
-	// if err != nil {
-    //     log.Printf("Database error while deleting token for UserID: %s, Provider: %s, Error: %v\n", req.UserId, req.Provider, err)
-    //     return &pb.DisconnectIntegrationResponse{
-    //         Success: false,
-    //         Message: "Database error",
-    //     }, status.Error(codes.Internal, "database operation failed")
-    // }
-
-	// rowsAffected, _ := result.RowsAffected()
-    // if rowsAffected == 0 {
-    //     log.Printf("No integration found for UserID: %s, Provider: %s\n", req.UserId, req.Provider)
-    //     return &pb.DisconnectIntegrationResponse{
-    //         Success: false,
-    //         Message: "No integration found to disconnect",
-    //     }, status.Error(codes.NotFound, "no integration found")
-    // }
-
-    // log.Printf("Successfully disconnected integration for UserID: %s, Provider: %s\n", req.UserId, req.Provider)
-
 	return &pb.DisconnectIntegrationResponse{Success: true, Message: "Disconnected successfully"}, nil
 }
 

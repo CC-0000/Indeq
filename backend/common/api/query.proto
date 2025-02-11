@@ -9,11 +9,10 @@ service QueryService {
 }
 
 message QueryRequest {
-    string userID = 1;
+    string conversationId = 1;
     string query = 2;
 }
 
 message QueryResponse {
-    string userID = 1;
-    string response = 2;
+    bool success = 1;
 }

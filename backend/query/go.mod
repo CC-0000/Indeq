@@ -5,6 +5,7 @@ go 1.23.5
 require google.golang.org/grpc v1.70.0
 
 require (
+	github.com/joho/godotenv v1.5.1 // indirect
 	golang.org/x/net v0.32.0 // indirect
 	golang.org/x/sys v0.29.0 // indirect
 	golang.org/x/text v0.21.0 // indirect
@@ -12,6 +13,9 @@ require (
 	google.golang.org/protobuf v1.35.2 // indirect
 )
 
-require github.com/cc-0000/indeq/common v0.0.0
+require (
+	github.com/cc-0000/indeq/common v0.0.0
+	github.com/rabbitmq/amqp091-go v1.10.0
+)
 
 replace github.com/cc-0000/indeq/common => ../common

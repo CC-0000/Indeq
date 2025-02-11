@@ -3,12 +3,16 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"strings"
 
 	pb "github.com/cc-0000/indeq/common/api"
+	"github.com/cc-0000/indeq/common/config"
+	"github.com/google/uuid"
+	amqp "github.com/rabbitmq/amqp091-go"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -16,8 +20,7 @@ import (
 type ServiceClients struct {
 	queryClient pb.QueryServiceClient
 	authClient pb.AuthenticationServiceClient
-	integrationClient pb.IntegrationServiceClient
-	ctx context.Context
+	rabbitMQConn *amqp.Connection
 }
 
 func authMiddleware(next http.HandlerFunc, clients *ServiceClients) http.HandlerFunc {
@@ -30,7 +33,7 @@ func authMiddleware(next http.HandlerFunc, clients *ServiceClients) http.Handler
         }
 		auth_token := strings.TrimPrefix(auth_header, "Bearer ")
 
-		res, err := clients.authClient.Verify(clients.ctx, &pb.VerifyRequest{
+		res, err := clients.authClient.Verify(r.Context(), &pb.VerifyRequest{
 			Token: auth_token,
 		})
 
@@ -48,26 +51,154 @@ func helloHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(HelloResponse{Message: "Hello, World!"})
 }
 
-func handleMakeQueryGenerator(clients *ServiceClients) http.HandlerFunc {
-	return func (w http.ResponseWriter, r *http.Request) {
-		var queryRequest QueryRequest
-		if err := json.NewDecoder(r.Body).Decode(&queryRequest); err != nil {
-			http.Error(w, "Bad Request", http.StatusBadRequest)
+func handleGetQueryGenerator(clients *ServiceClients) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log.Println("received event stream request")
+
+		// Set up context with cancellation
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+
+		// NOTE: expects authentication middleware to have already verified the token!!!
+		// Grab the token --> userId
+		auth_header := r.Header.Get("Authorization")
+		auth_token := strings.TrimPrefix(auth_header, "Bearer ")
+		verifyRes, _ := clients.authClient.Verify(ctx, &pb.VerifyRequest{
+			Token: auth_token,
+		})
+
+		// Get the query parameters
+		queryParams := r.URL.Query()
+		incomingId := queryParams.Get("conversationId") 
+		conversationId := fmt.Sprintf("%s-%s", verifyRes.UserId, incomingId)
+		
+		// Handle SSE connection
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("Access-Control-Allow-Origin", "*") // this should be updated in the future to only allow frontend connections
+
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
 			return
 		}
 
-		// Call the service
-		res, err := clients.queryClient.MakeQuery(clients.ctx, &pb.QueryRequest{
-			UserID: queryRequest.UserID,
-			Query: queryRequest.Query,
-		})
+		// Create a rabbitMQ channel
+		channel, err := clients.rabbitMQConn.Channel()
 		if err != nil {
-			http.Error(w, "Failed to make query", http.StatusInternalServerError)
+			log.Fatal(err)
+		}
+		defer channel.Close()
+
+		queue, err := channel.QueueDeclare(
+            conversationId, // name
+            false,           // durable
+            true,           // delete when unused
+            false,           // exclusive
+            false,           // no-wait
+			amqp.Table{ 		// arguments
+				"x-expires": 300000, // 5 minutes in milliseconds
+			},
+		)
+		if err != nil {
+            http.Error(w, "Internal Server Error", http.StatusInternalServerError)
             return
+        }
+
+		msgs, err := channel.Consume(
+			queue.Name,
+			"",    // consumer
+			true,  // auto-ack
+			false, // exclusive
+			false, // no-local
+			false,
+			nil,
+		)
+		if err != nil {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
 		}
 
-        w.Header().Set("Content-Type", "application/json")
-        json.NewEncoder(w).Encode(res)
+		log.Print("Starting to read...")
+		for {
+			select {
+				case <-ctx.Done():
+					log.Print("Closing connection from gateway...")
+					return
+				case msg, ok := <-msgs: // there is a message in the channel
+					if !ok {
+						return
+					}
+					// parse the message into json
+					thisMsg := string(msg.Body)
+					jsonData, _ := json.Marshal(struct {
+						Type string `json:"type"`
+						Data string `json:"data"`
+					}{
+						Type: "message",
+						Data: thisMsg,
+					})
+					// write it out to the response
+					fmt.Fprintf(w, "data: %s\n\n", jsonData)
+					flusher.Flush()
+	
+					// if the message is blank there are no more messages
+					if thisMsg == "" {
+						return
+					}
+			}
+		}
+	}
+}
+
+func handlePostQueryGenerator(clients *ServiceClients) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+
+		// Set up context
+		ctx := r.Context()
+
+		// NOTE: expects authentication middleware to have already verified the token!!!
+		// Grab the token --> userId
+		auth_header := r.Header.Get("Authorization")
+		auth_token := strings.TrimPrefix(auth_header, "Bearer ")
+		verifyRes, _ := clients.authClient.Verify(ctx, &pb.VerifyRequest{
+			Token: auth_token,
+		})
+
+		// Generate a per-request UUID
+		newId := uuid.New()
+		conversationId := fmt.Sprintf("%s-%s", verifyRes.UserId, newId.String())
+
+		// Grab the query
+		var queryRequest QueryRequest
+		if err := json.NewDecoder(r.Body).Decode(&queryRequest); err != nil {
+			http.Error(w, "Invalid Formatting", http.StatusBadRequest)
+			return
+		}
+		if queryRequest.Query == "" {
+			http.Error(w, "Invalid Formatting", http.StatusBadRequest)
+			return
+		}
+
+		// Send the query in a goroutine
+		go func() {
+			detachedCtx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			_, err := clients.queryClient.MakeQuery(detachedCtx, &pb.QueryRequest{
+				ConversationId: conversationId,
+				Query:  queryRequest.Query,
+			})
+			if err != nil {
+				log.Printf("Error making query: %v", err)
+			}
+		}()
+
+		httpResponse := &QueryResponse{
+			ConversationId: newId.String(),
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(httpResponse)
 	}
 }
 
@@ -88,7 +219,7 @@ func handleRegisterGenerator(clients *ServiceClients) http.HandlerFunc {
 		}
 
 		// Call the register service
-		res, err := clients.authClient.Register(clients.ctx, &pb.RegisterRequest{
+		res, err := clients.authClient.Register(r.Context(), &pb.RegisterRequest{
 			Email: registerRequest.Email,
 			Name: registerRequest.Name,
 			Password: registerRequest.Password,
@@ -117,7 +248,7 @@ func handleLoginGenerator(clients *ServiceClients) http.HandlerFunc {
 		}
 
 		// Call the login service
-		res, err := clients.authClient.Login(clients.ctx, &pb.LoginRequest{
+		res, err := clients.authClient.Login(r.Context(), &pb.LoginRequest{
 			Email: loginRequest.Email,
 			Password: loginRequest.Password,
 		})
@@ -137,6 +268,19 @@ func handleLoginGenerator(clients *ServiceClients) http.HandlerFunc {
 }
 
 func main() {
+	// Load .env variables
+	err := config.LoadSharedConfig()
+	if err != nil {
+		log.Fatalf("Error loading .env file: %v", err)
+	}
+
+	// Connect to RabbitMQ
+	rabbitMQConn, err := amqp.Dial(os.Getenv("RABBITMQ_URL"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer rabbitMQConn.Close()
+
 	// Connect to the query service
     queryConn, err := grpc.NewClient(
         os.Getenv("QUERY_ADDRESS"), // Target address
@@ -168,20 +312,19 @@ func main() {
 		log.Fatalf("Failed to establish connection with integration-service: %v", err)
 	}
 	defer integrationConn.Close()
-	integrationServiceClient := pb.NewIntegrationServiceClient(integrationConn)
 
 	// Save the service clients for future use
 	serviceClients := &ServiceClients{
 		queryClient: queryServiceClient, 
 		authClient: authServiceClient,
-		integrationClient: integrationServiceClient,
-		ctx: context.Background(),
+		rabbitMQConn: rabbitMQConn,
 	}
 	log.Print("Server has established connection with other services")
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /hello", helloHandler)
-	mux.HandleFunc("POST /query", authMiddleware(handleMakeQueryGenerator(serviceClients), serviceClients))
+	mux.HandleFunc("POST /api/query", authMiddleware(handlePostQueryGenerator(serviceClients), serviceClients))
+	mux.HandleFunc("GET /api/query", authMiddleware(handleGetQueryGenerator(serviceClients), serviceClients))
 	mux.HandleFunc("POST /api/register", handleRegisterGenerator(serviceClients))
 	mux.HandleFunc("POST /api/login", handleLoginGenerator(serviceClients))
 	mux.HandleFunc("POST /api/connect", authMiddleware(handleConnectIntegrationGenerator(serviceClients), serviceClients))
