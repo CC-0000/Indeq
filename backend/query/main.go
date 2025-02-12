@@ -19,7 +19,7 @@ import (
 )
 
 type queryServer struct {
-	pb.UnimplementedQueryServiceServer 
+	pb.UnimplementedQueryServiceServer
 	rabbitMQConn *amqp.Connection
 }
 
@@ -39,7 +39,7 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 	llmReq.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{}
-    llmRes, err := client.Do(llmReq)
+	llmRes, err := client.Do(llmReq)
 	if err != nil {
 		log.Printf("failed to make query to llm: %v", err)
 	}
@@ -56,46 +56,46 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 	// Create notification channels for when the client closes the channel --> cancel the context
 	notifyClose := channel.NotifyClose(make(chan *amqp.Error, 1))
 	notifyCancel := channel.NotifyCancel(make(chan string, 1))
-    go func() {
-        select {
-        case <-notifyClose:
-            log.Println("Channel closed")
-            cancel()
-        case <-notifyCancel:
-            log.Println("Channel cancelled")
-            cancel()
-        }
-    }()
-	
-    queue, err := channel.QueueDeclare(
-        req.ConversationId, // queue name
-        false,     			// durable
-        true,     			// delete when unused
-        false,     			// exclusive
-        false,     			// no-wait
-        amqp.Table{ 		// arguments
-            "x-expires": 300000, // 5 minutes in milliseconds
-        },
-    )
-    if err != nil {
-        log.Fatal(err)
-    }
+	go func() {
+		select {
+		case <-notifyClose:
+			log.Println("Channel closed")
+			cancel()
+		case <-notifyCancel:
+			log.Println("Channel cancelled")
+			cancel()
+		}
+	}()
+
+	queue, err := channel.QueueDeclare(
+		req.ConversationId, // queue name
+		false,              // durable
+		true,               // delete when unused
+		false,              // exclusive
+		false,              // no-wait
+		amqp.Table{ // arguments
+			"x-expires": 300000, // 5 minutes in milliseconds
+		},
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// Keeps on reading until there are no more tokens
 	for scanner.Scan() {
 		select {
-		case <- ctx.Done():
+		case <-ctx.Done():
 			return &pb.QueryResponse{
 				Success: false,
 			}, fmt.Errorf("client has disconnected")
 		default:
 			_, err := channel.QueueDeclarePassive(
 				req.ConversationId, // queue name
-				false,     			// durable
-				true,     			// delete when unused
-				false,     			// exclusive
-				false,     			// no-wait
-				amqp.Table{ 		// arguments
+				false,              // durable
+				true,               // delete when unused
+				false,              // exclusive
+				false,              // no-wait
+				amqp.Table{ // arguments
 					"x-expires": 300000, // 5 minutes in milliseconds
 				},
 			)
@@ -104,7 +104,7 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 				cancel()
 				break
 			}
-			
+
 			var result map[string]interface{}
 			json.Unmarshal(scanner.Bytes(), &result)
 			// stream it to a rabbitMQ message queue
@@ -113,23 +113,23 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 				log.Printf("Error: response field is not a string")
 				continue
 			}
-	
+
 			err = channel.PublishWithContext(
 				ctx,
-				"",     		// exchange
-				queue.Name, 	// routing key
-				false,  		// mandatory
-				false,  		// immediate
+				"",         // exchange
+				queue.Name, // routing key
+				false,      // mandatory
+				false,      // immediate
 				amqp.Publishing{
 					ContentType: "text/plain",
-					Body:       []byte(token),
+					Body:        []byte(token),
 				})
 			if err != nil {
 				log.Printf("Error publishing message: %v", err)
 				continue
 			}
 		}
-    }
+	}
 
 	return &pb.QueryResponse{
 		Success: true,
@@ -147,7 +147,7 @@ func main() {
 	// Load the TLS configuration values
 	tlsConfig, err := config.LoadTLSFromEnv("QUERY_CRT", "QUERY_KEY")
 	if err != nil {
-		log.Fatal("Error loading TLS config for query")
+		log.Fatal("Error loading TLS config for query service")
 	}
 
 	// Connect to RabbitMQ

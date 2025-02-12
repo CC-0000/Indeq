@@ -34,7 +34,7 @@ func LoadTLSFromEnv(certEnvName string, keyEnvName string) (*tls.Config, error) 
 
     return &tls.Config{
         Certificates: []tls.Certificate{cert},
-        MinVersion:  tls.VersionTLS12,
+        MinVersion:  tls.VersionTLS13,
     }, nil
 }
  
