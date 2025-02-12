@@ -48,7 +48,7 @@ func authMiddleware(next http.HandlerFunc, clients *ServiceClients) http.Handler
 
 func helloHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(HelloResponse{Message: "Hello, World!"})
+	json.NewEncoder(w).Encode(&pb.HttpHelloResponse{Message: "Hello, World!"})
 }
 
 func handleGetQueryGenerator(clients *ServiceClients) http.HandlerFunc {
@@ -171,7 +171,7 @@ func handlePostQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 		conversationId := fmt.Sprintf("%s-%s", verifyRes.UserId, newId.String())
 
 		// Grab the query
-		var queryRequest QueryRequest
+		var queryRequest pb.HttpQueryRequest
 		if err := json.NewDecoder(r.Body).Decode(&queryRequest); err != nil {
 			http.Error(w, "Invalid Formatting", http.StatusBadRequest)
 			return
@@ -194,7 +194,7 @@ func handlePostQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 			}
 		}()
 
-		httpResponse := &QueryResponse{
+		httpResponse := &pb.HttpQueryResponse{
 			ConversationId: newId.String(),
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -204,7 +204,7 @@ func handlePostQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 
 func handleRegisterGenerator(clients *ServiceClients) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var registerRequest RegisterRequest
+		var registerRequest pb.HttpRegisterRequest
 		log.Println("Received register request")
 		if err := json.NewDecoder(r.Body).Decode(&registerRequest); err != nil {
 			log.Printf("Error: %v", err)
@@ -224,7 +224,7 @@ func handleRegisterGenerator(clients *ServiceClients) http.HandlerFunc {
 			return
 		}
 
-		httpResponse := &RegisterResponse{
+		httpResponse := &pb.HttpRegisterResponse{
 			Success: res.GetSuccess(),
 			Error: res.GetError(),
 		}
@@ -235,7 +235,7 @@ func handleRegisterGenerator(clients *ServiceClients) http.HandlerFunc {
 
 func handleLoginGenerator(clients *ServiceClients) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var loginRequest LoginRequest
+		var loginRequest pb.HttpLoginRequest
 		log.Println("Received login request")
 		if err := json.NewDecoder(r.Body).Decode(&loginRequest); err != nil {
 			http.Error(w, "Bad Request", http.StatusBadRequest)
@@ -252,7 +252,7 @@ func handleLoginGenerator(clients *ServiceClients) http.HandlerFunc {
 			return
 		}
 
-		httpResponse := &LoginResponse{
+		httpResponse := &pb.HttpLoginResponse{
 			Token: res.Token,
 			Error: res.Error,
 		}
