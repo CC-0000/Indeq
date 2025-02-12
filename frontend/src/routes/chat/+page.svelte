@@ -1,15 +1,16 @@
 <script lang="ts">
-  import { SearchIcon } from "svelte-feather-icons";
+  import { SearchIcon, ChevronDownIcon, CheckIcon } from "svelte-feather-icons";
   import { onDestroy } from 'svelte';
   import { marked } from 'marked';
 
   let userQuery = '';
   let conversationId: string | null = null;
+  const truncateLength = 80;
 
   let eventSource: EventSource | null = null;
-  let messages: { text: string; sender: string }[] = [];
-  let isStreaming: boolean = false;
+  let messages: { text: string; sender: string; reasoning: {text: string; collapsed: boolean}[] }[] = [];
   let isFullscreen = false;
+  let isReasoning = false;
   let conversationContainer;
 
   // Scroll to the bottom of the conversation
@@ -36,12 +37,12 @@
         return;
       }
 
-      messages = [...messages, { text: userQuery, sender: "user" }];
+      messages = [...messages, { text: userQuery, sender: "user", reasoning: [] }];
 
       const data = await res.json();
       conversationId = data.conversation_id;
 
-      messages = [...messages, { text: "", sender: "bot" }];
+      messages = [...messages, { text: "", sender: "bot", reasoning: [] }];
       streamResponse();
     } catch (err) {
       console.error('sendMessage error:', err);
@@ -59,24 +60,74 @@
     // Close any existing connection
     eventSource?.close();
 
-    isStreaming = true;
     isFullscreen = true;
+    isReasoning = true;
 
     const url = `/chat?conversationId=${encodeURIComponent(conversationId)}`;
     eventSource = new EventSource(url);
-    let botMessage = { text: "", sender: "bot" };
+    let botMessage = { text: "", sender: "bot", reasoning: [] as {text: string; collapsed: boolean}[] };
 
     eventSource.addEventListener('message', (evt) => {
       const payload = JSON.parse(evt.data);
-      botMessage.text += payload.data;
-      messages = [...messages.slice(0, -1), botMessage];
-      scrollToBottom();
+
+      // parse reasoning section
+      if (isReasoning) {
+
+        // reasoning paragraph break
+        if (/\n\n/.test(payload.data) && botMessage.reasoning.length > 0) {
+          botMessage.reasoning[botMessage.reasoning.length - 1].collapsed = true;
+          botMessage.reasoning.push({text: '', collapsed: false});
+          return;
+        }
+
+        // <think> tag or reasoning paragraph break
+        if (/\u003cthink\u003e/.test(payload.data) || /\n\n/.test(payload.data)) {
+          return;
+        }
+
+        // </think> tag
+        if (/\u003c\/think\u003e/.test(payload.data)) {
+          isReasoning = false;
+          return;
+        }
+        
+        if (botMessage.reasoning.length > 0) { 
+          botMessage.reasoning[botMessage.reasoning.length - 1].text += payload.data;
+        } else {
+          botMessage.reasoning.push({text: payload.data, collapsed: false});
+        }
+
+        if (messages[messages.length - 1].sender === "bot") {
+          messages[messages.length - 1].reasoning = botMessage.reasoning;
+        } else {
+          messages = [...messages, botMessage];
+        }
+      }
+      
+      else {
+        botMessage.text += payload.data;
+        messages = [...messages.slice(0, -1), botMessage];
+        scrollToBottom();
+      }
     });
 
     eventSource.addEventListener('error', (err) => {
       console.error('SSE error:', err);
       eventSource?.close();
     });
+  }
+
+  function toggleReasoning(messageIndex: number, reasoningIndex: number) {
+    const lastMessage = messages[messageIndex];
+    if (lastMessage.sender === "bot") {
+      lastMessage.reasoning[reasoningIndex].collapsed = !lastMessage.reasoning[reasoningIndex].collapsed;
+      messages = [...messages]; // Trigger reactivity
+    }
+  }
+
+  function truncateText(text: string): string {
+    if (text.length <= truncateLength) return text;
+    return text.slice(0, truncateLength) + '...';
   }
 
   onDestroy(() => {
@@ -142,32 +193,63 @@
     <div class="flex-1 flex flex-col bg-white w-full max-w-3xl">
 
       <div class="conversation-container flex-1 overflow-y-auto p-4 space-y-6" bind:this={conversationContainer}>
-        {#each messages as message}
+        {#each messages as message, messageIndex}
           <div class="space-y-4">
-            <!-- Result Text -->
             <div class="prose max-w-3xl mx-auto prose-lg">
-              {#if message.text === "" && isStreaming}
-                <div class="animate-pulse">Indexing...</div>
-              {:else if message.sender === "user"}
+              {#if message.sender === "user"}
                 <div class="font-bold prose-xl">{message.text}</div>
               {:else}
-                {@html marked(message.text)}
+                {#if message.reasoning.length > 0}
+                  <div class="max-w-3xl mx-auto">
+                    <h3 class="text-sm font-semibold text-gray-600">Reasoning</h3>
+                    {#each message.reasoning as thought, reasoningIndex}
+                      <div class="rounded-lg p-3 my-3 w-full">
+                        <div class="flex items-start w-full">
+                          <div class="flex justify-between items-start gap-2 w-full">
+                            <div class="flex items-start gap-2 flex-1 min-w-0">
+                              <div class="shrink-0">
+                                {#if isReasoning && reasoningIndex === message.reasoning.length - 1}
+                                  <div class="relative mt-2.5">
+                                    <div class="w-2 h-2 bg-green-400 rounded-full"></div>
+                                    <div class="w-2 h-2 bg-green-400 rounded-full absolute top-0 animate-ping"></div>
+                                  </div>
+                                {:else if isReasoning}
+                                  <div class="w-2 h-2 bg-gray-400 rounded-full mt-2.5"></div>
+                                {:else}
+                                  <CheckIcon size="16" class="text-gray-500 mt-1.5" />
+                                {/if}
+                              </div>
+                              <div class="text-gray-600 reasoning-container">
+                                <div class={`reasoning-content ${thought.collapsed ? 'collapsed' : 'expanded'}`}>
+                                  {thought.text}
+                                </div>
+                              </div>
+                            </div>
+                            {#if thought.text.length > truncateLength}
+                              <button 
+                                class="text-gray-600 shrink-0 cursor-pointer transition-transform duration-200 mt-2"
+                                class:rotate-180={!thought.collapsed}
+                                on:click={() => toggleReasoning(messageIndex, reasoningIndex)}
+                              >
+                                <ChevronDownIcon size="16" />
+                              </button>
+                            {/if}
+                          </div>
+                        </div>
+                      </div>
+                    {/each}
+                  </div>
+                {/if}
+                {#if message.text !== ""}
+                  <h3 class="text-sm font-semibold text-gray-600">Answer</h3>
+                  <div class="mt-4 prose max-w-3xl mx-auto prose-lg">
+                    {@html marked(message.text)}
+                  </div>
+                {:else}
+                  <div class="animate-pulse mt-4">Thinking...</div>
+                {/if}
               {/if}
             </div>
-
-            <!-- Sources 
-            {#if result.sources.length > 0}
-              <div class="max-w-3xl mx-auto">
-                <h3 class="text-sm font-semibold text-gray-600">Sources</h3>
-                <ul class="space-y-2">
-                  {#each result.sources as source}
-                    <li class="text-sm text-blue-500 hover:underline">
-                      <a href={source.url} target="_blank">{source.title}</a>
-                    </li>
-                  {/each}
-                </ul>
-              </div>
-            {/if} -->
           </div>
         {/each}
       </div>
@@ -184,3 +266,28 @@
     </div>
     {/if}
   </main>
+
+  <style>
+    .reasoning-container {
+      position: relative;
+      width: 100%;
+      overflow: hidden;
+    }
+
+    .reasoning-content {
+      transition: all 0.3s ease;
+    }
+
+    .reasoning-content.collapsed {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-height: 1.5em;
+    }
+
+    .reasoning-content.expanded {
+      white-space: normal;
+      max-height: 500px;
+    }
+
+  </style>
