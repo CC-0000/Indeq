@@ -15,6 +15,7 @@ import (
 	"github.com/cc-0000/indeq/common/config"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 type queryServer struct {
@@ -135,13 +136,18 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 	}, nil
 }
 
-
 func main() {
 	log.Println("Starting the server...")
 	// Load the .env file
 	err := config.LoadSharedConfig()
 	if err != nil {
 		log.Fatal("Error loading .env file")
+	}
+
+	// Load the TLS configuration values
+	tlsConfig, err := config.LoadTLSFromEnv("QUERY_CRT", "QUERY_KEY")
+	if err != nil {
+		log.Fatal("Error loading TLS config for query")
 	}
 
 	// Connect to RabbitMQ
@@ -162,7 +168,10 @@ func main() {
 	log.Println("Creating the query server...")
 
 	// Launch the server on the listener
-	grpcServer := grpc.NewServer()
+	opts := []grpc.ServerOption{
+		grpc.Creds(credentials.NewTLS(tlsConfig)),
+	}
+	grpcServer := grpc.NewServer(opts...)
 	pb.RegisterQueryServiceServer(grpcServer, &queryServer{rabbitMQConn: rabbitMQConn})
 	log.Printf("Query service listening on %v\n", listener.Addr())
 	if err := grpcServer.Serve(listener); err != nil {

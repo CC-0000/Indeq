@@ -20,6 +20,7 @@ import (
 	_ "github.com/lib/pq"
 	"golang.org/x/crypto/argon2"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 type authServer struct {
@@ -378,6 +379,12 @@ func main() {
         log.Fatal("JWT_SECRET environment variable is required")
     }
 
+    // Load the TLS configuration values
+	tlsConfig, err := config.LoadTLSFromEnv("AUTH_CRT", "AUTH_KEY")
+	if err != nil {
+		log.Fatal("Error loading TLS config for query")
+	}
+
     // Connect to database
     db, err := sql.Open("postgres", dbURL)
     if err != nil {
@@ -417,7 +424,10 @@ func main() {
 
 	log.Println("Creating the authentication server")
 
-    grpcServer := grpc.NewServer()
+    opts := []grpc.ServerOption{
+		grpc.Creds(credentials.NewTLS(tlsConfig)),
+	}
+    grpcServer := grpc.NewServer(opts...)
     pb.RegisterAuthenticationServiceServer(grpcServer, &authServer{db: db, jwtSecret: jwtSecret})
     log.Printf("Auth Service listening on %v\n", listener.Addr())
     if err := grpcServer.Serve(listener); err != nil {

@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -14,7 +17,7 @@ import (
 	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/credentials"
 )
 
 type ServiceClients struct {
@@ -268,6 +271,18 @@ func main() {
 		log.Fatalf("Error loading .env file: %v", err)
 	}
 
+	// Load CA certificate from .env
+	caCertB64 := os.Getenv("CA_CRT")
+	caCert, err := base64.StdEncoding.DecodeString(caCertB64)
+	if err != nil {
+		log.Fatalf("failed to decode CA cert: %v", err)
+	}
+
+	certPool := x509.NewCertPool()
+	if !certPool.AppendCertsFromPEM(caCert) {
+		log.Fatal("failed to add CA certificate")
+	}
+
 	// Connect to RabbitMQ
 	rabbitMQConn, err := amqp.Dial(os.Getenv("RABBITMQ_URL"))
 	if err != nil {
@@ -277,8 +292,10 @@ func main() {
 
 	// Connect to the query service
     queryConn, err := grpc.NewClient(
-        os.Getenv("QUERY_ADDRESS"), // Target address
-        grpc.WithTransportCredentials(insecure.NewCredentials()), // Required for plaintext
+        os.Getenv("QUERY_ADDRESS"),
+        grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
+			RootCAs: certPool,
+		})),
     )
 	if err != nil {
 		log.Fatalf("Failed to establish connection with query-service: %v", err)
@@ -289,7 +306,9 @@ func main() {
 	// Connect to the authentication service
 	authConn, err := grpc.NewClient(
 		os.Getenv("AUTH_ADDRESS"), 
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
+			RootCAs: certPool,
+		})),
 	)
 	if err != nil {
 		log.Fatalf("Failed to establish connection with auth-service: %v", err)
