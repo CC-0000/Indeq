@@ -199,12 +199,113 @@ func refreshAllExpiredTokens(db *sql.DB) {
 	}
 	
 }
+
+func enumToString(provider pb.Provider) (string, error) {
+	switch provider {
+	case pb.Provider_GOOGLE:
+		return "GOOGLE", nil
+	case pb.Provider_MICROSOFT:
+		return "MICROSOFT", nil
+	case pb.Provider_NOTION:
+		return "NOTION", nil
+	default:
+		return "", fmt.Errorf("invalid provider: %v", provider)
+	}
+}
+
 func (s *integrationServer) ConnectIntegration(ctx context.Context, req *pb.ConnectIntegrationRequest) (*pb.ConnectIntegrationResponse, error) {
-	return &pb.ConnectIntegrationResponse{Success: true, Message: "Connected successfully"}, nil
+	providerStr, err := enumToString(req.Provider)
+	if err != nil {
+		return &pb.ConnectIntegrationResponse{
+			Success: false,
+			Message: fmt.Sprintf("Failed to convert provider to string: %v", err),
+			ErrorDetails: err.Error(),
+		}, nil
+	}
+	
+	tokenRes, err := ExchangeAuthCodeForToken(providerStr, req.AuthCode)
+	if err != nil {
+		return &pb.ConnectIntegrationResponse{
+			Success: false,
+			Message: fmt.Sprintf("Failed to exchange auth code: %v", err),
+			ErrorDetails: err.Error(),
+		}, nil
+	}
+	
+	_, err = s.db.ExecContext(ctx, `
+	INSERT INTO oauth_tokens (user_id, provider, access_token, refresh_token, expires_at)
+	VALUES ($1, $2, $3, $4, $5)
+	ON CONFLICT (user_id, provider)
+	DO UPDATE SET
+		access_token = EXCLUDED.access_token,
+		refresh_token = EXCLUDED.refresh_token,
+		expires_at = EXCLUDED.expires_at,
+		updated_at = NOW()
+	`,
+		req.UserId,
+		providerStr,
+		tokenRes.AccessToken,
+		tokenRes.RefreshToken,
+		tokenRes.ExpiresAt,
+	)
+
+	if err != nil {
+		return &pb.ConnectIntegrationResponse{
+			Success: false,
+			Message: fmt.Sprintf("Database error saving token: %v", err),
+			ErrorDetails: err.Error(),
+		}, nil
+	}
+
+	return &pb.ConnectIntegrationResponse{
+		Success: true,
+		Message: "Integration connected successfully",
+	}, nil
 }
 
 func (s *integrationServer) DisconnectIntegration(ctx context.Context, req *pb.DisconnectIntegrationRequest) (*pb.DisconnectIntegrationResponse, error) {
-	return &pb.DisconnectIntegrationResponse{Success: true, Message: "Disconnected successfully"}, nil
+	providerStr, err := enumToString(req.Provider)
+	if err != nil {
+		return &pb.DisconnectIntegrationResponse{
+			Success: false,
+			Message: fmt.Sprintf("Failed to convert provider to string: %v", err),
+		}, nil
+	}
+
+	result, err := s.db.ExecContext(ctx, `
+	DELETE FROM oauth_tokens
+	WHERE user_id = $1 AND provider = $2
+	`,
+		req.UserId,
+		providerStr,
+	)
+
+	if err != nil {
+		return &pb.DisconnectIntegrationResponse{
+			Success: false,
+			Message: fmt.Sprintf("Database error deleting token: %v", err),
+		}, nil
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return &pb.DisconnectIntegrationResponse{
+			Success: false,
+			Message: fmt.Sprintf("Failed to get rows affected: %v", err),
+		}, nil
+	}
+
+	if rowsAffected == 0 {
+		return &pb.DisconnectIntegrationResponse{
+			Success: false,
+			Message: "No token found to delete",
+		}, nil
+	}
+
+	return &pb.DisconnectIntegrationResponse{
+		Success: true,
+		Message: "Integration disconnected successfully",
+	}, nil
 }
 
 func main() {
@@ -243,13 +344,15 @@ func main() {
         log.Fatalf("Failed to create oauth_tokens table: %v", err)
     }
 
-    _, err = db.ExecContext(ctx, `
-        CREATE INDEX IF NOT EXISTS user_provider_idx ON oauth_tokens(user_id, provider);
-    `)
+	_, err = db.ExecContext(ctx, `
+		ALTER TABLE oauth_tokens
+		ADD CONSTRAINT user_provider_unique
+		UNIQUE (user_id, provider);
+	`)
 
-    if err != nil {
-        log.Fatalf("Failed to create user_provider index: %v", err)
-    }
+	if err != nil {
+		log.Fatalf("Failed to create user_provider index: %v", err)
+	}
 
     fmt.Println("Database setup completed: oauth_tokens table is ready.")
 	startTokenRefreshWorker(db)

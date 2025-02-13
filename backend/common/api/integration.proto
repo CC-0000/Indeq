@@ -10,14 +10,25 @@ service IntegrationService {
 }
 
 enum Provider {
-    GOOGLE = 0;
-    MICROSOFT = 1;
-    NOTION = 2;
+    PROVIDER_UNSPECIFIED = 0;
+    GOOGLE = 1;
+    MICROSOFT = 2;
+    NOTION = 3;
+}
+
+message OAuthURLRequest {
+    Provider provider = 1;
+    string state = 2;
+}
+
+message OAuthURLResponse {
+    string url = 1;
 }
 
 message ConnectIntegrationRequest {
-    Provider provider = 1;
-    string auth_code = 2;
+    string user_id = 1;
+    Provider provider = 2;
+    string auth_code = 3;
 }
 
 message ConnectIntegrationResponse {
@@ -27,7 +38,8 @@ message ConnectIntegrationResponse {
 }
 
 message DisconnectIntegrationRequest {
-    Provider provider = 1;
+    string user_id = 1;
+    Provider provider = 2;
 }
 
 message DisconnectIntegrationResponse {
