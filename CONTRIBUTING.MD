@@ -47,6 +47,7 @@ Here you will find all the necessary information for developers to install and s
 
 - If docker isn't running, try `sudo dockerd` to run it manually or `systemctl restart docker` if you have it set to run in the background.
 - If you're running into go mod issues try running `go work sync` in the **/backend** folder
+- If your Dockerfiles are failing, make sure you are running `go mod tidy` in the service folder where the Dockerfile is failing
 - If your containers are having issues and/or unexpected behavior, try entering one of them by running:
   `docker exec -it <name_of_running_container> bash` while your container is running
 - For postgresql containers, `psql -U <postgres_username>` will open the postgres terminal

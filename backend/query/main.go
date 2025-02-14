@@ -179,5 +179,4 @@ func main() {
 	} else {
 		log.Printf("Query service served on %v\n", listener.Addr())
 	}
-
 }
