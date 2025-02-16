@@ -13,8 +13,8 @@ COPY gateway/go.mod gateway/go.sum ./gateway/
 COPY common/go.mod common/go.sum ./common/
 
 # Download dependencies
-RUN cd gateway && go mod tidy && go mod download
-RUN cd common && go mod tidy && go mod download
+RUN cd gateway && go mod download
+RUN cd common && go mod download
 
 # Copy source code
 COPY gateway/ ./gateway/

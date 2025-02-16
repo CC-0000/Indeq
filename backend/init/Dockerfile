@@ -9,31 +9,30 @@ RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
 RUN go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 
 # Copy module files first
-COPY query/go.mod query/go.sum ./query/
+COPY init/go.mod init/go.sum ./init/
 COPY common/go.mod common/go.sum ./common/
 
 # Download dependencies
-RUN cd query && go mod download
+RUN cd init && go mod download
 RUN cd common && go mod download
 
 # Copy source code
-COPY query/ ./query/
+COPY init/ ./init/
 COPY common/ ./common/
 
 # Create the proto files if they aren't already generated
 RUN cd common && make gen
 
 # Build binary with module replacement
-RUN cd query && \
-    CGO_ENABLED=0 GOOS=linux go build -o ../query-service .
+RUN cd init && \
+    CGO_ENABLED=0 GOOS=linux go build -o ../init-routine .
 
 # Runtime stage  
 FROM alpine:latest
 RUN apk --no-cache add ca-certificates
 
 WORKDIR /app/
-COPY --from=builder /app/query-service .
+COPY --from=builder /app/init-routine .
 COPY --from=builder /app/common/config/.env . 
 
-EXPOSE 50051
-CMD ["./query-service"]
+CMD ["./init-routine"]

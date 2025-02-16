@@ -13,8 +13,8 @@ COPY vector/go.mod vector/go.sum ./vector/
 COPY common/go.mod common/go.sum ./common/
 
 # Download dependencies
-RUN cd vector && go mod tidy && go mod download
-RUN cd common && go mod tidy && go mod download
+RUN cd vector && go mod download
+RUN cd common && go mod download
 
 # Copy source code
 COPY vector/ ./vector/

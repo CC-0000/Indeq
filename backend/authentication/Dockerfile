@@ -13,8 +13,8 @@ COPY authentication/go.mod authentication/go.sum ./authentication/
 COPY common/go.mod common/go.sum ./common/
 
 # Download dependencies
-RUN cd authentication && go mod tidy && go mod download
-RUN cd common && go mod tidy && go mod download
+RUN cd authentication && go mod download
+RUN cd common && go mod download
 
 # Copy source code
 COPY authentication/ ./authentication/
