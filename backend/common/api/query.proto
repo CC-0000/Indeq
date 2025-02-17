@@ -9,7 +9,7 @@ service QueryService {
 }
 
 message QueryRequest {
-    string conversationId = 1;
+    string conversation_id = 1;
     string query = 2;
 }
 
