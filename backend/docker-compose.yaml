@@ -68,6 +68,17 @@ services:
     networks:
       - indeq-net
 
+  vector:
+    image: vector-service
+    build:
+      context: .
+      dockerfile: vector/Dockerfile
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    networks:
+      - indeq-net
+
   gateway:
     image: gateway-service
     build:

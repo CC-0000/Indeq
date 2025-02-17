@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+option go_package = "github.com/cc-0000/indeq/common/api";
+
+import "google/protobuf/timestamp.proto";
+
+package api;
+
+enum Platform {
+    PLATFORM_LOCAL = 0;
+    PLATFORM_GOOGLE_DRIVE = 1;
+    PLATFORM_GOOGLE_DOCS = 2;
+    PLATFORM_MICROSOFT = 3;
+    PLATFORM_NOTION = 4;
+}
+
+message TextChunkMessage {
+    message Metadata {
+        google.protobuf.Timestamp date_created = 1;
+        google.protobuf.Timestamp date_last_modified = 2; 
+        string user_id = 3;         // "af948791-409b-43f3-807a-9dcf6589b056"
+        string file_path = 4;       // "/personal/journal.pdf"
+        string page = 5;            // page 5
+        uint32 row_start = 6;       // line 24 <-- start of the block INCLUSIVE
+        uint32 col_start = 7;       // Col 10 <-- start of the block INCLUSIVE
+        uint32 row_end = 8;         // line 30 <-- end of the block INCLUSIVE
+        uint32 col_end = 9;         // Col 23 <-- end of the block INCLUSIVE
+        string title = 10;          // "My journal"
+        Platform platform = 11;     // google, notion, etc.
+    }
+    Metadata metadata = 1;
+    string content = 2;
+}

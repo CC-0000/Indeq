@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+option go_package = "github.com/cc-0000/indeq/common/api";
+
+import "api/kafka.proto";
+
+package api;
+
+service VectorService {
+    rpc DeleteFile(VectorFileDeleteRequest) returns (VectorFileDeleteReponse);
+    // rpc GetTopKVectors() returns ();
+}
+
+message VectorFileDeleteRequest {
+    string user_id = 1;
+    Platform platform = 2;
+    string file_path = 3;   // file paths should be unique per platform
+}
+
+message VectorFileDeleteReponse {
+    bool success = 1;
+    string error = 2;
+}
