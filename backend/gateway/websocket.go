@@ -14,6 +14,7 @@ import (
 
 type WSHandler struct {
 	clients *ServiceClients
+	userId  string
 }
 
 func (h *WSHandler) OnOpen(socket *gws.Conn) {
@@ -43,8 +44,10 @@ func (h *WSHandler) OnMessage(socket *gws.Conn, message *gws.Message) {
 	}
 
 	kafkaMessage := &pb.TextChunkMessage{
-		Metadata: &pb.TextChunkMessage_Metadata{},
-		Content:  request.Text,
+		Metadata: &pb.TextChunkMessage_Metadata{
+			UserId: h.userId,
+		},
+		Content: request.Text,
 	}
 
 	byteEncodedKafkaMessage, err := proto.Marshal(kafkaMessage)

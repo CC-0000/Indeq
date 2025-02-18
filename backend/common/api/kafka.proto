@@ -19,8 +19,8 @@ message TextChunkMessage {
         google.protobuf.Timestamp date_created = 1;
         google.protobuf.Timestamp date_last_modified = 2; 
         string user_id = 3;         // "af948791-409b-43f3-807a-9dcf6589b056"
-        string file_path = 4;       // "/personal/journal.pdf"
-        string page = 5;            // page 5
+        string file_id = 4;         // "4i23uh5i-2342-g452-g5gg-o9385h6dahl1"
+        uint32 page = 5;            // page 5
         uint32 row_start = 6;       // line 24 <-- start of the block INCLUSIVE
         uint32 col_start = 7;       // Col 10 <-- start of the block INCLUSIVE
         uint32 row_end = 8;         // line 30 <-- end of the block INCLUSIVE

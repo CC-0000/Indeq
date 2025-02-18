@@ -9,6 +9,7 @@ package api;
 service VectorService {
     rpc DeleteFile(VectorFileDeleteRequest) returns (VectorFileDeleteReponse);
     // rpc GetTopKVectors() returns ();
+    rpc SetupCollection(SetupCollectionRequest) returns (SetupCollectionResponse);
 }
 
 message VectorFileDeleteRequest {
@@ -18,6 +19,15 @@ message VectorFileDeleteRequest {
 }
 
 message VectorFileDeleteReponse {
+    bool success = 1;
+    string error = 2;
+}
+
+message SetupCollectionRequest {
+    string user_id = 1;
+}
+
+message SetupCollectionResponse {
     bool success = 1;
     string error = 2;
 }

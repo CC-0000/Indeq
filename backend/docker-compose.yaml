@@ -65,6 +65,8 @@ services:
     depends_on:
       passwordDB:
         condition: service_healthy
+      vector:
+        condition: service_started
     networks:
       - indeq-net
 

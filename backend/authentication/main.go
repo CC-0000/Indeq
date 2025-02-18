@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
+	"crypto/tls"
+	"crypto/x509"
 	"database/sql"
 	"encoding/base64"
 	"fmt"
@@ -25,8 +27,9 @@ import (
 
 type authServer struct {
 	pb.UnimplementedAuthenticationServiceServer
-	db        *sql.DB // password database
-	jwtSecret []byte  // secret for creating jwts
+	db           *sql.DB // password database
+	vectorClient pb.VectorServiceClient
+	jwtSecret    []byte // secret for creating jwts
 }
 
 type params struct {
@@ -308,17 +311,30 @@ func (s *authServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb
 	}
 	defer tx.Rollback()
 
-	_, err = tx.ExecContext(ctx,
-		"INSERT INTO users (email, password_hash, name) VALUES ($1, $2, $3)",
+	var userId string
+	err = tx.QueryRowContext(
+		ctx,
+		"INSERT INTO users (email, password_hash, name) VALUES ($1, $2, $3) RETURNING id",
 		strings.ToLower(req.Email), // Normalize email
 		encodedHash,
 		req.Name,
-	)
+	).Scan(&userId)
 
 	if err != nil {
 		return &pb.RegisterResponse{
 			Success: false,
 			Error:   "email already exists",
+		}, nil
+	}
+
+	// Try to create a corresponding entry in the vector collection
+	res, err := s.vectorClient.SetupCollection(ctx, &pb.SetupCollectionRequest{
+		UserId: userId,
+	})
+	if err != nil || !res.Success {
+		return &pb.RegisterResponse{
+			Success: false,
+			Error:   "failed to setup user datastores",
 		}, nil
 	}
 
@@ -379,6 +395,18 @@ func main() {
 		log.Fatal("JWT_SECRET environment variable is required")
 	}
 
+	// Load CA certificate from .env
+	caCertB64 := os.Getenv("CA_CRT")
+	caCert, err := base64.StdEncoding.DecodeString(caCertB64)
+	if err != nil {
+		log.Fatalf("failed to decode CA cert: %v", err)
+	}
+
+	certPool := x509.NewCertPool()
+	if !certPool.AppendCertsFromPEM(caCert) {
+		log.Fatal("failed to add CA certificate")
+	}
+
 	// Load the TLS configuration values
 	tlsConfig, err := config.LoadTLSFromEnv("AUTH_CRT", "AUTH_KEY")
 	if err != nil {
@@ -422,13 +450,30 @@ func main() {
 	}
 	defer listener.Close()
 
+	// Connect to the vector service
+	vectorConn, err := grpc.NewClient(
+		os.Getenv("VECTOR_ADDRESS"),
+		grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
+			RootCAs: certPool,
+		})),
+	)
+	if err != nil {
+		log.Fatalf("Failed to establish connection with vector-service: %v", err)
+	}
+	defer vectorConn.Close()
+	vectorServiceClient := pb.NewVectorServiceClient(vectorConn)
+
 	log.Println("Creating the authentication server")
 
 	opts := []grpc.ServerOption{
 		grpc.Creds(credentials.NewTLS(tlsConfig)),
 	}
 	grpcServer := grpc.NewServer(opts...)
-	pb.RegisterAuthenticationServiceServer(grpcServer, &authServer{db: db, jwtSecret: jwtSecret})
+	pb.RegisterAuthenticationServiceServer(grpcServer, &authServer{
+		db:           db,
+		vectorClient: vectorServiceClient,
+		jwtSecret:    jwtSecret,
+	})
 	log.Printf("Auth Service listening on %v\n", listener.Addr())
 	if err := grpcServer.Serve(listener); err != nil {
 		log.Fatalf("Failed to serve: %v", err)
