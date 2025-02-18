@@ -30,21 +30,21 @@
             <div class="w-2 h-2 bg-green-400 rounded-full"></div>
             <div class="w-2 h-2 bg-green-400 rounded-full absolute top-0 animate-ping"></div>
           </div>
+          <span class="text-sm text-gray-600">Google</span>
+        </div>
+        <div class="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-full">
+          <div class="relative">
+            <div class="w-2 h-2 bg-green-400 rounded-full"></div>
+            <div class="w-2 h-2 bg-green-400 rounded-full absolute top-0 animate-ping"></div>
+          </div>
+          <span class="text-sm text-gray-600">Microsoft</span>
+        </div>
+        <div class="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-full">
+          <div class="relative">
+            <div class="w-2 h-2 bg-green-400 rounded-full"></div>
+            <div class="w-2 h-2 bg-green-400 rounded-full absolute top-0 animate-ping"></div>
+          </div>
           <span class="text-sm text-gray-600">Notion</span>
-        </div>
-        <div class="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-full">
-          <div class="relative">
-            <div class="w-2 h-2 bg-green-400 rounded-full"></div>
-            <div class="w-2 h-2 bg-green-400 rounded-full absolute top-0 animate-ping"></div>
-          </div>
-          <span class="text-sm text-gray-600">Google Drive</span>
-        </div>
-        <div class="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-full">
-          <div class="relative">
-            <div class="w-2 h-2 bg-green-400 rounded-full"></div>
-            <div class="w-2 h-2 bg-green-400 rounded-full absolute top-0 animate-ping"></div>
-          </div>
-          <span class="text-sm text-gray-600">Slack</span>
         </div>
       </div>
     </div>

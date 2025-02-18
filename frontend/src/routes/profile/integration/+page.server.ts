@@ -65,37 +65,44 @@ export const load: PageServerLoad = async ({ url, cookies }) => {
 
     // Handle OAuth callback
     if (code && provider) {
-      const authData = { code, provider };
-      console.log(authData)
-      // try {
-      //   const response = await fetch(`${GO_BACKEND_URL}/api/auth/temppost`, {
-      //     method: 'POST',
-      //     headers: {
-      //       'Content-Type': 'application/json'
-      //     },
-      //     body: JSON.stringify(authData)
-      //   });
+      const authData = { Provider: provider, AuthCode: code };
+      const token = cookies.get('session');
 
-      //   if (!response.ok) {
-      //     const errorText = await response.text();
-      //     console.error('Auth failed:', errorText);
-      //     return { success: false, error: 'Authentication failed' };
-      //   }
+      if (!token) {
+        console.error('No JWT token found, user is not authenticated');
+        return { success: false, error: 'Authentication failed' };
+      }
 
-      //   const data = await response.json();
-      //   if (data.error) {
-      //     return { success: false, error: data.error };
-      //   }
+      try {
+        const response = await fetch(`${GO_BACKEND_URL}/api/connect`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(authData)
+        });
+        console.log(response)
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('Auth failed:', errorText);
+          return { success: false, error: 'Authentication failed' };
+        }
 
-      //   return {
-      //     success: true,
-      //     isAuthenticated: true,
-      //     provider: provider
-      //   };
-      // } catch (error) {
-      //   console.error('Integration error:', error);
-      //   return { success: false, error: 'Failed Integration' };
-      // }
+        const data = await response.json();
+        if (data.error) {
+          return { success: false, error: data.error };
+        }
+
+        return {
+          success: true,
+          isAuthenticated: true,
+          provider: provider
+        };
+      } catch (error) {
+        console.error('Integration error:', error);
+        return { success: false, error: 'Failed Integration' };
+      }
     }
 
     const requestedProvider = url.searchParams.get('provider')?.toUpperCase() as 'GOOGLE' | 'MICROSOFT';
@@ -105,10 +112,10 @@ export const load: PageServerLoad = async ({ url, cookies }) => {
     }
 
     // Check session
-    const session = cookies.get('session');
-    if (!session) {
-      return { success: false, redirectTo: '/login' };
-    }
+    // const session = cookies.get('session');
+    // if (!session) {
+    //   return { success: false, redirectTo: '/login' };
+    // }
 
     return {
       success: false,

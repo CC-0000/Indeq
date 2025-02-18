@@ -25,10 +25,12 @@ type integrationServer struct {
 
 // TokenResponse represents the OAuth token response from our providers
 type TokenResponse struct {
-	AccessToken string 
-	RefreshToken string
-	ExpiresIn int
-	ExpiresAt time.Time
+	AccessToken string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	ExpiresIn int `json:"expires_in"`
+	TokenType string `json:"token_type"`
+	Scope string `json:"scope"`
+	ExpiresAt time.Time `json:"-"`
 }
 
 // OAuthProviderConfig represents the token exchange and refresh
@@ -43,15 +45,15 @@ type OAuthProviderConfig struct {
 var providers = map[string]OAuthProviderConfig{
 	"GOOGLE": {
 		TokenURL:     "https://oauth2.googleapis.com/token",
-		ClientID:     "your_google_client_id",
-		ClientSecret: "your_google_client_secret",
-		RedirectURI:  "your_redirect_uri",
+		ClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
+		ClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
+		RedirectURI:  os.Getenv("GOOGLE_REDIRECT_URI"),
 	},
 	"MICROSOFT": {
 		TokenURL:     "https://login.microsoftonline.com/common/oauth2/v2.0/token",
-		ClientID:     "your_microsoft_client_id",
-		ClientSecret: "your_microsoft_client_secret",
-		RedirectURI:  "your_redirect_uri",
+		ClientID:     os.Getenv("MICROSOFT_CLIENT_ID"),
+		ClientSecret: os.Getenv("MICROSOFT_CLIENT_SECRET"),
+		RedirectURI:  os.Getenv("MICROSOFT_REDIRECT_URI"),
 	},
 	"NOTION": {
 		TokenURL:     "https://api.notion.com/v1/oauth/token",
@@ -65,8 +67,9 @@ var providers = map[string]OAuthProviderConfig{
 func ExchangeAuthCodeForToken(provider string, authCode string) (*TokenResponse, error) {
 	config, exists := providers[provider]
 	if !exists {
-		return nil, errors.New("unsupported provider")
+		return nil, fmt.Errorf("unsupported provider: %s", provider)
 	}
+	log.Printf("Exchanging auth code for token with provider: %s and auth code: %s", provider, authCode)
 
 	data := fmt.Sprintf(
 		"client_id=%s&client_secret=%s&code=%s&grant_type=authorization_code&redirect_uri=%s",
@@ -140,11 +143,9 @@ func RefreshOAuthToken(provider string, refreshToken string) (*TokenResponse, er
 }
 
 func startTokenRefreshWorker(db *sql.DB) {
-	ticker := time.NewTicker(1 * time.Minute)
+	ticker := time.NewTicker(time.Minute)
 	go func() {
-		defer ticker.Stop()
-		for {
-			<-ticker.C
+		for range ticker.C {
 			log.Println("Refreshing all expired tokens...")
 			refreshAllExpiredTokens(db)
 		}
@@ -156,9 +157,9 @@ func refreshAllExpiredTokens(db *sql.DB) {
 	defer cancel()
 
 	rows, err := db.QueryContext(ctx, `
-		SELECT user_id, provider, refresh_token
+		SELECT user_id, provider, refresh_token, expires_at
 		FROM oauth_tokens
-		WHERE expires_at < NOW()
+		WHERE expires_at < NOW() + INTERVAL '5 minutes'
 	`)
 	
 	if err != nil {
@@ -171,33 +172,46 @@ func refreshAllExpiredTokens(db *sql.DB) {
 		var userID string
 		var provider string
 		var refreshToken string
+		var expiresAt time.Time
 
-		if err := rows.Scan(&userID, &provider, &refreshToken); err != nil {
+		if err := rows.Scan(&userID, &provider, &refreshToken, &expiresAt); err != nil {
 			log.Printf("Error scanning token row: %v", err)
 			continue
 		}
 
-		tokenData, err := RefreshOAuthToken(provider, refreshToken)
+		if refreshToken == "" {
+			log.Printf("No refresh token found for user %s and provider %s", userID, provider)
+			continue
+		}
 
+		tokenData, err := RefreshOAuthToken(provider, refreshToken)
 		if err != nil {
 			log.Printf("Error refreshing token for user %s: %v", userID, err)
 			continue
 		}
 
+		if tokenData.RefreshToken == "" {
+			log.Printf("No new refresh token returned for user %s; reusing old one", userID)
+			tokenData.RefreshToken = refreshToken
+		}
+		
 		_, err = db.ExecContext(ctx, `
 			UPDATE oauth_tokens
 			SET access_token = $1, refresh_token = $2, expires_at = $3, updated_at = NOW()
 			WHERE user_id = $4 AND provider = $5
 		`, tokenData.AccessToken, tokenData.RefreshToken, tokenData.ExpiresAt, userID, provider)
-		
+
 		if err != nil {
 			log.Printf("Error updating token for user %s: %v", userID, err)
 			continue
 		}
 
-		log.Printf("Successfully refreshed token for user %s", userID)
+		if tokenData.RefreshToken != refreshToken {
+			log.Printf("Successfully refreshed access token and refresh token for user %s", userID)
+		} else {
+			log.Printf("Successfully refreshed the access token for user %s", userID)
+		}
 	}
-	
 }
 
 func enumToString(provider pb.Provider) (string, error) {
@@ -231,14 +245,42 @@ func (s *integrationServer) ConnectIntegration(ctx context.Context, req *pb.Conn
 			ErrorDetails: err.Error(),
 		}, nil
 	}
-	
+
+	var existingRefreshToken string
+	err = s.db.QueryRowContext(ctx, `
+		SELECT refresh_token
+		FROM oauth_tokens
+		WHERE user_id = $1 AND provider = $2
+	`,
+		req.UserId,
+		providerStr,
+	).Scan(&existingRefreshToken)
+	if err != nil && err != sql.ErrNoRows {
+		return &pb.ConnectIntegrationResponse{
+			Success: false,
+			Message: fmt.Sprintf("Database error querying token: %v", err),
+			ErrorDetails: err.Error(),
+		}, nil
+	}
+
+	if tokenRes.RefreshToken == "" {
+		if existingRefreshToken != "" {
+			log.Println("No refresh token returned from provider, using existing token")
+			tokenRes.RefreshToken = existingRefreshToken
+		} else {
+			return &pb.ConnectIntegrationResponse{
+				Success: false,
+				Message: "No refresh token returned from provider",
+			}, nil
+		}
+	}
 	_, err = s.db.ExecContext(ctx, `
 	INSERT INTO oauth_tokens (user_id, provider, access_token, refresh_token, expires_at)
 	VALUES ($1, $2, $3, $4, $5)
 	ON CONFLICT (user_id, provider)
 	DO UPDATE SET
 		access_token = EXCLUDED.access_token,
-		refresh_token = EXCLUDED.refresh_token,
+		refresh_token = COALESCE(NULLIF(EXCLUDED.refresh_token, ''), oauth_tokens.refresh_token),
 		expires_at = EXCLUDED.expires_at,
 		updated_at = NOW()
 	`,

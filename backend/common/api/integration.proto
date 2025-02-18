@@ -5,6 +5,7 @@ option go_package = "github.com/cc-0000/indeq/common/api";
 package api;
 
 service IntegrationService {
+    rpc GetIntegrations(GetIntegrationsRequest) returns (GetIntegrationsResponse);
     rpc ConnectIntegration(ConnectIntegrationRequest) returns (ConnectIntegrationResponse);
     rpc DisconnectIntegration(DisconnectIntegrationRequest) returns (DisconnectIntegrationResponse);
 }
@@ -14,6 +15,14 @@ enum Provider {
     GOOGLE = 1;
     MICROSOFT = 2;
     NOTION = 3;
+}
+
+message GetIntegrationsRequest {
+    string user_id = 1;
+}
+
+message GetIntegrationsResponse {
+    repeated Provider providers = 1;
 }
 
 message OAuthURLRequest {
