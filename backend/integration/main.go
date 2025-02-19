@@ -227,6 +227,45 @@ func enumToString(provider pb.Provider) (string, error) {
 	}
 }
 
+func (s *integrationServer) GetIntegrations(ctx context.Context, req *pb.GetIntegrationsRequest) (*pb.GetIntegrationsResponse, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT provider
+		FROM oauth_tokens
+		WHERE user_id = $1
+	`, req.UserId)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to query integrations: %v", err)
+	}
+	defer rows.Close()
+
+	providersSet := make(map[pb.Provider]bool)
+	for rows.Next() {
+		var provider string
+		if err := rows.Scan(&provider); err != nil {
+			return nil, fmt.Errorf("failed to scan provider: %v", err)
+		}
+		
+		switch provider {
+		case "GOOGLE":
+			providersSet[pb.Provider_GOOGLE] = true
+		case "MICROSOFT":
+			providersSet[pb.Provider_MICROSOFT] = true
+		case "NOTION":
+			providersSet[pb.Provider_NOTION] = true
+		}
+	}
+
+	var providers []pb.Provider
+	for provider := range providersSet {
+		providers = append(providers, provider)
+	}
+
+	return &pb.GetIntegrationsResponse{
+		Providers: providers,
+	}, nil
+}
+
 func (s *integrationServer) ConnectIntegration(ctx context.Context, req *pb.ConnectIntegrationRequest) (*pb.ConnectIntegrationResponse, error) {
 	providerStr, err := enumToString(req.Provider)
 	if err != nil {

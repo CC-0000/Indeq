@@ -216,6 +216,46 @@ func stringToEnumProvider(provider string) (pb.Provider, error) {
 	}
 }
 
+func handleGetIntegrationsGenerator(clients *ServiceClients) http.HandlerFunc {
+	return func(w http.ResponseWriter, r * http.Request) {
+		// Set up context
+		ctx := r.Context()
+
+		// NOTE: expects authentication middleware to have already verified the token!!!
+		// Grab the token --> userId
+		auth_header := r.Header.Get("Authorization")
+		auth_token := strings.TrimPrefix(auth_header, "Bearer ")
+		verifyRes, err := clients.authClient.Verify(ctx, &pb.VerifyRequest{
+			Token: auth_token,
+		})
+
+		if err != nil || !verifyRes.Valid {
+			http.Error(w, "Invalid token", http.StatusUnauthorized)
+			return
+		}
+
+		res, err := clients.integrationClient.GetIntegrations(ctx, &pb.GetIntegrationsRequest{
+			UserId: verifyRes.UserId,
+		})
+
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to get integrations: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		response := struct {
+			Providers []string `json:"providers"`
+		}{}
+
+		for _, provider := range res.Providers {
+			response.Providers = append(response.Providers, provider.String())
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}
+}
+
 func handleConnectIntegrationGenerator(clients *ServiceClients) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		
@@ -448,6 +488,7 @@ func main() {
 	mux.HandleFunc("POST /api/login", handleLoginGenerator(serviceClients))
 	mux.HandleFunc("POST /api/connect", authMiddleware(handleConnectIntegrationGenerator(serviceClients), serviceClients))
 	mux.HandleFunc("POST /api/disconnect", authMiddleware(handleDisconnectIntegrationGenerator(serviceClients), serviceClients))
+	mux.HandleFunc("GET /api/integrations", authMiddleware(handleGetIntegrationsGenerator(serviceClients), serviceClients))
 
 	httpPort := os.Getenv("GATEWAY_ADDRESS")
 	server := &http.Server{

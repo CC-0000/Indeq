@@ -1,6 +1,10 @@
-<script>
-    import { SearchIcon } from "svelte-feather-icons";
-  </script>
+<script lang="ts">
+  import { SearchIcon } from "svelte-feather-icons";
+  export let data: { integrations: string[] }
+  const isIntegrated = (provider: string): boolean => {
+    return data.integrations.includes(provider.toUpperCase());
+  }
+</script>
   
   <main class="min-h-screen flex flex-col items-center justify-center p-6">
     <!-- Centered Search Box -->
@@ -25,24 +29,45 @@
 
       <!-- Integration Badges -->
       <div class="flex gap-4 mt-4 justify-center">
+        <!-- Google -->
         <div class="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-full">
           <div class="relative">
-            <div class="w-2 h-2 bg-green-400 rounded-full"></div>
-            <div class="w-2 h-2 bg-green-400 rounded-full absolute top-0 animate-ping"></div>
+            <div
+              class="w-2 h-2 rounded-full"
+              style="background-color: {isIntegrated('GOOGLE') ? 'green' : 'red'}"
+            ></div>
+            <div
+              class="w-2 h-2 rounded-full absolute top-0 animate-ping"
+              style="background-color: {isIntegrated('GOOGLE') ? 'green' : 'red'}"
+            ></div>
           </div>
           <span class="text-sm text-gray-600">Google</span>
         </div>
+        <!-- Microsoft -->
         <div class="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-full">
           <div class="relative">
-            <div class="w-2 h-2 bg-green-400 rounded-full"></div>
-            <div class="w-2 h-2 bg-green-400 rounded-full absolute top-0 animate-ping"></div>
+            <div
+              class="w-2 h-2 rounded-full"
+              style="background-color: {isIntegrated('MICROSOFT') ? 'green' : 'red'}"
+            ></div>
+            <div
+              class="w-2 h-2 rounded-full absolute top-0 animate-ping"
+              style="background-color: {isIntegrated('MICROSOFT') ? 'green' : 'red'}"
+            ></div>
           </div>
           <span class="text-sm text-gray-600">Microsoft</span>
         </div>
+        <!-- Notion -->
         <div class="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-full">
           <div class="relative">
-            <div class="w-2 h-2 bg-green-400 rounded-full"></div>
-            <div class="w-2 h-2 bg-green-400 rounded-full absolute top-0 animate-ping"></div>
+            <div
+              class="w-2 h-2 rounded-full"
+              style="background-color: {isIntegrated('NOTION') ? 'green' : 'red'}"
+            ></div>
+            <div
+              class="w-2 h-2 rounded-full absolute top-0 animate-ping"
+              style="background-color: {isIntegrated('NOTION') ? 'green' : 'red'}"
+            ></div>
           </div>
           <span class="text-sm text-gray-600">Notion</span>
         </div>
