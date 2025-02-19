@@ -367,7 +367,13 @@ func main() {
 	}
 
 	log.Printf("Starting server on %s", server.Addr)
-	if err := server.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("Server error: %v", err)
+	if os.Getenv("DEV_PROD") == "prod" {
+		if err := server.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server error: %v", err)
+		}
+	} else {
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server error: %v", err)
+		}
 	}
 }
