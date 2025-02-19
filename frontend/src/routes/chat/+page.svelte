@@ -11,17 +11,7 @@
   let messages: { text: string; sender: string; reasoning: {text: string; collapsed: boolean}[] }[] = [];
   let isFullscreen = false;
   let isReasoning = false;
-  let conversationContainer;
-
-  // Scroll to the bottom of the conversation
-  function scrollToBottom() {
-    const container = document.querySelector(".conversation-container");
-    if (container) {
-      setTimeout(() => {
-        container.scrollTop = container.scrollHeight;
-      }, 0);
-    }
-  }
+  let conversationContainer: HTMLElement | null = null;
 
   async function query() {
     try {
@@ -107,7 +97,6 @@
       else {
         botMessage.text += payload.data;
         messages = [...messages.slice(0, -1), botMessage];
-        scrollToBottom();
       }
     });
 
@@ -123,11 +112,6 @@
       lastMessage.reasoning[reasoningIndex].collapsed = !lastMessage.reasoning[reasoningIndex].collapsed;
       messages = [...messages]; // Trigger reactivity
     }
-  }
-
-  function truncateText(text: string): string {
-    if (text.length <= truncateLength) return text;
-    return text.slice(0, truncateLength) + '...';
   }
 
   onDestroy(() => {
