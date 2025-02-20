@@ -16,7 +16,7 @@ export async function verifyToken(token: string) {
         }
 
         const response = await res.json();
-        return response.success === "true";
+        return response.valid;
 
     } catch (error) {
         return false; // Token is invalid
