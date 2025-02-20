@@ -19,7 +19,8 @@ const login = async (email: string, password: string, cookies: Cookies) => {
         httpOnly: true,
         secure: true,
         path: '/',
-        maxAge: 60 * 60 * 24
+        maxAge: 60 * 60 * 24,
+        sameSite: 'lax'
     });
 }
 
