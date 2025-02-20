@@ -15,7 +15,8 @@ export const handle: Handle = async ({ event, resolve }) => {
     }
 
     if (!publicRoutes.includes(event.url.pathname)) {
-        const isValid = jwt && verifyToken(jwt);
+        const isValid = jwt && await verifyToken(jwt);
+        
         if (!isValid) {
             return redirect(302, '/login');
         }

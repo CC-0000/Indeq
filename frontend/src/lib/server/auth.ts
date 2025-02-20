@@ -1,13 +1,24 @@
-import jwt from 'jsonwebtoken';
-import { JWT_SECRET } from '$env/static/private';
+import { GO_BACKEND_URL } from '$env/static/private';
 
-const SECRET_KEY = JWT_SECRET || "";
+export async function verifyToken(token: string) {
+    try {
+        const res = await fetch(`${GO_BACKEND_URL}/api/verify`, {
+            method: 'POST',
+            headers: {
+				'Content-Type': 'application/json',
+				'Authorization': `Bearer ${token}`
+			},
+            body: JSON.stringify({}),
+        });
 
-export function verifyToken(token: string) {
-  try {
-    const decoded = jwt.verify(token, SECRET_KEY);
-    return decoded; // Return the decoded token payload
-  } catch (error) {
-    return null; // Token is invalid
-  }
+        if (!res.ok) {
+            throw new Error('Failed to verify token');
+        }
+
+        const response = await res.json();
+        return response.success === "true";
+
+    } catch (error) {
+        return false; // Token is invalid
+    }
 }
