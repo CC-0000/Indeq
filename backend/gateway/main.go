@@ -14,6 +14,7 @@ import (
 
 	pb "github.com/cc-0000/indeq/common/api"
 	"github.com/cc-0000/indeq/common/config"
+	"github.com/golang/protobuf/jsonpb"
 	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"google.golang.org/grpc"
@@ -286,6 +287,39 @@ func handleLoginGenerator(clients *ServiceClients) http.HandlerFunc {
 	}
 }
 
+func handleVerifyGenerator(clients *ServiceClients) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log.Println("Received verify request")
+
+		valid := false
+		auth_header := r.Header.Get("Authorization")
+		if auth_header != "" {
+			auth_token := strings.TrimPrefix(auth_header, "Bearer ")
+
+			res, err := clients.authClient.Verify(r.Context(), &pb.VerifyRequest{
+				Token: auth_token,
+			})
+
+			if err == nil && res.Valid {
+				valid = true
+			}
+		}
+
+		httpResponse := &pb.HttpVerifyResponse{
+			Valid: valid,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		marshaler := &jsonpb.Marshaler{
+			EmitDefaults: true,
+		}
+		err := marshaler.Marshal(w, httpResponse)
+		if err != nil {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		}
+	}
+}
+
 func main() {
 	// Load .env variables
 	err := config.LoadSharedConfig()
@@ -358,6 +392,7 @@ func main() {
 	mux.HandleFunc("GET /api/query", authMiddleware(handleGetQueryGenerator(serviceClients), serviceClients))
 	mux.HandleFunc("POST /api/register", handleRegisterGenerator(serviceClients))
 	mux.HandleFunc("POST /api/login", handleLoginGenerator(serviceClients))
+	mux.HandleFunc("POST /api/verify", handleVerifyGenerator(serviceClients))
 
 	httpPort := os.Getenv("GATEWAY_ADDRESS")
 	server := &http.Server{
