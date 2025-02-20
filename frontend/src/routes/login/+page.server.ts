@@ -27,7 +27,7 @@ export const actions = {
                 const msg = await res.text();
                 
                 // Return an error to the page to display
-                return fail(res.status, { errorMessage: msg });
+                return fail(res.status, { error: msg });
             }
 
             const response = await res.json();
@@ -43,7 +43,7 @@ export const actions = {
             if (response.error == null || response.error === '') {
                 return { success: true };
             } else {
-                return fail(400, { errorMessage: response.error });
+                return fail(400, { error: response.error });
             }
 
         } catch (error) {
