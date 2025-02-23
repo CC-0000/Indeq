@@ -14,20 +14,21 @@ enum Platform {
     PLATFORM_NOTION = 4;
 }
 
+message Metadata {
+    google.protobuf.Timestamp date_created = 1; // "2017-02-17:0012"
+    google.protobuf.Timestamp date_last_modified = 2; // "2017-02-19:0164"
+    string user_id = 3;         // "af948791-409b-43f3-807a-9dcf6589b056"
+    string file_id = 4;         // "4i23uh5i-2342-g452-g5gg-o9385h6dahl1"
+    uint32 page = 5;            // page 5
+    uint32 row_start = 6;       // line 24 <-- start of the block INCLUSIVE
+    uint32 col_start = 7;       // Col 10 <-- start of the block INCLUSIVE
+    uint32 row_end = 8;         // line 30 <-- end of the block INCLUSIVE
+    uint32 col_end = 9;         // Col 23 <-- end of the block INCLUSIVE
+    string title = 10;          // "My journal"
+    Platform platform = 11;     // google, notion, etc.
+}
+
 message TextChunkMessage {
-    message Metadata {
-        google.protobuf.Timestamp date_created = 1;
-        google.protobuf.Timestamp date_last_modified = 2; 
-        string user_id = 3;         // "af948791-409b-43f3-807a-9dcf6589b056"
-        string file_id = 4;         // "4i23uh5i-2342-g452-g5gg-o9385h6dahl1"
-        uint32 page = 5;            // page 5
-        uint32 row_start = 6;       // line 24 <-- start of the block INCLUSIVE
-        uint32 col_start = 7;       // Col 10 <-- start of the block INCLUSIVE
-        uint32 row_end = 8;         // line 30 <-- end of the block INCLUSIVE
-        uint32 col_end = 9;         // Col 23 <-- end of the block INCLUSIVE
-        string title = 10;          // "My journal"
-        Platform platform = 11;     // google, notion, etc.
-    }
     Metadata metadata = 1;
     string content = 2;
 }

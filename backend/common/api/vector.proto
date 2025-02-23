@@ -8,18 +8,28 @@ package api;
 
 service VectorService {
     rpc DeleteFile(VectorFileDeleteRequest) returns (VectorFileDeleteReponse);
-    // rpc GetTopKVectors() returns ();
+    rpc GetTopKChunks(GetTopKChunksRequest) returns (GetTopKChunksResponse);
     rpc SetupCollection(SetupCollectionRequest) returns (SetupCollectionResponse);
 }
 
 message VectorFileDeleteRequest {
     string user_id = 1;
     Platform platform = 2;
-    string file_path = 3;   // file paths should be unique per platform
+    string file_id = 3;   // file paths should be unique per platform
 }
 
 message VectorFileDeleteReponse {
     bool success = 1;
+    string error = 2;
+}
+
+message GetTopKChunksRequest {
+    string user_id = 1;
+    string prompt = 2;
+}
+
+message GetTopKChunksResponse {
+    repeated TextChunkMessage top_k_vectors = 1;
     string error = 2;
 }
 

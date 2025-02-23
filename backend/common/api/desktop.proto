@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+option go_package = "github.com/cc-0000/indeq/common/api";
+
+package api;
+
+import "api/kafka.proto";
+
+service DesktopService {
+    rpc GetChunksFromUser(GetChunksFromUserRequest) returns (GetChunksFromUserResponse);
+}
+
+message GetChunksFromUserRequest {
+    string user_id = 1;
+    repeated Metadata metadata = 2;
+    optional uint32 ttl = 3;    // milliseconds
+}
+
+message GetChunksFromUserResponse {
+    int64 numChunks = 1;
+    repeated TextChunkMessage chunks = 2;
+    string error = 3;
+}
