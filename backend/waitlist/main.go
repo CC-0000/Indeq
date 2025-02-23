@@ -7,15 +7,58 @@ import (
 	"time"
 	"database/sql"
 	"net"
+	"regexp"
 
 	pb "github.com/cc-0000/indeq/common/api"
 	_ "github.com/lib/pq"
 	"google.golang.org/grpc"
 )
 
-type waitlistServer struct {
+type WaitlistServer struct {
 	pb.UnimplementedWaitlistServiceServer
 	db *sql.DB  // waitlist db
+}
+
+var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
+
+func (s *WaitlistServer) AddToWaitlist(ctx context.Context, req *pb.AddToWaitlistRequest) (*pb.AddToWaitlistResponse, error) {
+	if req.Email == "" || !emailRegex.MatchString(req.Email) {
+		return &pb.AddToWaitlistResponse{
+			Success: false,
+			Message: "Invalid email address",
+		}, nil
+	}
+
+	var existingEmail bool
+	err := s.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM waitlist WHERE email = $1)", req.Email).Scan(&existingEmail)
+	if err != nil {
+		log.Println("Database query error:", err)
+		return &pb.AddToWaitlistResponse{
+			Success: false,
+			Message: "Database error. Please try again later.",
+		}, nil
+	}
+
+	if existingEmail {
+		return &pb.AddToWaitlistResponse{
+			Success: false,
+			Message: "You're already on the waitlist! 😊",
+		}, nil
+	}
+	
+	_, err = s.db.ExecContext(ctx, "INSERT INTO waitlist (email) VALUES ($1)", req.Email)
+	if err != nil {
+		log.Println("Database insert error:", err)
+		return &pb.AddToWaitlistResponse{
+			Success: false,
+			Message: "Could not add to waitlist. Please try again later.",
+		}, nil
+	}
+
+	return &pb.AddToWaitlistResponse{
+		Success: true,
+		Message: "You're on the waitlist! 🎉",
+	}, nil
 }
 
 func main() {
@@ -75,7 +118,7 @@ func main() {
 	log.Println("Creating the waitlist server...")
 
 	grpcServer := grpc.NewServer()
-	pb.RegisterWaitlistServiceServer(grpcServer, &waitlistServer{db: db})
+	pb.RegisterWaitlistServiceServer(grpcServer, &WaitlistServer{db: db})
 
 	log.Printf("Waitlist Service listening on %v\n", listener.Addr())
 	if err := grpcServer.Serve(listener); err != nil {

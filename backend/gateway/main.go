@@ -24,6 +24,7 @@ import (
 type ServiceClients struct {
 	queryClient  pb.QueryServiceClient
 	authClient   pb.AuthenticationServiceClient
+	waitlistClient pb.WaitlistServiceClient
 	rabbitMQConn *amqp.Connection
 }
 
@@ -228,6 +229,35 @@ func handlePostQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 	}
 }
 
+func handleAddToWaitlist(clients *ServiceClients) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var addToWaitlistRequest pb.HttpAddToWaitlistRequest
+		log.Println("Received add to waitlist request")
+		if err := json.NewDecoder(r.Body).Decode(&addToWaitlistRequest); err != nil {
+			log.Printf("Error: %v", err)
+			http.Error(w, "Bad Request", http.StatusBadRequest)
+			return
+		}
+
+		// Call the waitlist service
+		res, err := clients.waitlistClient.AddToWaitlist(r.Context(), &pb.AddToWaitlistRequest{
+			Email: addToWaitlistRequest.Email,
+		})
+
+		if err != nil {
+			http.Error(w, "Failed to add to waitlist", http.StatusInternalServerError)
+			return
+		}
+		
+		httpResponse := &pb.HttpAddToWaitlistResponse{
+			Success: res.Success,
+			Message: res.Message,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(httpResponse)
+	}
+}
+
 func handleRegisterGenerator(clients *ServiceClients) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var registerRequest pb.HttpRegisterRequest
@@ -393,6 +423,7 @@ func main() {
 	mux.HandleFunc("POST /api/register", handleRegisterGenerator(serviceClients))
 	mux.HandleFunc("POST /api/login", handleLoginGenerator(serviceClients))
 	mux.HandleFunc("POST /api/verify", handleVerifyGenerator(serviceClients))
+	mux.HandleFunc("POST /api/waitlist", handleAddToWaitlist(serviceClients))
 
 	httpPort := os.Getenv("GATEWAY_ADDRESS")
 	server := &http.Server{

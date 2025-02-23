@@ -1,5 +1,5 @@
-<script>
-    import { LockIcon, MailIcon } from "svelte-feather-icons";
+<script lang="ts">
+  import { LockIcon, MailIcon } from "svelte-feather-icons";
   import { onMount } from "svelte";
 
   // Blob positions and sizes
