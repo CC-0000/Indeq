@@ -2,6 +2,8 @@
   import { SearchIcon, ChevronDownIcon, CheckIcon } from "svelte-feather-icons";
   import { onDestroy } from 'svelte';
   import { marked } from 'marked';
+  import katex from "katex";
+  import "katex/dist/katex.min.css";
 
   let userQuery = '';
   let conversationId: string | null = null;
@@ -96,6 +98,7 @@
       
       else {
         botMessage.text += payload.data;
+        // botMessage.text = renderContent(botMessage.text);
         messages = [...messages.slice(0, -1), botMessage];
       }
     });
@@ -112,6 +115,57 @@
       lastMessage.reasoning[reasoningIndex].collapsed = !lastMessage.reasoning[reasoningIndex].collapsed;
       messages = [...messages]; // Trigger reactivity
     }
+  }
+
+  function preprocessContent(content: string) {
+
+    content = content.replace(/&amp;#39;/g, "'");
+
+    // Replace (...) with \(...\) for inline LaTeX
+    content = content.replace(/\\\((.*?)(?<!\\)\)/g, (_, latex) => {
+        return `\\(${latex}\\)`;
+    });
+
+    // Replace (...) with \(...\) for inline LaTeX
+    content = content.replace(/\((.*?)\)/g, (_, latex) => {
+        return `\\(${latex}\\)`;
+    });
+
+    // Replace $$...$$ with \[...\] for display equations
+    content = content.replace(/\$\$([\s\S]*?)\$\$/g, (_, latex) => {
+        return `\\[${latex}\\]`;
+    });
+
+    // Replace [...] with \[...\] for display equations
+    content = content.replace(/\[\s*([\s\S]*?)\s*\]/g, (_, latex) => {
+        return `\\[${latex}\\]`;
+    });
+
+    // Ensure \boxed is properly handled
+    content = content.replace(/\\boxed{([\s\S]*?)}/g, (_, latex) => {
+        return `\\[\\boxed{${latex}}\\]`;
+    });
+
+    return content;
+}
+
+
+  function renderContent(msg : string) {
+
+    msg = preprocessContent(msg);
+    const markdownContent = marked(msg) as string;
+
+    // Render display equations (\[...\])
+    let renderedContent = markdownContent.replace(/\\\[([\s\S]*?)\\\]/g, (_, latex) => {
+        return katex.renderToString(latex, { displayMode: true, throwOnError: false });
+    });
+
+    // Render LaTeX within the Markdown content
+    renderedContent = renderedContent.replace(/\\\((.*?)\\\)/g, (_, latex) => {
+        return katex.renderToString(latex, { displayMode: false, throwOnError: false });
+    });
+
+    return renderedContent;
   }
 
   onDestroy(() => {
@@ -227,7 +281,7 @@
                 {#if message.text !== ""}
                   <h3 class="text-sm font-semibold text-gray-600">Answer</h3>
                   <div class="mt-4 prose max-w-3xl mx-auto prose-lg">
-                    {@html marked(message.text)}
+                    {@html marked(renderContent(message.text))}
                   </div>
                 {:else}
                   <div class="animate-pulse mt-4">Thinking...</div>
