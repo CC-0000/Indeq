@@ -28,6 +28,23 @@ type vectorServer struct {
 	milvusClient client.Client
 }
 
+func (s *vectorServer) DeleteFile(ctx context.Context, req *pb.VectorFileDeleteRequest) (*pb.VectorFileDeleteReponse, error) {
+	// UNTESTED
+	collectionName := "user_" + strings.ReplaceAll(req.UserId, "-", "_")
+	filter := fmt.Sprintf("file_id == '%s' && platform == %d", req.FileId, req.Platform)
+	err := s.milvusClient.Delete(ctx, collectionName, "", filter)
+	if err != nil {
+		return &pb.VectorFileDeleteReponse{Success: false, Error: err.Error()}, fmt.Errorf("failed to delete data: %v", err.Error())
+	}
+
+	return nil, fmt.Errorf("")
+}
+
+func (s *vectorServer) GetTopKChunks(ctx context.Context, req *pb.GetTopKChunksRequest) (*pb.GetTopKChunksResponse, error) {
+	// TODO
+	return nil, fmt.Errorf("")
+}
+
 func (s *vectorServer) SetupCollection(ctx context.Context, req *pb.SetupCollectionRequest) (*pb.SetupCollectionResponse, error) {
 	collectionName := "user_" + strings.ReplaceAll(req.UserId, "-", "_")
 	dimension, err := strconv.Atoi(os.Getenv("VECTOR_DIMENSION"))
@@ -70,15 +87,15 @@ func (s *vectorServer) SetupCollection(ctx context.Context, req *pb.SetupCollect
 	}
 
 	// Create a vector index
-	index, err := entity.NewIndexAUTOINDEX(entity.COSINE)
+	index, err := entity.NewIndexHNSW(entity.IP, 32, 256) // {2-100, 100-500}
 	if err != nil {
 		log.Print(err)
 		return &pb.SetupCollectionResponse{Success: false, Error: err.Error()}, fmt.Errorf("failed to create index: %v", err)
 	}
-	err = s.milvusClient.CreateIndex(context.Background(), collectionName, "vector", index, false, client.WithIndexName("vector_index"))
+	err = s.milvusClient.CreateIndex(ctx, collectionName, "vector", index, false, client.WithIndexName("vector_index"))
 	if err != nil {
 		log.Print(err)
-		return &pb.SetupCollectionResponse{Success: false, Error: err.Error()}, fmt.Errorf("failed to set up index: %v", err)
+		return &pb.SetupCollectionResponse{Success: false, Error: err.Error()}, fmt.Errorf("failed to set up index in database: %v", err)
 	}
 
 	return &pb.SetupCollectionResponse{Success: true}, nil
@@ -182,7 +199,7 @@ func main() {
 
 	grpcAddress := os.Getenv("VECTOR_PORT")
 
-	tlsConfig, err := config.LoadTLSFromEnv("VECTOR_CRT", "VECTOR_KEY")
+	tlsConfig, err := config.LoadServerTLSFromEnv("VECTOR_CRT", "VECTOR_KEY")
 	if err != nil {
 		log.Fatal("Error loading TLS config for vector service")
 	}
