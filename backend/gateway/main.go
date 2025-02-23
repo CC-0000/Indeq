@@ -16,9 +16,7 @@ import (
 	"github.com/cc-0000/indeq/common/config"
 	"github.com/golang/protobuf/jsonpb"
 	"github.com/google/uuid"
-	"github.com/lxzan/gws"
 	amqp "github.com/rabbitmq/amqp091-go"
-	"github.com/segmentio/kafka-go"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
@@ -27,10 +25,10 @@ type ServiceClients struct {
 	queryClient  pb.QueryServiceClient
 	authClient   pb.AuthenticationServiceClient
 	rabbitMQConn *amqp.Connection
-	kafkaWriter  *kafka.Writer
 }
 
 func helloHandler(w http.ResponseWriter, r *http.Request) {
+	log.Print("hello request received")
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(&pb.HttpHelloResponse{Message: "Hello, World!"})
 }
@@ -298,7 +296,7 @@ func main() {
 	}
 
 	// Load TLS Config
-	tlsConfig, err := config.LoadTLSFromEnv("GATEWAY_CRT", "GATEWAY_KEY")
+	tlsConfig, err := config.LoadServerTLSFromEnv("GATEWAY_CRT", "GATEWAY_KEY")
 	if err != nil {
 		log.Fatal("Error loading TLS config for gateway service")
 	}
@@ -309,19 +307,6 @@ func main() {
 		log.Fatal(err)
 	}
 	defer rabbitMQConn.Close()
-
-	// Connect to Apache Kafka
-	broker, ok := os.LookupEnv("KAFKA_BROKER_ADDRESS")
-	if !ok {
-		log.Fatal("failed to retrieve kafka broker address")
-	}
-
-	kafkaWriter := &kafka.Writer{
-		Addr:     kafka.TCP(broker),
-		Topic:    "text-chunks",
-		Balancer: &kafka.LeastBytes{}, // routes to the least congested partition
-	}
-	defer kafkaWriter.Close()
 
 	// Connect to the query service
 	queryConn, err := grpc.NewClient(
@@ -349,12 +334,10 @@ func main() {
 	defer authConn.Close()
 	authServiceClient := pb.NewAuthenticationServiceClient(authConn)
 
-	// Save the service clients for future use
 	serviceClients := &ServiceClients{
 		queryClient:  queryServiceClient,
 		authClient:   authServiceClient,
 		rabbitMQConn: rabbitMQConn,
-		kafkaWriter:  kafkaWriter,
 	}
 	log.Print("Server has established connection with other services")
 
