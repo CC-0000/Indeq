@@ -57,6 +57,17 @@ services:
     networks:
       - indeq-net
 
+  mqtt:
+    image: mqtt-service
+    container_name: mqtt-service
+    ports:
+      - "8883:8883"
+    build:
+      context: .
+      dockerfile: mqtt/Dockerfile
+    networks:
+      - indeq-net
+
   authentication:
     image: authentication-service
     build:
@@ -100,6 +111,21 @@ services:
     networks:
       - indeq-net
 
+  desktop:
+    image: desktop-service
+    build:
+      context: .
+      dockerfile: desktop/Dockerfile
+    ports:
+      - "8081:8080"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      mqtt:
+        condition: service_started
+    networks:
+      - indeq-net
+
   query:
     image: query-service
     build:
@@ -137,3 +163,5 @@ volumes:
 networks:
   indeq-net:
     driver: bridge
+    labels:
+      com.docker.network.dns.name: docker.internal
