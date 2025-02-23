@@ -35,6 +35,7 @@ type TokenResponse struct {
 
 // OAuthProviderConfig represents the token exchange and refresh
 type OAuthProviderConfig struct {
+	AuthURL string
 	TokenURL string
 	ClientID string
 	ClientSecret string

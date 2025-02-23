@@ -6,6 +6,7 @@ package api;
 
 service IntegrationService {
     rpc GetIntegrations(GetIntegrationsRequest) returns (GetIntegrationsResponse);
+    rpc GetOAuthURL(GetOAuthURLRequest) returns (GetOAuthURLResponse);
     rpc ConnectIntegration(ConnectIntegrationRequest) returns (ConnectIntegrationResponse);
     rpc DisconnectIntegration(DisconnectIntegrationRequest) returns (DisconnectIntegrationResponse);
 }
@@ -25,12 +26,12 @@ message GetIntegrationsResponse {
     repeated Provider providers = 1;
 }
 
-message OAuthURLRequest {
+message GetOAuthURLRequest {
     Provider provider = 1;
     string state = 2;
 }
 
-message OAuthURLResponse {
+message GetOAuthURLResponse {
     string url = 1;
 }
 

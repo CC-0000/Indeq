@@ -489,7 +489,6 @@ func main() {
 	mux.HandleFunc("POST /api/connect", authMiddleware(handleConnectIntegrationGenerator(serviceClients), serviceClients))
 	mux.HandleFunc("POST /api/disconnect", authMiddleware(handleDisconnectIntegrationGenerator(serviceClients), serviceClients))
 	mux.HandleFunc("GET /api/integrations", authMiddleware(handleGetIntegrationsGenerator(serviceClients), serviceClients))
-
 	httpPort := os.Getenv("GATEWAY_ADDRESS")
 	server := &http.Server{
 		Addr:    httpPort,
