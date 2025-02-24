@@ -44,21 +44,17 @@ jobs:
     - name: Tag and Push images to ECR
       run: |
 
-        docker build -t authentication:$IMAGE_TAG -f backend/Dockerfile .
+        docker build -t authentication:$IMAGE_TAG -f backend/authentication/Dockerfile .
         docker tag authentication:$IMAGE_TAG ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/authentication:$IMAGE_TAG
         docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/authentication:$IMAGE_TAG
 
-        docker build -t query:$IMAGE_TAG -f backend/Dockerfile .
+        docker build -t query:$IMAGE_TAG -f backend/query/Dockerfile .
         docker tag query:$IMAGE_TAG ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/query:$IMAGE_TAG
         docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/query:$IMAGE_TAG
 
-        docker build -t gateway:$IMAGE_TAG -f backend/Dockerfile .
+        docker build -t gateway:$IMAGE_TAG -f backend/gateway/Dockerfile .
         docker tag gateway:$IMAGE_TAG ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/gateway:$IMAGE_TAG
         docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/gateway:$IMAGE_TAG
-        
-        docker build -t rabbitmq:$IMAGE_TAG -f backend/Dockerfile .
-        docker tag rabbitmq:$IMAGE_TAG ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/rabbitmq:$IMAGE_TAG
-        docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/rabbitmq:$IMAGE_TAG
         
     - name: Create config.yaml with GitHub secrets
       run: |
