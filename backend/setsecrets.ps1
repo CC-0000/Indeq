@@ -1,9 +1,5 @@
 # Load the YAML file and extract the data section
-$data = yq eval '.data | to_entries' .\backend-config.yaml
-
-# Output the raw data for debugging
-Write-Host "Raw data extracted from YAML:"
-Write-Host $data
+$data = yq eval '.' .\backend-config.yaml
 
 # Check if any secrets were found
 if ($data.Count -eq 0) {
@@ -18,7 +14,7 @@ foreach ($secret in $data) {
 
     # Trim the string and extract key and value
     $trimmedSecret = $rawSecret.Trim()
-    $keyValue = $trimmedSecret -replace '^- key: ', '' -split ': '
+    $keyValue = $trimmedSecret -split ': '
 
     # Check if the keyValue array has the expected number of elements
     if ($keyValue.Count -lt 2) {
@@ -39,12 +35,7 @@ foreach ($secret in $data) {
         continue
     }
 
-    # Output the secret being set
-    Write-Host "Setting secret: $name"
-
     # Set the secret in GitHub
     gh secret set $name --body $value
 
-    # Confirm the secret was set
-    Write-Host "Secret $name has been set."
 }
