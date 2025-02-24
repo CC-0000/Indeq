@@ -4,6 +4,7 @@
     import { marked } from 'marked';
     import katex from "katex";
     import "katex/dist/katex.min.css";
+    import { processReasoningMessage, processOutputMessage, toggleReasoning } from '$lib/utils/chat';
 
     let userQuery = '';
     let conversationId: string | null = null;
@@ -46,9 +47,10 @@
 
     function streamResponse() {
         if (!conversationId) {
-        console.error('No conversationId to stream');
-        return;
+            console.error('No conversationId to stream');
+            return;
         }
+
         // Close any existing connection
         eventSource?.close();
 
@@ -57,69 +59,40 @@
 
         const url = `/chat?conversationId=${encodeURIComponent(conversationId)}`;
         eventSource = new EventSource(url);
-        let botMessage = { text: "", sender: "bot", reasoning: [] as {text: string; collapsed: boolean}[] };
+        let botMessage = { 
+            text: "", 
+            sender: "bot", 
+            reasoning: [] as {text: string; collapsed: boolean}[] 
+        };
 
         eventSource.addEventListener('message', (evt) => {
-        const payload = JSON.parse(evt.data);
-
-        // parse reasoning section
-        if (isReasoning) {
-
-            // reasoning paragraph break
-            if (/\n\n/.test(payload.data) && botMessage.reasoning.length > 0) {
-            botMessage.reasoning[botMessage.reasoning.length - 1].collapsed = true;
-            botMessage.reasoning.push({text: '', collapsed: false});
-            return;
-            }
-
-            // <think> tag or reasoning paragraph break
-            if (/\u003cthink\u003e/.test(payload.data) || /\n\n/.test(payload.data)) {
-            return;
-            }
-
-            // </think> tag
-            if (/\u003c\/think\u003e/.test(payload.data)) {
-            isReasoning = false;
-            return;
-            }
+            const payload = JSON.parse(evt.data);
             
-            if (botMessage.reasoning.length > 0) { 
-            botMessage.reasoning[botMessage.reasoning.length - 1].text += payload.data;
-            } else {
-            botMessage.reasoning.push({text: payload.data, collapsed: false});
-            }
+            // state object to pass to the processing functions
+            const state = {
+                messages,
+                isReasoning
+            };
 
-            if (messages[messages.length - 1].sender === "bot") {
-            messages[messages.length - 1].reasoning = botMessage.reasoning;
+            if (isReasoning) {
+                processReasoningMessage(payload.data, botMessage, state);
+                messages = state.messages;
+                isReasoning = state.isReasoning;
             } else {
-            messages = [...messages, botMessage];
+                processOutputMessage(payload.data, botMessage, state);
+                messages = state.messages;
             }
-        }
-        
-        else {
-            botMessage.text += payload.data;
-            // botMessage.text = renderContent(botMessage.text);
-            messages = [...messages.slice(0, -1), botMessage];
-        }
         });
 
         eventSource.addEventListener('error', (err) => {
-        console.error('SSE error:', err);
-        eventSource?.close();
+            console.error('SSE error:', err);
+            eventSource?.close();
         });
-    }
-
-    function toggleReasoning(messageIndex: number, reasoningIndex: number) {
-        const lastMessage = messages[messageIndex];
-        if (lastMessage.sender === "bot") {
-        lastMessage.reasoning[reasoningIndex].collapsed = !lastMessage.reasoning[reasoningIndex].collapsed;
-        messages = [...messages]; // Trigger reactivity
-        }
     }
 
     // Function to render LaTeX blocks
     function renderLatex(content: string) {
-        // Create a temporary div to hold the content
+        
         const tempDiv = document.createElement('div');
         tempDiv.innerHTML = content;
 
@@ -263,7 +236,11 @@
                               <button 
                                 class="text-gray-600 shrink-0 cursor-pointer transition-transform duration-200 mt-2"
                                 class:rotate-180={!thought.collapsed}
-                                on:click={() => toggleReasoning(messageIndex, reasoningIndex)}
+                                on:click={() => {
+                                    const state = { messages, isReasoning };
+                                    toggleReasoning(messageIndex, reasoningIndex, state);
+                                    messages = state.messages;
+                                }}
                               >
                                 <ChevronDownIcon size="16" />
                               </button>
