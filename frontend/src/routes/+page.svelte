@@ -2,10 +2,11 @@
   import { LockIcon, MailIcon } from "svelte-feather-icons";
   import { onMount } from "svelte";
   import { PUBLIC_GO_BACKEND_URL } from "$env/static/public";
+  import { toast } from "svelte-sonner";
+  import { Toaster } from "svelte-sonner";
   
   let email = "";
   let submitStatus: 'idle' | 'loading' | 'success' | 'error' = 'idle';
-  let errorMessage = '';
 
   async function handleSubmit(event: SubmitEvent) {
     event.preventDefault();
@@ -27,15 +28,15 @@
       }
 
       submitStatus = 'success';
-      errorMessage = result.message;
       email = '';
+      toast.success(result.message || "Successfully added to the waitlist! 🎉");
     } catch (error) {
       submitStatus = 'error';
+      let errorMessage = "Failed to submit email. Please try again";
       if (error instanceof Error) {
         errorMessage = error.message;
-      } else {
-        errorMessage = 'Failed to submit email. Please try again';
       }
+      toast.error(errorMessage);
     }
   }
 
@@ -75,6 +76,7 @@
     <p class="text-gray-600 text-lg">Next generation private data search</p>
 
     <!-- Email Signup Form -->
+    <Toaster />
     <form class="flex items-center gap-3 mt-8" on:submit={handleSubmit}>
       <div class="relative flex-1">
         <MailIcon size="20" class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
@@ -90,20 +92,9 @@
         class="p-2 rounded-lg bg-primary text-white hover:bg-blue-600 transition-colors"
         disabled={submitStatus === 'loading'}
       >
-        {#if submitStatus === 'loading'}
-          Loading...
-        {:else}
-          Notify Me
-        {/if}
+        Notify Me
       </button>
     </form>
-
-    {#if submitStatus === 'success'}
-      <p class="mt-2 text-green-600">{errorMessage}</p>
-    {/if}
-    {#if submitStatus === 'error'}
-      <p class="mt-2 text-red-600">{errorMessage}</p>
-    {/if}
 
     <!-- Coming Soon Message -->
     <div class="flex items-center justify-center gap-3 mt-4">

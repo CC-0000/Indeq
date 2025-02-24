@@ -7,7 +7,7 @@ import (
 	"time"
 	"database/sql"
 	"net"
-	"regexp"
+	"net/mail"
 
 	pb "github.com/cc-0000/indeq/common/api"
 	_ "github.com/lib/pq"
@@ -21,10 +21,9 @@ type WaitlistServer struct {
 	db *sql.DB  // waitlist db
 }
 
-var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
-
 func (s *WaitlistServer) AddToWaitlist(ctx context.Context, req *pb.AddToWaitlistRequest) (*pb.AddToWaitlistResponse, error) {
-	if req.Email == "" || !emailRegex.MatchString(req.Email) {
+	_, err := mail.ParseAddress(req.Email)
+	if err != nil {
 		return &pb.AddToWaitlistResponse{
 			Success: false,
 			Message: "Invalid email address",
@@ -32,7 +31,7 @@ func (s *WaitlistServer) AddToWaitlist(ctx context.Context, req *pb.AddToWaitlis
 	}
 
 	var existingEmail bool
-	err := s.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM waitlist WHERE email = $1)", req.Email).Scan(&existingEmail)
+	err = s.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM waitlist WHERE email = $1)", req.Email).Scan(&existingEmail)
 	if err != nil {
 		log.Println("Database query error:", err)
 		return &pb.AddToWaitlistResponse{
@@ -47,7 +46,7 @@ func (s *WaitlistServer) AddToWaitlist(ctx context.Context, req *pb.AddToWaitlis
 			Message: "You're already on the waitlist! 😊",
 		}, nil
 	}
-	
+
 	_, err = s.db.ExecContext(ctx, "INSERT INTO waitlist (email) VALUES ($1)", req.Email)
 	if err != nil {
 		log.Println("Database insert error:", err)
