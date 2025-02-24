@@ -34,8 +34,8 @@ jobs:
         aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com
 
     - name: Build images with Docker Compose
-        run: |
-          docker-compose build
+      run: |
+        docker-compose build
 
     - name: Tag and Push images to ECR
       run: |
@@ -99,6 +99,5 @@ jobs:
 
     - name: Deploy to EKS
       run: |
-        kubectl apply -f k8s-manifests.yml
+        kubectl apply -f backend/k8s-manifest.yml
         kubectl apply -f configmap.yaml
-        kubectl rollout status deployment/my-app-deployment
