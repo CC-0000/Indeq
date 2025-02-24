@@ -3,14 +3,13 @@ name: Deploy to Amazon EKS
 on:
   push:
     branches:
-      - cicd  # Trigger deployment on the main branch
+      - cicd  # Trigger deployment on the cicd branch
 
 env:
   AWS_REGION: us-east-1
-  EKS_CLUSTER_NAME: my-eks-cluster
-  ECR_REPOSITORY: my-app-repo
+  EKS_CLUSTER_NAME: backend-cluster
+  ECR_REPOSITORY: indeq/backend
   IMAGE_TAG: latest
-  SECRET_NAME: my-app-config
 
 jobs:
   deploy:
@@ -38,24 +37,48 @@ jobs:
         docker tag $ECR_REPOSITORY:$IMAGE_TAG <your-account-id>.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG
         docker push <your-account-id>.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG
 
-    # - name: Fetch Secrets from AWS Secrets Manager
-    #   run: |
-    #     SECRET_JSON=$(aws secretsmanager get-secret-value --secret-id $SECRET_NAME --query SecretString --output text)
-    #     echo "$SECRET_JSON" > secret.json
-
-    # - name: Create ConfigMap from AWS Secrets
-    #   run: |
-    #     APP_ENV=$(jq -r '.APP_ENV' secret.json)
-    #     LOG_LEVEL=$(jq -r '.LOG_LEVEL' secret.json)
-
-    #     echo "apiVersion: v1
-    #     kind: ConfigMap
-    #     metadata:
-    #       name: my-app-config
-    #     data:
-    #       APP_ENV: \"$APP_ENV\"
-    #       LOG_LEVEL: \"$LOG_LEVEL\"
-    #     " > k8s-manifests/configmap.yaml
+    - name: Create config.yaml with GitHub secrets
+      run: |
+        echo "apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: backend-config
+        data:
+          AUTH_PORT: \"\${{ secrets.AUTH_PORT }}\"
+          AUTH_ADDRESS: \"\${{ secrets.AUTH_ADDRESS }}\"
+          QUERY_PORT: \"\${{ secrets.QUERY_PORT }}\"
+          QUERY_ADDRESS: \"\${{ secrets.QUERY_ADDRESS }}\"
+          VECTOR_PORT: \"\${{ secrets.VECTOR_PORT }}\"
+          VECTOR_ADDRESS: \"\${{ secrets.VECTOR_ADDRESS }}\"
+          GATEWAY_ADDRESS: \"\${{ secrets.GATEWAY_ADDRESS }}\"
+          DATABASE_URL: \"\${{ secrets.DATABASE_URL }}\"
+          POSTGRES_USER: \"\${{ secrets.POSTGRES_USER }}\"
+          POSTGRES_PASSWORD: \"\${{ secrets.POSTGRES_PASSWORD }}\"
+          POSTGRES_DB: \"\${{ secrets.POSTGRES_DB }}\"
+          JWT_SECRET: \"\${{ secrets.JWT_SECRET }}\"
+          ARGON2_MEMORY: \"\${{ secrets.ARGON2_MEMORY }}\"
+          ARGON2_ITERATIONS: \"\${{ secrets.ARGON2_ITERATIONS }}\"
+          ARGON2_PARALLELISM: \"\${{ secrets.ARGON2_PARALLELISM }}\"
+          ARGON2_SALT_LENGTH: \"\${{ secrets.ARGON2_SALT_LENGTH }}\"
+          ARGON2_KEY_LENGTH: \"\${{ secrets.ARGON2_KEY_LENGTH }}\"
+          MIN_PASSWORD_LENGTH: \"\${{ secrets.MIN_PASSWORD_LENGTH }}\"
+          MAX_PASSWORD_LENGTH: \"\${{ secrets.MAX_PASSWORD_LENGTH }}\"
+          MAX_EMAIL_LENGTH: \"\${{ secrets.MAX_EMAIL_LENGTH }}\"
+          RABBITMQ_URL: \"\${{ secrets.RABBITMQ_URL }}\"
+          RABBITMQ_DEFAULT_USER: \"\${{ secrets.RABBITMQ_DEFAULT_USER }}\"
+          RABBITMQ_DEFAULT_PASS: \"\${{ secrets.RABBITMQ_DEFAULT_PASS }}\"
+          RABBITMQ_LOGS: \"\${{ secrets.RABBITMQ_LOGS }}\"
+          OLLAMA_URL: \"\${{ secrets.OLLAMA_URL }}\"
+          LLM_MODEL: \"\${{ secrets.LLM_MODEL }}\"
+          ZILLIZ_ADDRESS: \"\${{ secrets.ZILLIZ_ADDRESS }}\"
+          ZILLIZ_API_KEY: \"\${{ secrets.ZILLIZ_API_KEY }}\"
+          CA_CRT: \"\${{ secrets.CA_CRT }}\"
+          QUERY_CRT: \"\${{ secrets.QUERY_CRT }}\"
+          QUERY_KEY: \"\${{ secrets.QUERY_KEY }}\"
+          AUTH_CRT: \"\${{ secrets.AUTH_CRT }}\"
+          AUTH_KEY: \"\${{ secrets.AUTH_KEY }}\"
+          ALLOWED_CLIENT_IP: \"\${{ secrets.ALLOWED_CLIENT_IP }}\"
+        " > configmap.yaml
 
     - name: Configure kubectl
       run: |
@@ -63,5 +86,6 @@ jobs:
 
     - name: Deploy to EKS
       run: |
-        kubectl apply -f k8s-manifests/
+        kubectl apply -f k8s-manifests.yml
+        kubectl apply -f configmap.yaml
         kubectl rollout status deployment/my-app-deployment
