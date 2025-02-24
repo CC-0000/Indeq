@@ -9,6 +9,7 @@ interface ChatState {
     isReasoning: boolean;
 }
 
+// Function to process reasoning messages and update message state
 export function processReasoningMessage(data: string, botMessage: BotMessage, state: ChatState) {
     // Handle reasoning paragraph break
     if (/\n\n/.test(data) && botMessage.reasoning.length > 0) {
@@ -43,11 +44,13 @@ export function processReasoningMessage(data: string, botMessage: BotMessage, st
     }
 }
 
+// Function to process output message and update message state
 export function processOutputMessage(data: string, botMessage: BotMessage, state: ChatState) {
     botMessage.text += data;
     state.messages = [...state.messages.slice(0, -1), botMessage];
 }
 
+// Function to toggle reasoning visibility
 export function toggleReasoning(messageIndex: number, reasoningIndex: number, state: ChatState) {
     const lastMessage = state.messages[messageIndex];
     if (lastMessage.sender === "bot") {
