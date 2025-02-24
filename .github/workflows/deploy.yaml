@@ -48,8 +48,9 @@ jobs:
     - name: Tag and Push images to ECR
       run: |
         cd backend
+        ls -la
         # Loop through each service defined in the docker-compose.yml
-        for service in $(docker-compose config --services); do
+        for service in $(docker-compose.yaml config --services); do
           if [[ "$service" != "passwordDB" && "$service" != "ollama" ]]; then # ollama and db is not pushed to ECR
               # Tag the image
               docker tag $service:$IMAGE_TAG ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/$service:$IMAGE_TAG
