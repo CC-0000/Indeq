@@ -1,6 +1,28 @@
-import { fail, redirect } from '@sveltejs/kit';
+import { fail, type Cookies } from '@sveltejs/kit';
 import type { Actions } from './$types';
 import { GO_BACKEND_URL } from '$env/static/private';
+
+const login = async (email: string, password: string, cookies: Cookies) => {
+    const loginRes = await fetch(`${GO_BACKEND_URL}/api/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ "email": email, "password": password }),
+    });
+
+    if (!loginRes.ok) {
+        const msg = await loginRes.text();
+        return fail(loginRes.status, { error: msg });
+    }
+
+    const response = await loginRes.json();
+    cookies.set('jwt', response.token, {
+        httpOnly: true,
+        secure: true,
+        path: '/',
+        maxAge: 60 * 60 * 24,
+        sameSite: 'strict'
+    });
+}
 
 export const actions = {
     default: async ({ request, cookies }) => {
@@ -18,7 +40,7 @@ export const actions = {
             });
         }
         
-        const res = await fetch(`${GO_BACKEND_URL}/api/register`, {
+        const registerRes = await fetch(`${GO_BACKEND_URL}/api/register`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -26,19 +48,20 @@ export const actions = {
             body: JSON.stringify({ "email": email, "name": name, "password": password }),
         });
 
-        if (!res.ok) {
-            const msg = await res.text();
+        if (!registerRes.ok) {
+            const msg = await registerRes.text();
 
             // Return an error to the page to display
-            return fail(res.status, { errorMessage: msg });
+            return fail(registerRes.status, { error: msg });
         }
 
-        const response = await res.json();
+        const response = await registerRes.json();
 
         if (response.success) {
+            await login(email.toString(), password.toString(), cookies);
             return { success: true };
         } else {
-            return fail(400, { errorMessage: response.error });
+            return fail(400, { error: response.error });
         }
         
     }

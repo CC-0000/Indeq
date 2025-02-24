@@ -10,8 +10,8 @@
 
     // Check for success or error in the server response
     $: if (form?.success) {
-        toast.success('Registration successful!');
-        goto('/login');
+        toast.success('Welcome aboard! 🎉');
+        goto('/chat');
     }
 
     $: if (form?.error) {

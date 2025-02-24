@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -11,26 +14,49 @@ import (
 
 	pb "github.com/cc-0000/indeq/common/api"
 	"github.com/cc-0000/indeq/common/config"
+	"github.com/golang/protobuf/jsonpb"
 	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/credentials"
 )
 
 type ServiceClients struct {
-	queryClient pb.QueryServiceClient
-	authClient pb.AuthenticationServiceClient
+	queryClient  pb.QueryServiceClient
+	authClient   pb.AuthenticationServiceClient
 	rabbitMQConn *amqp.Connection
+}
+
+func corsMiddleware(next http.Handler) http.Handler {
+	// establishes site-wide CORS policies
+	allowedIp, ok := os.LookupEnv("ALLOWED_CLIENT_IP")
+	if !ok {
+		log.Fatal("Failed to retrieve ALLOWED_CLIENT_IP")
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", allowedIp)
+
+		// Handle preflight requests
+		if r.Method == "OPTIONS" {
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			w.Header().Set("Access-Control-Max-Age", "3600") // tell the browser to cache the pre-flight request for 3600 seconds aka an hour
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 func authMiddleware(next http.HandlerFunc, clients *ServiceClients) http.HandlerFunc {
 	// simply modifies a handler func to pass these checks first
 	return func(w http.ResponseWriter, r *http.Request) {
 		auth_header := r.Header.Get("Authorization")
-        if auth_header == "" {
-            http.Error(w, "No authorization token provided", http.StatusUnauthorized)
-            return
-        }
+		if auth_header == "" {
+			http.Error(w, "No authorization token provided", http.StatusUnauthorized)
+			return
+		}
 		auth_token := strings.TrimPrefix(auth_header, "Bearer ")
 
 		res, err := clients.authClient.Verify(r.Context(), &pb.VerifyRequest{
@@ -48,7 +74,7 @@ func authMiddleware(next http.HandlerFunc, clients *ServiceClients) http.Handler
 
 func helloHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(HelloResponse{Message: "Hello, World!"})
+	json.NewEncoder(w).Encode(&pb.HttpHelloResponse{Message: "Hello, World!"})
 }
 
 func handleGetQueryGenerator(clients *ServiceClients) http.HandlerFunc {
@@ -69,9 +95,9 @@ func handleGetQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 
 		// Get the query parameters
 		queryParams := r.URL.Query()
-		incomingId := queryParams.Get("conversationId") 
+		incomingId := queryParams.Get("conversationId")
 		conversationId := fmt.Sprintf("%s-%s", verifyRes.UserId, incomingId)
-		
+
 		// Handle SSE connection
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
@@ -92,19 +118,19 @@ func handleGetQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 		defer channel.Close()
 
 		queue, err := channel.QueueDeclare(
-            conversationId, // name
-            false,           // durable
-            true,           // delete when unused
-            false,           // exclusive
-            false,           // no-wait
-			amqp.Table{ 		// arguments
+			conversationId, // name
+			false,          // durable
+			true,           // delete when unused
+			false,          // exclusive
+			false,          // no-wait
+			amqp.Table{ // arguments
 				"x-expires": 300000, // 5 minutes in milliseconds
 			},
 		)
 		if err != nil {
-            http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-            return
-        }
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
 
 		msgs, err := channel.Consume(
 			queue.Name,
@@ -123,30 +149,30 @@ func handleGetQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 		log.Print("Starting to read...")
 		for {
 			select {
-				case <-ctx.Done():
-					log.Print("Closing connection from gateway...")
+			case <-ctx.Done():
+				log.Print("Closing connection from gateway...")
+				return
+			case msg, ok := <-msgs: // there is a message in the channel
+				if !ok {
 					return
-				case msg, ok := <-msgs: // there is a message in the channel
-					if !ok {
-						return
-					}
-					// parse the message into json
-					thisMsg := string(msg.Body)
-					jsonData, _ := json.Marshal(struct {
-						Type string `json:"type"`
-						Data string `json:"data"`
-					}{
-						Type: "message",
-						Data: thisMsg,
-					})
-					// write it out to the response
-					fmt.Fprintf(w, "data: %s\n\n", jsonData)
-					flusher.Flush()
-	
-					// if the message is blank there are no more messages
-					if thisMsg == "" {
-						return
-					}
+				}
+				// parse the message into json
+				thisMsg := string(msg.Body)
+				jsonData, _ := json.Marshal(struct {
+					Type string `json:"type"`
+					Data string `json:"data"`
+				}{
+					Type: "message",
+					Data: thisMsg,
+				})
+				// write it out to the response
+				fmt.Fprintf(w, "data: %s\n\n", jsonData)
+				flusher.Flush()
+
+				// if the message is blank there are no more messages
+				if thisMsg == "" {
+					return
+				}
 			}
 		}
 	}
@@ -171,7 +197,7 @@ func handlePostQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 		conversationId := fmt.Sprintf("%s-%s", verifyRes.UserId, newId.String())
 
 		// Grab the query
-		var queryRequest QueryRequest
+		var queryRequest pb.HttpQueryRequest
 		if err := json.NewDecoder(r.Body).Decode(&queryRequest); err != nil {
 			http.Error(w, "Invalid Formatting", http.StatusBadRequest)
 			return
@@ -187,14 +213,14 @@ func handlePostQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 			defer cancel()
 			_, err := clients.queryClient.MakeQuery(detachedCtx, &pb.QueryRequest{
 				ConversationId: conversationId,
-				Query:  queryRequest.Query,
+				Query:          queryRequest.Query,
 			})
 			if err != nil {
 				log.Printf("Error making query: %v", err)
 			}
 		}()
 
-		httpResponse := &QueryResponse{
+		httpResponse := &pb.HttpQueryResponse{
 			ConversationId: newId.String(),
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -204,7 +230,7 @@ func handlePostQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 
 func handleRegisterGenerator(clients *ServiceClients) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var registerRequest RegisterRequest
+		var registerRequest pb.HttpRegisterRequest
 		log.Println("Received register request")
 		if err := json.NewDecoder(r.Body).Decode(&registerRequest); err != nil {
 			log.Printf("Error: %v", err)
@@ -214,8 +240,8 @@ func handleRegisterGenerator(clients *ServiceClients) http.HandlerFunc {
 
 		// Call the register service
 		res, err := clients.authClient.Register(r.Context(), &pb.RegisterRequest{
-			Email: registerRequest.Email,
-			Name: registerRequest.Name,
+			Email:    registerRequest.Email,
+			Name:     registerRequest.Name,
 			Password: registerRequest.Password,
 		})
 
@@ -224,9 +250,9 @@ func handleRegisterGenerator(clients *ServiceClients) http.HandlerFunc {
 			return
 		}
 
-		httpResponse := &RegisterResponse{
+		httpResponse := &pb.HttpRegisterResponse{
 			Success: res.GetSuccess(),
-			Error: res.GetError(),
+			Error:   res.GetError(),
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(httpResponse)
@@ -235,7 +261,7 @@ func handleRegisterGenerator(clients *ServiceClients) http.HandlerFunc {
 
 func handleLoginGenerator(clients *ServiceClients) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var loginRequest LoginRequest
+		var loginRequest pb.HttpLoginRequest
 		log.Println("Received login request")
 		if err := json.NewDecoder(r.Body).Decode(&loginRequest); err != nil {
 			http.Error(w, "Bad Request", http.StatusBadRequest)
@@ -243,7 +269,7 @@ func handleLoginGenerator(clients *ServiceClients) http.HandlerFunc {
 
 		// Call the login service
 		res, err := clients.authClient.Login(r.Context(), &pb.LoginRequest{
-			Email: loginRequest.Email,
+			Email:    loginRequest.Email,
 			Password: loginRequest.Password,
 		})
 
@@ -252,12 +278,45 @@ func handleLoginGenerator(clients *ServiceClients) http.HandlerFunc {
 			return
 		}
 
-		httpResponse := &LoginResponse{
+		httpResponse := &pb.HttpLoginResponse{
 			Token: res.Token,
 			Error: res.Error,
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(httpResponse)
+	}
+}
+
+func handleVerifyGenerator(clients *ServiceClients) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log.Println("Received verify request")
+
+		valid := false
+		auth_header := r.Header.Get("Authorization")
+		if auth_header != "" {
+			auth_token := strings.TrimPrefix(auth_header, "Bearer ")
+
+			res, err := clients.authClient.Verify(r.Context(), &pb.VerifyRequest{
+				Token: auth_token,
+			})
+
+			if err == nil && res.Valid {
+				valid = true
+			}
+		}
+
+		httpResponse := &pb.HttpVerifyResponse{
+			Valid: valid,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		marshaler := &jsonpb.Marshaler{
+			EmitDefaults: true,
+		}
+		err := marshaler.Marshal(w, httpResponse)
+		if err != nil {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		}
 	}
 }
 
@@ -268,6 +327,24 @@ func main() {
 		log.Fatalf("Error loading .env file: %v", err)
 	}
 
+	// Load CA certificate from .env
+	caCertB64 := os.Getenv("CA_CRT")
+	caCert, err := base64.StdEncoding.DecodeString(caCertB64)
+	if err != nil {
+		log.Fatalf("failed to decode CA cert: %v", err)
+	}
+
+	certPool := x509.NewCertPool()
+	if !certPool.AppendCertsFromPEM(caCert) {
+		log.Fatal("failed to add CA certificate")
+	}
+
+	// Load TLS Config
+	tlsConfig, err := config.LoadTLSFromEnv("GATEWAY_CRT", "GATEWAY_KEY")
+	if err != nil {
+		log.Fatal("Error loading TLS config for gateway service")
+	}
+
 	// Connect to RabbitMQ
 	rabbitMQConn, err := amqp.Dial(os.Getenv("RABBITMQ_URL"))
 	if err != nil {
@@ -276,10 +353,12 @@ func main() {
 	defer rabbitMQConn.Close()
 
 	// Connect to the query service
-    queryConn, err := grpc.NewClient(
-        os.Getenv("QUERY_ADDRESS"), // Target address
-        grpc.WithTransportCredentials(insecure.NewCredentials()), // Required for plaintext
-    )
+	queryConn, err := grpc.NewClient(
+		os.Getenv("QUERY_ADDRESS"),
+		grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
+			RootCAs: certPool,
+		})),
+	)
 	if err != nil {
 		log.Fatalf("Failed to establish connection with query-service: %v", err)
 	}
@@ -288,8 +367,10 @@ func main() {
 
 	// Connect to the authentication service
 	authConn, err := grpc.NewClient(
-		os.Getenv("AUTH_ADDRESS"), 
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		os.Getenv("AUTH_ADDRESS"),
+		grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
+			RootCAs: certPool,
+		})),
 	)
 	if err != nil {
 		log.Fatalf("Failed to establish connection with auth-service: %v", err)
@@ -299,8 +380,8 @@ func main() {
 
 	// Save the service clients for future use
 	serviceClients := &ServiceClients{
-		queryClient: queryServiceClient, 
-		authClient: authServiceClient,
+		queryClient:  queryServiceClient,
+		authClient:   authServiceClient,
 		rabbitMQConn: rabbitMQConn,
 	}
 	log.Print("Server has established connection with other services")
@@ -311,15 +392,23 @@ func main() {
 	mux.HandleFunc("GET /api/query", authMiddleware(handleGetQueryGenerator(serviceClients), serviceClients))
 	mux.HandleFunc("POST /api/register", handleRegisterGenerator(serviceClients))
 	mux.HandleFunc("POST /api/login", handleLoginGenerator(serviceClients))
+	mux.HandleFunc("POST /api/verify", handleVerifyGenerator(serviceClients))
 
 	httpPort := os.Getenv("GATEWAY_ADDRESS")
 	server := &http.Server{
-		Addr:    httpPort,
-		Handler: mux,
+		Addr:      httpPort,
+		Handler:   corsMiddleware(mux),
+		TLSConfig: tlsConfig,
 	}
 
 	log.Printf("Starting server on %s", server.Addr)
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("Server error: %v", err)
+	if os.Getenv("DEV_PROD") == "prod" {
+		if err := server.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server error: %v", err)
+		}
+	} else {
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server error: %v", err)
+		}
 	}
 }
