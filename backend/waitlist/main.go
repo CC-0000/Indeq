@@ -12,6 +12,8 @@ import (
 	pb "github.com/cc-0000/indeq/common/api"
 	_ "github.com/lib/pq"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"github.com/cc-0000/indeq/common/config"
 )
 
 type WaitlistServer struct {
@@ -70,12 +72,11 @@ func main() {
 		log.Fatal("WAITLIST_DATABASE_URL environment variable is required")
 	}
 
-	// TODO: Add TLS configuration values
 	// Load the TLS configuration values
-	// tlsConfig, err := config.LoadTLSFromEnv("WAITLIST_CRT", "WAITLIST_KEY")
-	// if err != nil {
-	// 	log.Fatal("Error loading TLS config for waitlist service")
-	// }
+	tlsConfig, err := config.LoadTLSFromEnv("WAITLIST_CRT", "WAITLIST_KEY")
+	if err != nil {
+		log.Fatal("Error loading TLS config for waitlist service")
+	}
 
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
@@ -117,7 +118,10 @@ func main() {
 	
 	log.Println("Creating the waitlist server...")
 
-	grpcServer := grpc.NewServer()
+	opts := []grpc.ServerOption{
+		grpc.Creds(credentials.NewTLS(tlsConfig)),
+	}
+	grpcServer := grpc.NewServer(opts...)
 	pb.RegisterWaitlistServiceServer(grpcServer, &WaitlistServer{db: db})
 
 	log.Printf("Waitlist Service listening on %v\n", listener.Addr())

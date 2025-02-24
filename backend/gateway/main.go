@@ -243,7 +243,7 @@ func handleAddToWaitlist(clients *ServiceClients) http.HandlerFunc {
 		res, err := clients.waitlistClient.AddToWaitlist(r.Context(), &pb.AddToWaitlistRequest{
 			Email: addToWaitlistRequest.Email,
 		})
-
+		
 		if err != nil {
 			http.Error(w, "Failed to add to waitlist", http.StatusInternalServerError)
 			return
@@ -408,10 +408,24 @@ func main() {
 	defer authConn.Close()
 	authServiceClient := pb.NewAuthenticationServiceClient(authConn)
 
+	// Connect to the waitlist service
+	waitlistConn, err := grpc.NewClient(
+		os.Getenv("WAITLIST_ADDRESS"),
+		grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
+			RootCAs: certPool,
+		})),
+	)
+	if err != nil {
+		log.Fatalf("Failed to establish connection with waitlist-service: %v", err)
+	}
+	defer waitlistConn.Close()
+	waitlistServiceClient := pb.NewWaitlistServiceClient(waitlistConn)
+
 	// Save the service clients for future use
 	serviceClients := &ServiceClients{
 		queryClient:  queryServiceClient,
 		authClient:   authServiceClient,
+		waitlistClient: waitlistServiceClient,
 		rabbitMQConn: rabbitMQConn,
 	}
 	log.Print("Server has established connection with other services")
