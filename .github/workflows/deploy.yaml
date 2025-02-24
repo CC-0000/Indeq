@@ -21,14 +21,14 @@ jobs:
     steps:
     - name: Checkout Repository
       uses: actions/checkout@v3
+      
+    - name: Check File Directory
+      run: |
+        echo "Checking file directory..."
+        ls -la
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v1
-
-    - name: Install Docker Compose
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y docker-compose
 
     - name: Configure AWS Credentials
       uses: aws-actions/configure-aws-credentials@v2
@@ -41,22 +41,22 @@ jobs:
       run: |
         aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com
 
-    - name: Build images with Docker Compose
-      run: |
-        docker-compose build
-
     - name: Tag and Push images to ECR
       run: |
-        # Loop through each service defined in the docker-compose.yml
-        for service in $(backend/docker-compose.yaml config --services); do
-          if [[ "$service" != "passwordDB" && "$service" != "ollama" ]]; then # ollama and db is not pushed to ECR
-              # Tag the image
-              docker tag $service:$IMAGE_TAG ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/$service:$IMAGE_TAG
-              # Push the image to ECR
-              docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/$service:$IMAGE_TAG
-          fi
-        done
 
+        # Tagging each service and pushing to ECR
+        docker tag authentication:$IMAGE_TAG ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/authentication:$IMAGE_TAG
+        docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/authentication:$IMAGE_TAG
+
+        docker tag query:$IMAGE_TAG ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/query:$IMAGE_TAG
+        docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/query:$IMAGE_TAG
+
+        docker tag gateway:$IMAGE_TAG ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/gateway:$IMAGE_TAG
+        docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/gateway:$IMAGE_TAG
+        
+        docker tag rabbitmq:$IMAGE_TAG ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/rabbitmq:$IMAGE_TAG
+        docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/rabbitmq:$IMAGE_TAG
+        
     - name: Create config.yaml with GitHub secrets
       run: |
         echo "apiVersion: v1
