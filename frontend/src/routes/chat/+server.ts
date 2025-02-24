@@ -2,24 +2,13 @@ import { error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { GO_BACKEND_URL } from '$env/static/private';
 
-let session: string = "";
-
-// Extract session from cookie
-const getSession = (cookieHeader: string) => {
-	const cookies = cookieHeader.split(';').reduce((acc, cookie) => {
-		const [key, value] = cookie.trim().split('=');
-		acc[key] = value;
-		return acc;
-	}, {} as Record<string, string>);
-
-	return cookies.session;
-};
+let jwt: string = "";
 
 /**
  * 1) POST /chat — Send a new message to your Go server
  *    Return a conversation ID (or any response you like).
  */
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async ({ request, cookies }) => {
 	try {
 		const body = await request.json();
 		const { query } = body;
@@ -28,15 +17,15 @@ export const POST: RequestHandler = async ({ request }) => {
 			throw error(400, 'No query provided');
 		}
 
-		const cookie = request.headers.get('cookie');
-		if (cookie) { session = getSession(cookie); }
+		const cookie = cookies.get('jwt');
+		if (cookie) { jwt = cookie; }
 
 		// Forward this request to your Go server's POST /query
 		const goRes = await fetch(`${GO_BACKEND_URL}/api/query`, {
 			method: 'POST',
 			headers: {
 				'Content-Type': 'application/json',
-				'Authorization': `Bearer ${session}`
+				'Authorization': `Bearer ${jwt}`
 			},
 			body: JSON.stringify({
 				query
@@ -74,7 +63,7 @@ export const GET: RequestHandler = async ({ url }) => {
 		const goResponse = await fetch(goSseUrl, {
 			method: 'GET',
 			headers: {
-				'Authorization': `Bearer ${session}`,
+				'Authorization': `Bearer ${jwt}`,
 				Accept: 'text/event-stream'
 			}
 		});
