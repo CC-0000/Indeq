@@ -1,232 +1,228 @@
 <script lang="ts">
-  import { SearchIcon, ChevronDownIcon, CheckIcon } from "svelte-feather-icons";
-  import { onDestroy } from 'svelte';
-  import { marked } from 'marked';
-  import katex from "katex";
-  import "katex/dist/katex.min.css";
+    import { SearchIcon, ChevronDownIcon, CheckIcon } from "svelte-feather-icons";
+    import { onDestroy } from 'svelte';
+    import { marked } from 'marked';
+    import katex from "katex";
+    import "katex/dist/katex.min.css";
 
-  let userQuery = '';
-  let conversationId: string | null = null;
-  const truncateLength = 80;
+    let userQuery = '';
+    let conversationId: string | null = null;
+    const truncateLength = 80;
 
-  let eventSource: EventSource | null = null;
-  let messages: { text: string; sender: string; reasoning: {text: string; collapsed: boolean}[] }[] = [];
-  let isFullscreen = false;
-  let isReasoning = false;
-  let conversationContainer: HTMLElement | null = null;
+    let eventSource: EventSource | null = null;
+    let messages: { text: string; sender: string; reasoning: {text: string; collapsed: boolean}[] }[] = [];
+    let isFullscreen = false;
+    let isReasoning = false;
+    let conversationContainer: HTMLElement | null = null;
 
-  async function query() {
-    try {
-      const res = await fetch('/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: userQuery })
-      });
+    async function query() {
+        try {
+        const res = await fetch('/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: userQuery })
+        });
 
-      if (!res.ok) {
-        const msg = await res.text();
-        console.error('Error from /chat POST:', msg);
+        if (!res.ok) {
+            const msg = await res.text();
+            console.error('Error from /chat POST:', msg);
+            return;
+        }
+
+        messages = [...messages, { text: userQuery, sender: "user", reasoning: [] }];
+
+        const data = await res.json();
+        conversationId = data.conversation_id;
+
+        messages = [...messages, { text: "", sender: "bot", reasoning: [] }];
+        streamResponse();
+        } catch (err) {
+        console.error('sendMessage error:', err);
+        }
+
+        // Reset the user query
+        userQuery = '';
+    }
+
+    function streamResponse() {
+        if (!conversationId) {
+        console.error('No conversationId to stream');
         return;
-      }
-
-      messages = [...messages, { text: userQuery, sender: "user", reasoning: [] }];
-
-      const data = await res.json();
-      conversationId = data.conversation_id;
-
-      messages = [...messages, { text: "", sender: "bot", reasoning: [] }];
-      streamResponse();
-    } catch (err) {
-      console.error('sendMessage error:', err);
-    }
-
-    // Reset the user query
-    userQuery = '';
-  }
-
-  function streamResponse() {
-    if (!conversationId) {
-      console.error('No conversationId to stream');
-      return;
-    }
-    // Close any existing connection
-    eventSource?.close();
-
-    isFullscreen = true;
-    isReasoning = true;
-
-    const url = `/chat?conversationId=${encodeURIComponent(conversationId)}`;
-    eventSource = new EventSource(url);
-    let botMessage = { text: "", sender: "bot", reasoning: [] as {text: string; collapsed: boolean}[] };
-
-    eventSource.addEventListener('message', (evt) => {
-      const payload = JSON.parse(evt.data);
-
-      // parse reasoning section
-      if (isReasoning) {
-
-        // reasoning paragraph break
-        if (/\n\n/.test(payload.data) && botMessage.reasoning.length > 0) {
-          botMessage.reasoning[botMessage.reasoning.length - 1].collapsed = true;
-          botMessage.reasoning.push({text: '', collapsed: false});
-          return;
         }
+        // Close any existing connection
+        eventSource?.close();
 
-        // <think> tag or reasoning paragraph break
-        if (/\u003cthink\u003e/.test(payload.data) || /\n\n/.test(payload.data)) {
-          return;
-        }
+        isFullscreen = true;
+        isReasoning = true;
 
-        // </think> tag
-        if (/\u003c\/think\u003e/.test(payload.data)) {
-          isReasoning = false;
-          return;
+        const url = `/chat?conversationId=${encodeURIComponent(conversationId)}`;
+        eventSource = new EventSource(url);
+        let botMessage = { text: "", sender: "bot", reasoning: [] as {text: string; collapsed: boolean}[] };
+
+        eventSource.addEventListener('message', (evt) => {
+        const payload = JSON.parse(evt.data);
+
+        // parse reasoning section
+        if (isReasoning) {
+
+            // reasoning paragraph break
+            if (/\n\n/.test(payload.data) && botMessage.reasoning.length > 0) {
+            botMessage.reasoning[botMessage.reasoning.length - 1].collapsed = true;
+            botMessage.reasoning.push({text: '', collapsed: false});
+            return;
+            }
+
+            // <think> tag or reasoning paragraph break
+            if (/\u003cthink\u003e/.test(payload.data) || /\n\n/.test(payload.data)) {
+            return;
+            }
+
+            // </think> tag
+            if (/\u003c\/think\u003e/.test(payload.data)) {
+            isReasoning = false;
+            return;
+            }
+            
+            if (botMessage.reasoning.length > 0) { 
+            botMessage.reasoning[botMessage.reasoning.length - 1].text += payload.data;
+            } else {
+            botMessage.reasoning.push({text: payload.data, collapsed: false});
+            }
+
+            if (messages[messages.length - 1].sender === "bot") {
+            messages[messages.length - 1].reasoning = botMessage.reasoning;
+            } else {
+            messages = [...messages, botMessage];
+            }
         }
         
-        if (botMessage.reasoning.length > 0) { 
-          botMessage.reasoning[botMessage.reasoning.length - 1].text += payload.data;
-        } else {
-          botMessage.reasoning.push({text: payload.data, collapsed: false});
+        else {
+            botMessage.text += payload.data;
+            // botMessage.text = renderContent(botMessage.text);
+            messages = [...messages.slice(0, -1), botMessage];
         }
+        });
 
-        if (messages[messages.length - 1].sender === "bot") {
-          messages[messages.length - 1].reasoning = botMessage.reasoning;
-        } else {
-          messages = [...messages, botMessage];
-        }
-      }
-      
-      else {
-        botMessage.text += payload.data;
-        // botMessage.text = renderContent(botMessage.text);
-        messages = [...messages.slice(0, -1), botMessage];
-      }
-    });
-
-    eventSource.addEventListener('error', (err) => {
-      console.error('SSE error:', err);
-      eventSource?.close();
-    });
-  }
-
-  function toggleReasoning(messageIndex: number, reasoningIndex: number) {
-    const lastMessage = messages[messageIndex];
-    if (lastMessage.sender === "bot") {
-      lastMessage.reasoning[reasoningIndex].collapsed = !lastMessage.reasoning[reasoningIndex].collapsed;
-      messages = [...messages]; // Trigger reactivity
+        eventSource.addEventListener('error', (err) => {
+        console.error('SSE error:', err);
+        eventSource?.close();
+        });
     }
-  }
 
-  function preprocessContent(content: string) {
+    function toggleReasoning(messageIndex: number, reasoningIndex: number) {
+        const lastMessage = messages[messageIndex];
+        if (lastMessage.sender === "bot") {
+        lastMessage.reasoning[reasoningIndex].collapsed = !lastMessage.reasoning[reasoningIndex].collapsed;
+        messages = [...messages]; // Trigger reactivity
+        }
+    }
 
-    content = content.replace(/&amp;#39;/g, "'");
+    // Function to render LaTeX blocks
+    function renderLatex(content: string) {
+        // Create a temporary div to hold the content
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = content;
 
-    // Replace (...) with \(...\) for inline LaTeX
-    content = content.replace(/\\\((.*?)(?<!\\)\)/g, (_, latex) => {
-        return `\\(${latex}\\)`;
+        // Find all LaTeX blocks and render them
+        const mathElements = tempDiv.getElementsByClassName('math');
+        Array.from(mathElements).forEach(element => {
+            const latex = element.textContent || '';
+            try {
+                const isDisplay = element.classList.contains('math-display');
+                const rendered = katex.renderToString(latex, {
+                    displayMode: isDisplay,
+                    throwOnError: false,
+                    strict: false
+                });
+                element.innerHTML = rendered;
+            } catch (error) {
+                console.error('LaTeX rendering error:', error);
+            }
+        });
+
+        return tempDiv.innerHTML;
+    }
+  
+    // Function to render Markdown with LaTeX support
+    function renderMarkdown(content: string) {
+
+        // Handle display math: \[ ... \] before markdown processing
+        content = content.replace(/\\\[([\s\S]*?)\\\]/g, (match, latex) => {
+            return `<div class="math math-display">${latex}</div>`;
+        });
+
+        // Handle inline math: \( ... \) before markdown processing
+        content = content.replace(/\\\(([\s\S]*?)\\\)/g, (match, latex) => {
+            return `<span class="math math-inline">${latex}</span>`;
+        });
+
+        return marked(content);
+    }
+
+    function renderContent(text: string) {
+        const markdownRendered = renderMarkdown(text) as string;
+        return renderLatex(markdownRendered);
+    }
+
+    onDestroy(() => {
+        eventSource?.close();
     });
-
-    // Replace (...) with \(...\) for inline LaTeX
-    content = content.replace(/\((.*?)\)/g, (_, latex) => {
-        return `\\(${latex}\\)`;
-    });
-
-    // Replace $$...$$ with \[...\] for display equations
-    content = content.replace(/\$\$([\s\S]*?)\$\$/g, (_, latex) => {
-        return `\\[${latex}\\]`;
-    });
-
-    // Replace [...] with \[...\] for display equations
-    content = content.replace(/\[\s*([\s\S]*?)\s*\]/g, (_, latex) => {
-        return `\\[${latex}\\]`;
-    });
-
-    // Ensure \boxed is properly handled
-    content = content.replace(/\\boxed{([\s\S]*?)}/g, (_, latex) => {
-        return `\\[\\boxed{${latex}}\\]`;
-    });
-
-    return content;
-}
-
-
-  function renderContent(msg : string) {
-
-    msg = preprocessContent(msg);
-    const markdownContent = marked(msg) as string;
-
-    // Render display equations (\[...\])
-    let renderedContent = markdownContent.replace(/\\\[([\s\S]*?)\\\]/g, (_, latex) => {
-        return katex.renderToString(latex, { displayMode: true, throwOnError: false });
-    });
-
-    // Render LaTeX within the Markdown content
-    renderedContent = renderedContent.replace(/\\\((.*?)\\\)/g, (_, latex) => {
-        return katex.renderToString(latex, { displayMode: false, throwOnError: false });
-    });
-
-    return renderedContent;
-  }
-
-  onDestroy(() => {
-    eventSource?.close();
-  });
 
 </script>
   
-  <main class="min-h-screen flex flex-col items-center justify-center p-6">
+<main class="min-h-screen flex flex-col items-center justify-center p-6">
     {#if !isFullscreen}
     <!-- Centered Search Box -->
     <div class="w-full max-w-3xl p-8 text-center">
       
-      <h1 class="text-4xl text-gray-900 mb-3">Indeq</h1>
-      <p class="text-gray-600 mb-6">Crawl your content in seconds, so you can spend more time on what matters.</p>
-  
-      <!-- Search Input -->
-      <div class="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+        <h1 class="text-4xl text-gray-900 mb-3">Indeq</h1>
+        <p class="text-gray-600 mb-6">Crawl your content in seconds, so you can spend more time on what matters.</p>
+    
+        <!-- Search Input -->
+        <div class="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+            
+            <input
+            type="text"
+            bind:value={userQuery}
+            placeholder="Search for private data insights..."
+            class="flex-1 p-2 bg-transparent focus:outline-none"
+            class:move-to-bottom={isFullscreen}
+            on:keydown={(e) => e.key === 'Enter' && query()}
+            />
+            <button
+            class="p-2 rounded-lg bg-primary text-white hover:bg-blue-600 transition-colors"
+            on:click={query}
+            >
+            <SearchIcon size="20" />
+            </button>
         
-        <input
-          type="text"
-          bind:value={userQuery}
-          placeholder="Search for private data insights..."
-          class="flex-1 p-2 bg-transparent focus:outline-none"
-          class:move-to-bottom={isFullscreen}
-          on:keydown={(e) => e.key === 'Enter' && query()}
-        />
-        <button
-          class="p-2 rounded-lg bg-primary text-white hover:bg-blue-600 transition-colors"
-          on:click={query}
-        >
-          <SearchIcon size="20" />
-        </button>
-      
-      </div>
+        </div>
 
-      <!-- Integration Badges -->
-      <div class="flex gap-4 mt-4 justify-center">
-        <div class="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-full">
-          <div class="relative">
-            <div class="w-2 h-2 bg-green-400 rounded-full"></div>
-            <div class="w-2 h-2 bg-green-400 rounded-full absolute top-0 animate-ping"></div>
-          </div>
-          <span class="text-sm text-gray-600">Notion</span>
+        <!-- Integration Badges -->
+        <div class="flex gap-4 mt-4 justify-center">
+            <div class="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-full">
+            <div class="relative">
+                <div class="w-2 h-2 bg-green-400 rounded-full"></div>
+                <div class="w-2 h-2 bg-green-400 rounded-full absolute top-0 animate-ping"></div>
+            </div>
+            <span class="text-sm text-gray-600">Notion</span>
+            </div>
+            <div class="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-full">
+            <div class="relative">
+                <div class="w-2 h-2 bg-green-400 rounded-full"></div>
+                <div class="w-2 h-2 bg-green-400 rounded-full absolute top-0 animate-ping"></div>
+            </div>
+            <span class="text-sm text-gray-600">Google Drive</span>
+            </div>
+            <div class="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-full">
+            <div class="relative">
+                <div class="w-2 h-2 bg-green-400 rounded-full"></div>
+                <div class="w-2 h-2 bg-green-400 rounded-full absolute top-0 animate-ping"></div>
+            </div>
+            <span class="text-sm text-gray-600">Slack</span>
+            </div>
         </div>
-        <div class="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-full">
-          <div class="relative">
-            <div class="w-2 h-2 bg-green-400 rounded-full"></div>
-            <div class="w-2 h-2 bg-green-400 rounded-full absolute top-0 animate-ping"></div>
-          </div>
-          <span class="text-sm text-gray-600">Google Drive</span>
         </div>
-        <div class="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-full">
-          <div class="relative">
-            <div class="w-2 h-2 bg-green-400 rounded-full"></div>
-            <div class="w-2 h-2 bg-green-400 rounded-full absolute top-0 animate-ping"></div>
-          </div>
-          <span class="text-sm text-gray-600">Slack</span>
-        </div>
-      </div>
-    </div>
     {:else}
     <div class="flex-1 flex flex-col bg-white w-full max-w-3xl">
 
@@ -259,7 +255,7 @@
                               </div>
                               <div class="text-gray-600 reasoning-container">
                                 <div class={`reasoning-content ${thought.collapsed ? 'collapsed' : 'expanded'}`}>
-                                  {thought.text}
+                                  {@html renderLatex(thought.text)}
                                 </div>
                               </div>
                             </div>
@@ -281,7 +277,7 @@
                 {#if message.text !== ""}
                   <h3 class="text-sm font-semibold text-gray-600">Answer</h3>
                   <div class="mt-4 prose max-w-3xl mx-auto prose-lg">
-                    {@html marked(renderContent(message.text))}
+                    {@html renderContent(message.text)}
                   </div>
                 {:else}
                   <div class="animate-pulse mt-4">Thinking...</div>
@@ -303,9 +299,9 @@
       </div>
     </div>
     {/if}
-  </main>
+</main>
 
-  <style>
+<style>
     .reasoning-container {
       position: relative;
       width: 100%;
@@ -328,4 +324,4 @@
       max-height: 500px;
     }
 
-  </style>
+</style>
