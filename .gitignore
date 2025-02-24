@@ -33,6 +33,7 @@
 # Environment variables
 .env
 .env.local
+backend-config.yaml
 
 # Log files
 *.log

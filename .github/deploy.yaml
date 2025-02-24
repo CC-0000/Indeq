@@ -1,0 +1,67 @@
+name: Deploy to Amazon EKS
+
+on:
+  push:
+    branches:
+      - cicd  # Trigger deployment on the main branch
+
+env:
+  AWS_REGION: us-east-1
+  EKS_CLUSTER_NAME: my-eks-cluster
+  ECR_REPOSITORY: my-app-repo
+  IMAGE_TAG: latest
+  SECRET_NAME: my-app-config
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write  # For OIDC auth (recommended)
+      contents: read
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v3
+
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      run: |
+        aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin <your-account-id>.dkr.ecr.$AWS_REGION.amazonaws.com
+
+    - name: Build and Push Docker Image
+      run: |
+        docker build -t $ECR_REPOSITORY:$IMAGE_TAG .
+        docker tag $ECR_REPOSITORY:$IMAGE_TAG <your-account-id>.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG
+        docker push <your-account-id>.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG
+
+    # - name: Fetch Secrets from AWS Secrets Manager
+    #   run: |
+    #     SECRET_JSON=$(aws secretsmanager get-secret-value --secret-id $SECRET_NAME --query SecretString --output text)
+    #     echo "$SECRET_JSON" > secret.json
+
+    # - name: Create ConfigMap from AWS Secrets
+    #   run: |
+    #     APP_ENV=$(jq -r '.APP_ENV' secret.json)
+    #     LOG_LEVEL=$(jq -r '.LOG_LEVEL' secret.json)
+
+    #     echo "apiVersion: v1
+    #     kind: ConfigMap
+    #     metadata:
+    #       name: my-app-config
+    #     data:
+    #       APP_ENV: \"$APP_ENV\"
+    #       LOG_LEVEL: \"$LOG_LEVEL\"
+    #     " > k8s-manifests/configmap.yaml
+
+    - name: Configure kubectl
+      run: |
+        aws eks update-kubeconfig --name $EKS_CLUSTER_NAME --region $AWS_REGION
+
+    - name: Deploy to EKS
+      run: |
+        kubectl apply -f k8s-manifests/
+        kubectl rollout status deployment/my-app-deployment
