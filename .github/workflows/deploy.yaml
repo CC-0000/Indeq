@@ -52,11 +52,11 @@ jobs:
     - name: Check protoc-gen-go Installation
       run: |
         protoc-gen-go --version || echo "protoc-gen-go not found"
-        
+
     - name: Generate .env Files
-        run: |
-          chmod +x ./generate_env.sh
-          ./generate_env.sh
+      run: |
+        chmod +x ./generate_env.sh
+        ./generate_env.sh
 
     - name: Generate Code
       run: |
