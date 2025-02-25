@@ -3,7 +3,6 @@
   import { onMount } from "svelte";
   import { PUBLIC_GO_BACKEND_URL } from "$env/static/public";
   import { toast } from "svelte-sonner";
-  import { Toaster } from "svelte-sonner";
   
   let email = "";
   let submitStatus: 'idle' | 'loading' | 'success' | 'error' = 'idle';
@@ -76,7 +75,6 @@
     <p class="text-gray-600 text-lg">Next generation private data search</p>
 
     <!-- Email Signup Form -->
-    <Toaster />
     <form class="flex items-center gap-3 mt-8" on:submit={handleSubmit}>
       <div class="relative flex-1">
         <MailIcon size="20" class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
@@ -104,7 +102,7 @@
 
     <hr class="border-t border-gray-300 my-8" />
     
-    <div class="">
+    <div>
       <p class="text-lg pt-1 font-medium text-gray-600 mb-3">Built by engineers from</p>
       <div class="flex items-center justify-center gap-6 flex-wrap">
         <img src="/meta.svg" alt="Meta" class="h-8 w-8 opacity-50 hover:opacity-100 transition-opacity" />  
