@@ -26,10 +26,13 @@ jobs:
       run: |
         echo "Checking file directory..."
         ls -la
+        cd backend/common
+        ls -la
 
     - name: Generate Code
       run: |
-        make gen backend/common
+        cd backend/common
+        make gen
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v1
