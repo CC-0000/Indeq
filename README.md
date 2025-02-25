@@ -1,6 +1,8 @@
-# <img src="https://github.com/user-attachments/assets/2386b780-b630-4bce-91af-4361d4e471ef"> Indeq
+<h1><picture><source media="(prefers-color-scheme: dark)" srcset="https://github.com/user-attachments/assets/229c40be-ca07-4b32-b5bc-86ab49a872ec"><img alt="" src="https://github.com/user-attachments/assets/1eba86ae-6d05-40c8-9b7f-a8bd34f1761f"></picture> Indeq</h1>
 
-Next generation private data search
+Indeq is a unified private data search engine that integrates with Google Drive, Notion, Microsoft Office, and more to help users quickly find notes, emails, and assignments. Powered by indexing, NLP, and chunking algorithms, Indeq delivers fast, accurate, and context-aware results - eliminating the need for manual searches across multiple apps.
+
+We are a unified search engine for **your data**
 
 <h2>Tech Stack</h2>
 
@@ -23,6 +25,8 @@ Next generation private data search
 ![Vercel](https://img.shields.io/badge/-Vercel-%23000000?style=for-the-badge&logo=vercel&logoColor=white)
 ![Commitlint](https://img.shields.io/badge/-commitlint-%2300000?style=for-the-badge&logo=commitlint&logoColor=white)
 ![EKS](https://img.shields.io/badge/-Amazon%20EKS-%23FF9900?style=for-the-badge&logo=Amazon%20EKS&logoColor=white)
+
+**Currently Supporting**
 
 ![Google Drive](https://img.shields.io/badge/-Google%20Drive-%23479c50?style=for-the-badge&logo=Google%20Drive&logoColor=white)
 ![Office 365](https://img.shields.io/badge/-Microsoft%20Office-%233072c9?style=for-the-badge&logo=onlyoffice&logoColor=white)
