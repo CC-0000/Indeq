@@ -10,7 +10,12 @@
     const truncateLength = 80;
 
     let eventSource: EventSource | null = null;
-    let messages: { text: string; sender: string; reasoning: {text: string; collapsed: boolean}[] }[] = [];
+    let messages: { 
+        text: string; 
+        sender: string; 
+        reasoning: {text: string; collapsed: boolean}[];
+        reasoningSectionCollapsed: boolean;
+    }[] = [];
     let isFullscreen = false;
     let isReasoning = false;
     let conversationContainer: HTMLElement | null = null;
@@ -29,12 +34,12 @@
             return;
         }
 
-        messages = [...messages, { text: userQuery, sender: "user", reasoning: [] }];
+        messages = [...messages, { text: userQuery, sender: "user", reasoning: [], reasoningSectionCollapsed: false }];
 
         const data = await res.json();
         conversationId = data.conversation_id;
 
-        messages = [...messages, { text: "", sender: "bot", reasoning: [] }];
+        messages = [...messages, { text: "", sender: "bot", reasoning: [], reasoningSectionCollapsed: false }];
         streamResponse();
         } catch (err) {
         console.error('sendMessage error:', err);
@@ -61,7 +66,8 @@
         let botMessage = { 
             text: "", 
             sender: "bot", 
-            reasoning: [] as {text: string; collapsed: boolean}[] 
+            reasoning: [] as {text: string; collapsed: boolean}[],
+            reasoningSectionCollapsed: false
         };
 
         eventSource.addEventListener('message', (evt) => {
@@ -160,22 +166,41 @@
               {:else}
                 {#if message.reasoning.length > 0}
                   <div class="max-w-3xl mx-auto">
-                    <h3 class="text-sm font-semibold text-gray-600">Reasoning</h3>
+                    <div class="flex justify-between items-center">
+                      <h3 class="text-sm font-semibold text-gray-600">Reasoning</h3>
+                      <button 
+                        class="text-gray-600 cursor-pointer transition-transform duration-200 mt-3"
+                        class:rotate-180={!message.reasoningSectionCollapsed}
+                        on:click={() => {
+                          if (message.sender !== "user") {
+                            messages = messages.map((msg, idx) => 
+                              idx === messageIndex 
+                                ? {...msg, reasoningSectionCollapsed: !msg.reasoningSectionCollapsed} 
+                                : msg
+                            );
+                          }
+                        }}
+                      >
+                        <ChevronDownIcon size="16" />
+                      </button>
+                    </div>
+                    
+                    {#if !message.reasoningSectionCollapsed}
                     {#each message.reasoning as thought, reasoningIndex}
-                      <div class="rounded-lg p-3 my-3 w-full">
+                      <div class="rounded-lg pl-3 py-2 mb-3 w-full">
                         <div class="flex items-start w-full">
                           <div class="flex justify-between items-start gap-2 w-full">
                             <div class="flex items-start gap-2 flex-1 min-w-0">
                               <div class="shrink-0">
                                 {#if isReasoning && reasoningIndex === message.reasoning.length - 1}
-                                  <div class="relative mt-2.5">
+                                  <div class="relative mt-3">
                                     <div class="w-2 h-2 bg-green-400 rounded-full"></div>
                                     <div class="w-2 h-2 bg-green-400 rounded-full absolute top-0 animate-ping"></div>
                                   </div>
                                 {:else if isReasoning}
-                                  <div class="w-2 h-2 bg-gray-400 rounded-full mt-2.5"></div>
+                                  <div class="w-2 h-2 bg-gray-400 rounded-full mt-3"></div>
                                 {:else}
-                                  <CheckIcon size="16" class="text-gray-500 mt-1.5" />
+                                  <CheckIcon size="16" class="text-gray-500 mt-2" />
                                 {/if}
                               </div>
                               <div class="text-gray-600 reasoning-container">
@@ -201,6 +226,7 @@
                         </div>
                       </div>
                     {/each}
+                    {/if}
                   </div>
                 {/if}
                 {#if message.text !== ""}

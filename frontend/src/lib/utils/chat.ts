@@ -2,6 +2,7 @@ interface BotMessage {
     text: string;
     sender: string;
     reasoning: {text: string; collapsed: boolean}[];
+    reasoningSectionCollapsed: boolean;
 }
 
 interface ChatState {
@@ -26,6 +27,15 @@ export function processReasoningMessage(data: string, botMessage: BotMessage, st
     // Handle </think> tag
     if (/\u003c\/think\u003e/.test(data)) {
         state.isReasoning = false;
+        
+        // Auto-collapse reasoning section when reasoning is complete
+        botMessage.reasoningSectionCollapsed = true;
+
+        if (botMessage.reasoning.length > 0) {
+            botMessage.reasoning[botMessage.reasoning.length - 1].collapsed = true;
+        }
+        state.messages = [...state.messages.slice(0, -1), botMessage];
+        
         return;
     }
 
@@ -36,9 +46,13 @@ export function processReasoningMessage(data: string, botMessage: BotMessage, st
         botMessage.reasoning.push({text: data, collapsed: false});
     }
 
+    preserveReasoningSectionState(botMessage, state);
+
     // Update messages array
     if (state.messages[state.messages.length - 1].sender === "bot") {
         state.messages[state.messages.length - 1].reasoning = botMessage.reasoning;
+        state.messages[state.messages.length - 1].reasoningSectionCollapsed = botMessage.reasoningSectionCollapsed;
+        
     } else {
         state.messages = [...state.messages, botMessage];
     }
@@ -47,7 +61,16 @@ export function processReasoningMessage(data: string, botMessage: BotMessage, st
 // Function to process output message and update message state
 export function processOutputMessage(data: string, botMessage: BotMessage, state: ChatState) {
     botMessage.text += data;
+    preserveReasoningSectionState(botMessage, state);
     state.messages = [...state.messages.slice(0, -1), botMessage];
+}
+
+// Function to preserve reasoningSectionCollapsed property
+function preserveReasoningSectionState(botMessage: BotMessage, state: ChatState): void {
+    if (state.messages.length > 0 && state.messages[state.messages.length - 1].sender === "bot") {
+        const currentBotMessage = state.messages[state.messages.length - 1];
+        botMessage.reasoningSectionCollapsed = currentBotMessage.reasoningSectionCollapsed;
+    }
 }
 
 // Function to toggle reasoning visibility
