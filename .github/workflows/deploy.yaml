@@ -40,7 +40,6 @@ jobs:
     - name: Install protoc-gen-go
       run: |
         go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-        echo "GOPATH=$(go env GOPATH)" >> $GITHUB_ENV
         echo "$GOPATH/bin" >> $GITHUB_ENV
 
     - name: Generate Code
@@ -127,3 +126,8 @@ jobs:
       run: |
         kubectl apply -f backend/k8s-manifest.yml
         kubectl apply -f configmap.yaml
+
+    - name: Debug Environment Variables
+      run: |
+        echo "Current GOPATH: $(go env GOPATH)"
+        echo "Current PATH: $PATH"
