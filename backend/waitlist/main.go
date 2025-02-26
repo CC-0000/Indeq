@@ -30,29 +30,32 @@ func (s *WaitlistServer) AddToWaitlist(ctx context.Context, req *pb.AddToWaitlis
 		}, nil
 	}
 
-	var existingEmail bool
-	err = s.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM waitlist WHERE email = $1)", req.Email).Scan(&existingEmail)
-	if err != nil {
-		log.Println("Database query error:", err)
-		return &pb.AddToWaitlistResponse{
-			Success: false,
-			Message: "Database error. Please try again later.",
-		}, nil
-	}
+	result, err := s.db.ExecContext(ctx, `
+		INSERT INTO waitlist (email)
+		VALUES ($1)
+		ON CONFLICT (email) DO NOTHING`, req.Email)
 
-	if existingEmail {
-		return &pb.AddToWaitlistResponse{
-			Success: false,
-			Message: "You're already on the waitlist! 😊",
-		}, nil
-	}
-
-	_, err = s.db.ExecContext(ctx, "INSERT INTO waitlist (email) VALUES ($1)", req.Email)
 	if err != nil {
 		log.Println("Database insert error:", err)
 		return &pb.AddToWaitlistResponse{
 			Success: false,
 			Message: "Could not add to waitlist. Please try again later.",
+		}, nil
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		log.Println("Error retrieving affected rows:", err)
+		return &pb.AddToWaitlistResponse{
+			Success: false,
+			Message: "Could not verify waitlist status. Please try again later.",
+		}, nil
+	}
+
+	if rowsAffected == 0 {
+		return &pb.AddToWaitlistResponse{
+			Success: false,
+			Message: "You're already on the waitlist! 😊",
 		}, nil
 	}
 
