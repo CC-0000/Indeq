@@ -47,9 +47,9 @@ services:
       context: .
       dockerfile: authentication/Dockerfile
     env_file:
-      - ./authentication/.env
+      - ./common/config/.env
     depends_on:
-      passwordDB:
+      appDB:
         condition: service_healthy
     networks:
       - indeq-net
@@ -74,16 +74,16 @@ services:
       context: .
       dockerfile: waitlist/Dockerfile
     env_file:
-      - ./waitlist/.env
+      - ./common/config/.env
     depends_on:
-      waitlistDB:
+      appDB:
         condition: service_healthy
     networks:
       - indeq-net
-  passwordDB:
+  appDB:
     image: postgres:latest
     env_file:
-      - ./authentication/.env
+      - ./common/config/.env
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
@@ -95,31 +95,12 @@ services:
     expose:
       - "5432"
     volumes:
-      - auth_data:/var/lib/postgresql/data
-    networks:
-      - indeq-net
-  waitlistDB:
-    image: postgres:latest
-    env_file:
-      - ./waitlist/.env
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    command:
-      - -c
-      - ssl=off
-    expose:
-      - "5432"
-    volumes:
-      - waitlist_data:/var/lib/postgresql/data
+      - app_data:/var/lib/postgresql/data
     networks:
       - indeq-net
 
 volumes:
-  auth_data:
-  waitlist_data:
+  app_data:
   ollama_models:
   rabbitmq_data:
 

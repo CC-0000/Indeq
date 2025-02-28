@@ -69,9 +69,14 @@ func main() {
 	log.Println("Starting the waitlist server...")
 	
 	// Load all environmental variables
-	dbURL := os.Getenv("WAITLIST_DATABASE_URL")
+	err := config.LoadSharedConfig()
+	if err != nil {
+		log.Fatalf("Error loading .env file: %v", err)
+	}
+	
+	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		log.Fatal("WAITLIST_DATABASE_URL environment variable is required")
+		log.Fatalf("DATABASE_RUL environment variable is required")
 	}
 
 	// Load the TLS configuration values
@@ -91,10 +96,10 @@ func main() {
 
 	_, err = db.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS waitlist (
-		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-		email VARCHAR(255) UNIQUE NOT NULL,
-		created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-	);
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			email VARCHAR(255) UNIQUE NOT NULL,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+		);
 	`)
 	if err != nil {
 		log.Fatalf("Failed to create tables: %v", err)
