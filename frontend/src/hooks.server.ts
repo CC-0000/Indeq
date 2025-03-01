@@ -1,14 +1,27 @@
 // hooks server: handles session and authentication cookies
-import { redirect } from '@sveltejs/kit';
 import type { Handle } from '@sveltejs/kit';
+import { redirect } from '@sveltejs/kit';
+import { verifyToken } from '$lib/server/auth';
+import { APP_ENV } from '$env/static/private';
 
 export const handle: Handle = async ({ event, resolve }) => {
-    const session = event.cookies.get('session');
-    if (
-        (event.url.pathname.startsWith('/chat') || event.url.pathname.startsWith('/profile')) &&
-        !session
-    ) {
-        return redirect(302, '/login');
+    const jwt = event.cookies.get('jwt');
+
+    const publicRoutes = ['/', '/login', '/register'];
+    const productionRoutes = ['/'];
+
+    if (APP_ENV === 'PRODUCTION' && !productionRoutes.includes(event.url.pathname)) {
+        return redirect(302, '/');
     }
+
+    if (!publicRoutes.includes(event.url.pathname)) {
+        const isValid = jwt && await verifyToken(jwt);
+        
+        if (!isValid) {
+            return redirect(302, '/login');
+        }
+    }
+
     return resolve(event);
 }
+

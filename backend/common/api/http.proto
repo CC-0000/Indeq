@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+option go_package = "github.com/cc-0000/indeq/common/api";
+
+package api;
+
+message HttpHelloResponse {
+  string message = 1;
+}
+
+message HttpQueryRequest {
+  string query = 1;
+}
+
+message HttpQueryResponse {
+  string conversation_id = 1;
+}
+
+message HttpRegisterRequest {
+  string email = 1;
+  string name = 2;
+  string password = 3;
+}
+
+message HttpRegisterResponse {
+  bool success = 1;
+  string error = 2;
+}
+
+message HttpLoginRequest {
+  string email = 1;
+  string password = 2;
+}
+
+message HttpLoginResponse {
+  string token = 1;
+  string error = 2;
+}
+
+message HttpVerifyResponse {
+  bool valid = 1;
+}

@@ -27,16 +27,24 @@ export const actions = {
                 const msg = await res.text();
                 
                 // Return an error to the page to display
-                return fail(res.status, { errorMessage: msg });
+                return fail(res.status, { error: msg });
             }
 
             const response = await res.json();
-            cookies.set('session', response.token, { path: '/', maxAge: 60 * 60 * 24 * 30 });
 
-            if (response.error === '') {
+            // Store JWT token in an HTTP-only cookie
+            cookies.set('jwt', response.token, {
+                httpOnly: true, // Prevent client-side access
+                secure: true,   // Only send over HTTPS
+                path: '/',      // Accessible across the entire app
+                maxAge: 60 * 60 * 24, // 1 day
+                sameSite: 'strict'
+            });
+
+            if (response.error == null || response.error === '') {
                 return { success: true };
             } else {
-                return fail(400, { errorMessage: response.error });
+                return fail(400, { error: response.error });
             }
 
         } catch (error) {
