@@ -395,9 +395,9 @@ func main() {
     
     // Load all environmetal variables
 
-    dbURL := os.Getenv("INTEGRATION_DATABASE_URL")
+    dbURL := os.Getenv("DATABASE_URL")
     if dbURL == "" {
-        log.Fatalf("INTEGRATION_DATABASE_URL envionment variable is required")
+        log.Fatalf("DATABASE_URL envionment variable is required")
     }
     
     // Connect to db
@@ -418,23 +418,14 @@ func main() {
             refresh_token TEXT NOT NULL,
             expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE (user_id, provider)
         );
     `)
 
     if err != nil {
         log.Fatalf("Failed to create oauth_tokens table: %v", err)
     }
-
-	_, err = db.ExecContext(ctx, `
-		ALTER TABLE oauth_tokens
-		ADD CONSTRAINT user_provider_unique
-		UNIQUE (user_id, provider);
-	`)
-
-	if err != nil {
-		log.Fatalf("Failed to create user_provider index: %v", err)
-	}
 
     fmt.Println("Database setup completed: oauth_tokens table is ready.")
 	startTokenRefreshWorker(db)

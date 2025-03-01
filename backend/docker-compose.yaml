@@ -5,7 +5,7 @@ services:
       context: .
       dockerfile: query/Dockerfile
     env_file:
-      - ./query/.env
+      - ./common/config/.env
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -49,9 +49,9 @@ services:
       context: .
       dockerfile: authentication/Dockerfile
     env_file:
-      - ./authentication/.env
+      - ./common/config/.env
     depends_on:
-      passwordDB:
+      appDB:
         condition: service_healthy
     networks:
       - indeq-net
@@ -62,7 +62,7 @@ services:
       context: .
       dockerfile: gateway/Dockerfile
     env_file:
-      - ./gateway/.env
+      - ./common/config/.env
     ports:
       - "8080:8080"
     depends_on:
@@ -79,34 +79,16 @@ services:
       context: .
       dockerfile: integration/Dockerfile
     env_file:
-      - ./integration/.env
+      ./common/config/.env
     depends_on:
-      integrationDB:
+      appDB:
         condition: service_healthy
     networks:
       - indeq-net
-  integrationDB:
+  appDB:
     image: postgres:latest
     env_file:
-      - ./integration/.env
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    command:
-      - -c
-      - ssl=off
-    expose: 
-      - "5432"
-    volumes:
-      - integration_postgres_data:/var/lib/postgresql/data
-    networks:
-      - indeq-net
-  passwordDB:
-    image: postgres:latest
-    env_file:
-      - ./authentication/.env
+      - ./common/config/.env
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
@@ -118,13 +100,12 @@ services:
     expose:
       - "5432"
     volumes:
-      - auth_postgres_data:/var/lib/postgresql/data
+      - app_data:/var/lib/postgresql/data
     networks:
       - indeq-net
 
 volumes:
-  integration_postgres_data:
-  auth_postgres_data:
+  app_data:
   ollama_models:
   rabbitmq_data:
 

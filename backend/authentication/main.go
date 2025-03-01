@@ -15,6 +15,7 @@ import (
 	"time"
 
 	pb "github.com/cc-0000/indeq/common/api"
+	"github.com/cc-0000/indeq/common/config"
 	"github.com/golang-jwt/jwt/v5"
 	_ "github.com/lib/pq"
 	"golang.org/x/crypto/argon2"

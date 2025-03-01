@@ -244,6 +244,7 @@ func stringToEnumProvider(provider string) (pb.Provider, error) {
 
 func handleGetIntegrationsGenerator(clients *ServiceClients) http.HandlerFunc {
 	return func(w http.ResponseWriter, r * http.Request) {
+		log.Println("Received request to get users integrations")
 		// Set up context
 		ctx := r.Context()
 
@@ -256,6 +257,7 @@ func handleGetIntegrationsGenerator(clients *ServiceClients) http.HandlerFunc {
 		})
 
 		if err != nil || !verifyRes.Valid {
+			log.Println("Invalid token")
 			http.Error(w, "Invalid token", http.StatusUnauthorized)
 			return
 		}
@@ -269,14 +271,12 @@ func handleGetIntegrationsGenerator(clients *ServiceClients) http.HandlerFunc {
 			return
 		}
 
-		response := struct {
-			Providers []string `json:"providers"`
-		}{}
-
-		for _, provider := range res.Providers {
-			response.Providers = append(response.Providers, provider.String())
+		response := &pb.HttpGetIntegrationsResponse{
+			Providers: make([]string, len(res.Providers)),
 		}
-
+		for i, provider := range res.Providers {
+			response.Providers[i] = provider.String()
+		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(response)
 	}
@@ -284,16 +284,15 @@ func handleGetIntegrationsGenerator(clients *ServiceClients) http.HandlerFunc {
 
 func handleConnectIntegrationGenerator(clients *ServiceClients) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		
+		var connectIntegrationRequest pb.HttpConnectIntegrationRequest
 		// Set up context
 		ctx := r.Context()
 
-		var reqBody ConnectIntegrationRequest
-		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+		if err := json.NewDecoder(r.Body).Decode(&connectIntegrationRequest); err != nil {
 			http.Error(w, "Invalid JSON body", http.StatusBadRequest)
 			return
 		}
-		if reqBody.Provider == "" || reqBody.AuthCode == "" {
+		if connectIntegrationRequest.Provider == "" || connectIntegrationRequest.AuthCode == "" {
 			http.Error(w, "Missing provider or auth code", http.StatusBadRequest)
 			return
 		}
@@ -311,7 +310,7 @@ func handleConnectIntegrationGenerator(clients *ServiceClients) http.HandlerFunc
 			return
 		}
 
-		provider, err := stringToEnumProvider(reqBody.Provider)
+		provider, err := stringToEnumProvider(connectIntegrationRequest.Provider)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -320,7 +319,7 @@ func handleConnectIntegrationGenerator(clients *ServiceClients) http.HandlerFunc
 		connectRes, err := clients.integrationClient.ConnectIntegration(ctx, &pb.ConnectIntegrationRequest{
 			UserId: verifyRes.UserId,
 			Provider: provider,
-			AuthCode: reqBody.AuthCode,
+			AuthCode: connectIntegrationRequest.AuthCode,
 		})
 		
 		if err != nil {
@@ -328,7 +327,7 @@ func handleConnectIntegrationGenerator(clients *ServiceClients) http.HandlerFunc
 			return
 		}
 
-		respBody := &ConnectIntegrationResponse{
+		respBody := &pb.HttpConnectIntegrationResponse{
 			Success: connectRes.Success,
 			Message: connectRes.Message,
 			ErrorDetails: connectRes.ErrorDetails,
@@ -340,15 +339,15 @@ func handleConnectIntegrationGenerator(clients *ServiceClients) http.HandlerFunc
 
 func handleDisconnectIntegrationGenerator(clients *ServiceClients) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		var disconnectIntegrationRequest pb.HttpDisconnectIntegrationRequest
 		// Set up context
 		ctx := r.Context()
 
-		var reqBody DisconnectIntegrationRequest
-		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+		if err := json.NewDecoder(r.Body).Decode(&disconnectIntegrationRequest); err != nil {
 			http.Error(w, "Invalid JSON body", http.StatusBadRequest)
 			return
 		}
-		if reqBody.Provider == "" {
+		if disconnectIntegrationRequest.Provider == "" {
 			http.Error(w, "Missing provider", http.StatusBadRequest)
 			return
 		}
@@ -366,7 +365,7 @@ func handleDisconnectIntegrationGenerator(clients *ServiceClients) http.HandlerF
 			return
 		}
 
-		provider, err := stringToEnumProvider(reqBody.Provider)
+		provider, err := stringToEnumProvider(disconnectIntegrationRequest.Provider)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Invalid provider: %v", err), http.StatusBadRequest)
 			return
@@ -382,7 +381,7 @@ func handleDisconnectIntegrationGenerator(clients *ServiceClients) http.HandlerF
 			return
 		}
 
-		respBody := &DisconnectIntegrationResponse{
+		respBody := &pb.HttpDisconnectIntegrationResponse{
 			Success: disconnectRes.Success,
 			Message: disconnectRes.Message,
 		}
@@ -545,7 +544,9 @@ func main() {
 	// Connect to the integration service
 	integrationConn, err := grpc.NewClient(
 		os.Getenv("INTEGRATION_ADDRESS"),
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
+			RootCAs: certPool,
+		})),
 	)
 	if err != nil {
 		log.Fatalf("Failed to establish connection with integration-service: %v", err)

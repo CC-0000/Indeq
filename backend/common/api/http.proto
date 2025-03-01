@@ -40,3 +40,39 @@ message HttpLoginResponse {
 message HttpVerifyResponse {
   bool valid = 1;
 }
+
+message HttpGetIntegrationsRequest {
+}
+
+message HttpGetIntegrationsResponse {
+  repeated string providers = 1;
+}
+
+message HttpConnectIntegrationRequest {
+  string provider = 1;
+  string auth_code = 2;
+}
+
+message HttpConnectIntegrationResponse {
+  bool success = 1;
+  string message = 2;
+  string error_details = 3;
+}
+
+message HttpDisconnectIntegrationRequest {
+  string provider = 1;
+}
+
+message HttpDisconnectIntegrationResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message HttpGetOAuthURLRequest {
+  string provider = 1;
+  string state = 2;
+}
+
+message HttpGetOAuthURLResponse {
+  string url = 1;
+}
