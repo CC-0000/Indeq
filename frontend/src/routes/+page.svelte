@@ -1,7 +1,6 @@
 <script lang="ts">
   import { LockIcon, MailIcon } from "svelte-feather-icons";
   import { onMount } from "svelte";
-  import { PUBLIC_GO_BACKEND_URL } from "$env/static/public";
   import { toast } from "svelte-sonner";
   
   let email = "";
@@ -12,7 +11,7 @@
     submitStatus = 'loading';
 
     try {
-      const response = await fetch(`${PUBLIC_GO_BACKEND_URL}/api/waitlist`, {
+      const response = await fetch('/api/waitlist', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -28,7 +27,7 @@
 
       submitStatus = 'success';
       email = '';
-      toast.success(result.message || "Successfully added to the waitlist! 🎉");
+      toast.success(result.message || 'Successfully added to the waitlist! 🎉');
     } catch (error) {
       submitStatus = 'error';
       let errorMessage = "Failed to submit email. Please try again";
@@ -79,7 +78,6 @@
       <div class="relative flex-1">
         <MailIcon size="20" class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
         <input
-          type="email"
           bind:value={email}
           placeholder="Enter your email..."
           class="w-full pl-10 p-2 bg-white border border-gray-200 rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary placeholder-gray-400"
