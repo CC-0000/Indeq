@@ -4,65 +4,65 @@
 echo "Creating .env files..."
 
 # Define the directories
-declare -a dirs=("backend/gateway" "backend/authentication" "backend/query", "backend/common/config")
+declare -a dirs=("backend/gateway" "backend/authentication" "backend/query" "backend/common/config")
 
 # Loop through each directory and create the .env file
 for dir in "${dirs[@]}"; do
     echo "Creating .env in $dir"
     {
-        echo "AUTH_PORT=${{ secrets.AUTH_PORT }}"
-        echo "AUTH_ADDRESS=${{ secrets.AUTH_ADDRESS }}"
-        echo "QUERY_PORT=${{ secrets.QUERY_PORT }}"
-        echo "QUERY_ADDRESS=${{ secrets.QUERY_ADDRESS }}"
-        echo "VECTOR_PORT=${{ secrets.VECTOR_PORT }}"
-        echo "VECTOR_ADDRESS=${{ secrets.VECTOR_ADDRESS }}"
-        echo "GATEWAY_ADDRESS=${{ secrets.GATEWAY_ADDRESS }}"
+        echo "AUTH_PORT=${AUTH_PORT}"
+        echo "AUTH_ADDRESS=${AUTH_ADDRESS}"
+        echo "QUERY_PORT=${QUERY_PORT}"
+        echo "QUERY_ADDRESS=${QUERY_ADDRESS}"
+        echo "VECTOR_PORT=${VECTOR_PORT}"
+        echo "VECTOR_ADDRESS=${VECTOR_ADDRESS}"
+        echo "GATEWAY_ADDRESS=${GATEWAY_ADDRESS}"
 
         # Database parameters
-        echo "DATABASE_URL=${{ secrets.DATABASE_URL }}"
-        echo "POSTGRES_USER=${{ secrets.POSTGRES_USER }}"
-        echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}"
-        echo "POSTGRES_DB=${{ secrets.POSTGRES_DB }}"
+        echo "DATABASE_URL=${DATABASE_URL}"
+        echo "POSTGRES_USER=${POSTGRES_USER}"
+        echo "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}"
+        echo "POSTGRES_DB=${POSTGRES_DB}"
 
-        echo "JWT_SECRET=${{ secrets.JWT_SECRET }}"
+        echo "JWT_SECRET=${JWT_SECRET}"
 
         # Argon2 Parameters
-        echo "ARGON2_MEMORY=${{ secrets.ARGON2_MEMORY }}"
-        echo "ARGON2_ITERATIONS=${{ secrets.ARGON2_ITERATIONS }}"
-        echo "ARGON2_PARALLELISM=${{ secrets.ARGON2_PARALLELISM }}"
-        echo "ARGON2_SALT_LENGTH=${{ secrets.ARGON2_SALT_LENGTH }}"
-        echo "ARGON2_KEY_LENGTH=${{ secrets.ARGON2_KEY_LENGTH }}"
+        echo "ARGON2_MEMORY=${ARGON2_MEMORY}"
+        echo "ARGON2_ITERATIONS=${ARGON2_ITERATIONS}"
+        echo "ARGON2_PARALLELISM=${ARGON2_PARALLELISM}"
+        echo "ARGON2_SALT_LENGTH=${ARGON2_SALT_LENGTH}"
+        echo "ARGON2_KEY_LENGTH=${ARGON2_KEY_LENGTH}"
 
         # Password and Email Constraints
-        echo "MIN_PASSWORD_LENGTH=${{ secrets.MIN_PASSWORD_LENGTH }}"
-        echo "MAX_PASSWORD_LENGTH=${{ secrets.MAX_PASSWORD_LENGTH }}"
-        echo "MAX_EMAIL_LENGTH=${{ secrets.MAX_EMAIL_LENGTH }}"
+        echo "MIN_PASSWORD_LENGTH=${MIN_PASSWORD_LENGTH}"
+        echo "MAX_PASSWORD_LENGTH=${MAX_PASSWORD_LENGTH}"
+        echo "MAX_EMAIL_LENGTH=${MAX_EMAIL_LENGTH}"
 
         # RabbitMQ parameters
-        echo "RABBITMQ_URL=${{ secrets.RABBITMQ_URL }}"
-        echo "RABBITMQ_DEFAULT_USER=${{ secrets.RABBITMQ_DEFAULT_USER }}"
-        echo "RABBITMQ_DEFAULT_PASS=${{ secrets.RABBITMQ_DEFAULT_PASS }}"
-        echo "RABBITMQ_LOGS=${{ secrets.RABBITMQ_LOGS }}"
+        echo "RABBITMQ_URL=${RABBITMQ_URL}"
+        echo "RABBITMQ_DEFAULT_USER=${RABBITMQ_DEFAULT_USER}"
+        echo "RABBITMQ_DEFAULT_PASS=${RABBITMQ_DEFAULT_PASS}"
+        echo "RABBITMQ_LOGS=${RABBITMQ_LOGS}"
 
         # Ollama parameters
-        echo "OLLAMA_URL=${{ secrets.OLLAMA_URL }}"
-        echo "LLM_MODEL=${{ secrets.LLM_MODEL }}"
+        echo "OLLAMA_URL=${OLLAMA_URL}"
+        echo "LLM_MODEL=${LLM_MODEL}"
 
         # Zilliz parameters
-        echo "ZILLIZ_ADDRESS=${{ secrets.ZILLIZ_ADDRESS }}"
-        echo "ZILLIZ_API_KEY=${{ secrets.ZILLIZ_API_KEY }}"
+        echo "ZILLIZ_ADDRESS=${ZILLIZ_ADDRESS}"
+        echo "ZILLIZ_API_KEY=${ZILLIZ_API_KEY}"
 
         # TLS parameters in base 64
-        echo "CA_CRT=${{ secrets.CA_CRT }}"
-        echo "QUERY_CRT=${{ secrets.QUERY_CRT }}"
-        echo "QUERY_KEY=${{ secrets.QUERY_KEY }}"
-        echo "AUTH_CRT=${{ secrets.AUTH_CRT }}"
-        echo "AUTH_KEY=${{ secrets.AUTH_KEY }}"
-        echo "GATEWAY_CRT=${{ secrets.GATEWAY_CRT }}"
-        echo "GATEWAY_KEY=${{ secrets.GATEWAY_KEY }}"
+        echo "CA_CRT=${CA_CRT}"
+        echo "QUERY_CRT=${QUERY_CRT}"
+        echo "QUERY_KEY=${QUERY_KEY}"
+        echo "AUTH_CRT=${AUTH_CRT}"
+        echo "AUTH_KEY=${AUTH_KEY}"
+        echo "GATEWAY_CRT=${GATEWAY_CRT}"
+        echo "GATEWAY_KEY=${GATEWAY_KEY}"
 
         # CORS parameters
-        echo "ALLOWED_CLIENT_IP=${{ secrets.ALLOWED_CLIENT_IP }}"
+        echo "ALLOWED_CLIENT_IP=${ALLOWED_CLIENT_IP}"
     } > "$dir/.env"
 done
 
