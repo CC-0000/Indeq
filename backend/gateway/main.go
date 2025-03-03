@@ -292,7 +292,12 @@ func handleConnectIntegrationGenerator(clients *ServiceClients) http.HandlerFunc
 			http.Error(w, "Invalid JSON body", http.StatusBadRequest)
 			return
 		}
+
+		log.Printf("Provider: %s", connectIntegrationRequest.Provider)
+		log.Printf("Auth code: %s", connectIntegrationRequest.AuthCode)
+
 		if connectIntegrationRequest.Provider == "" || connectIntegrationRequest.AuthCode == "" {
+			log.Println("Missing provider or auth code")
 			http.Error(w, "Missing provider or auth code", http.StatusBadRequest)
 			return
 		}
@@ -321,7 +326,7 @@ func handleConnectIntegrationGenerator(clients *ServiceClients) http.HandlerFunc
 			Provider: provider,
 			AuthCode: connectIntegrationRequest.AuthCode,
 		})
-		
+
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Failed to connect integration: %v", err), http.StatusInternalServerError)
 			return

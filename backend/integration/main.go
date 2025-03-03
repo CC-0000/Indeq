@@ -14,8 +14,10 @@ import (
 	"time"
 
 	pb "github.com/cc-0000/indeq/common/api"
+	"github.com/cc-0000/indeq/common/config"
 	_ "github.com/lib/pq"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 type integrationServer struct {
@@ -399,6 +401,12 @@ func main() {
     if dbURL == "" {
         log.Fatalf("DATABASE_URL envionment variable is required")
     }
+
+	// Load the TLS configuration values
+	tlsConfig, err := config.LoadTLSFromEnv("INTEGRATION_CRT", "INTEGRATION_KEY")
+	if err != nil {
+		log.Fatal("Error loading TLS config for integration service")
+	}
     
     // Connect to db
     db, err := sql.Open("postgres", dbURL)
@@ -427,6 +435,13 @@ func main() {
         log.Fatalf("Failed to create oauth_tokens table: %v", err)
     }
 
+	_, err = db.ExecContext(ctx, `
+		CREATE INDEX IF NOT EXISTS user_provider_idx ON oauth_tokens (user_id, provider);
+	`)
+	if err != nil {
+		log.Fatalf("Failed to create user_provider index: %v", err)
+	}
+
     fmt.Println("Database setup completed: oauth_tokens table is ready.")
 	startTokenRefreshWorker(db)
     
@@ -442,10 +457,14 @@ func main() {
     }
     defer listener.Close()
 
-    log.Println("Creating the integration server...")
+    log.Println("Creating the integration server")
 
-    grpcServer := grpc.NewServer()
-    pb.RegisterIntegrationServiceServer(grpcServer, &integrationServer{db: db})
+	opts := []grpc.ServerOption{
+		grpc.Creds(credentials.NewTLS(tlsConfig)),
+	}
+
+	grpcServer := grpc.NewServer(opts...)
+	pb.RegisterIntegrationServiceServer(grpcServer, &integrationServer{db: db})
     log.Printf("Integration Service listening on %v\n", listener.Addr())
     if err := grpcServer.Serve(listener); err != nil {
         log.Fatalf("Failed to serve: %v", err)

@@ -38,7 +38,7 @@ export const actions = {
                 secure: true,   // Only send over HTTPS
                 path: '/',      // Accessible across the entire app
                 maxAge: 60 * 60 * 24, // 1 day
-                sameSite: 'strict'
+                sameSite: 'lax'
             });
 
             if (response.error == null || response.error === '') {
