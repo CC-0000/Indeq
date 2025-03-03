@@ -40,3 +40,12 @@ message HttpLoginResponse {
 message HttpVerifyResponse {
   bool valid = 1;
 }
+
+message HttpAddToWaitlistRequest {
+  string email = 1;
+}
+
+message HttpAddToWaitlistResponse {
+  bool success = 1;
+  string message = 2;
+}
