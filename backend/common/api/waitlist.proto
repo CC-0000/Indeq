@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+option go_package = "github.com/cc-0000/indeq/common/api";
+
+package api;
+
+service WaitlistService {
+    rpc AddToWaitlist(AddToWaitlistRequest) returns (AddToWaitlistResponse);
+}
+
+message AddToWaitlistRequest {
+    string email = 1;
+}
+
+message AddToWaitlistResponse {
+    bool success = 1;
+    string message = 2;
+}

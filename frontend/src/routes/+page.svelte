@@ -1,6 +1,43 @@
-<script>
-    import { LockIcon, MailIcon } from "svelte-feather-icons";
+<script lang="ts">
+  import { LockIcon, MailIcon } from "svelte-feather-icons";
   import { onMount } from "svelte";
+  import { PUBLIC_GO_BACKEND_URL } from "$env/static/public";
+  import { toast } from "svelte-sonner";
+  
+  let email = "";
+  let submitStatus: 'idle' | 'loading' | 'success' | 'error' = 'idle';
+
+  async function handleSubmit(event: SubmitEvent) {
+    event.preventDefault();
+    submitStatus = 'loading';
+
+    try {
+      const response = await fetch(`${PUBLIC_GO_BACKEND_URL}/api/waitlist`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email })
+      });
+
+      const result = await response.json();
+
+      if(!response.ok || !result.success) {
+        throw new Error(result.message || 'Submission failed');
+      }
+
+      submitStatus = 'success';
+      email = '';
+      toast.success(result.message || "Successfully added to the waitlist! 🎉");
+    } catch (error) {
+      submitStatus = 'error';
+      let errorMessage = "Failed to submit email. Please try again";
+      if (error instanceof Error) {
+        errorMessage = error.message;
+      }
+      toast.error(errorMessage);
+    }
+  }
 
   // Blob positions and sizes
   let blobs = [
@@ -21,66 +58,68 @@
     };
     animate();
   });
-  </script>
+</script>
   
-  <main class="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-white to-gray-50 p-6 relative overflow-hidden">
-    <!-- Blurred Gradient Animation -->
-    {#each blobs as blob}
-        <div
-        class="absolute rounded-full opacity-50 blur-3xl"
-        style={`width: ${blob.size}px; height: ${blob.size}px; background: ${blob.color}; left: ${blob.x}%; top: ${blob.y}%;`}
-        ></div>
-    {/each}
-  
-    <div class="w-full max-w-md text-center relative z-10">
-      <!-- App Name -->
-      <h1 class="text-4xl text-gray-900 mb-3">Indeq</h1>
-      <p class="text-gray-600 text-lg">Next generation private data search</p>
-  
-      <!-- Email Signup Form -->
-      <form class="flex items-center gap-3 mt-8">
-        <div class="relative flex-1">
-          <MailIcon size="20" class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-          <input
-            type="email"
-            placeholder="Enter your email..."
-            class="w-full pl-10 p-2 bg-white border border-gray-200 rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary placeholder-gray-400"
-          />
-        </div>
-        <button
-          type="submit"
-          class="p-2 rounded-lg bg-primary text-white hover:bg-blue-600 transition-colors"
-        >
-          Notify Me
-        </button>
-      </form>
+<main class="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-white to-gray-50 p-6 relative overflow-hidden">
+  <!-- Blurred Gradient Animation -->
+  {#each blobs as blob}
+      <div
+      class="absolute rounded-full opacity-50 blur-3xl"
+      style={`width: ${blob.size}px; height: ${blob.size}px; background: ${blob.color}; left: ${blob.x}%; top: ${blob.y}%;`}
+      ></div>
+  {/each}
 
-      <!-- Coming Soon Message -->
-      <div class="flex items-center justify-center gap-3 mt-4">
-        <LockIcon size="18" class="text-primary" />
-        <p class="text-lg pt-1 font-medium text-gray-800">Coming Soon, Join the waitlist</p>
+  <div class="w-full max-w-md text-center relative z-10">
+    <!-- App Name -->
+    <h1 class="text-4xl text-gray-900 mb-3">Indeq</h1>
+    <p class="text-gray-600 text-lg">Next generation private data search</p>
+
+    <!-- Email Signup Form -->
+    <form class="flex items-center gap-3 mt-8" on:submit={handleSubmit}>
+      <div class="relative flex-1">
+        <MailIcon size="20" class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+        <input
+          type="email"
+          bind:value={email}
+          placeholder="Enter your email..."
+          class="w-full pl-10 p-2 bg-white border border-gray-200 rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary placeholder-gray-400"
+        />
       </div>
+      <button
+        type="submit"
+        class="p-2 rounded-lg bg-primary text-white hover:bg-blue-600 transition-colors"
+        disabled={submitStatus === 'loading'}
+      >
+        Notify Me
+      </button>
+    </form>
 
-      <hr class="border-t border-gray-300 my-8" />
-     
-      <div class="">
-        <p class="text-lg pt-1 font-medium text-gray-600 mb-3">Built by engineers from</p>
-        <div class="flex items-center justify-center gap-6 flex-wrap">
-          <img src="/meta.svg" alt="Meta" class="h-8 w-8 opacity-50 hover:opacity-100 transition-opacity" />  
-          <img src="/roblox.svg" alt="Roblox" class="h-8 w-16 opacity-50 hover:opacity-100 transition-opacity" />
-          <img src="/google.svg" alt="Google" class="h-8 w-8 opacity-50 hover:opacity-100 transition-opacity " />
-          <img src="/coinbase.svg" alt="Coinbase" class="h-8 w-16 opacity-50 hover:opacity-100 transition-opacity" />
-          <img src="/oracle.svg" alt="Oracle" class="h-6 w-9 opacity-50 hover:opacity-100 transition-opacity" />
-          <img src="/aws.svg" alt="Amazon" class="mt-1 h-8 w-8 opacity-50 hover:opacity-100 transition-opacity" />
-          <img src="/atlassian.svg" alt="Atlassian" class="-mt-2 h-8 w-8 opacity-50 hover:opacity-100 transition-opacity" />
-        </div>
+    <!-- Coming Soon Message -->
+    <div class="flex items-center justify-center gap-3 mt-4">
+      <LockIcon size="18" class="text-primary" />
+      <p class="text-lg pt-1 font-medium text-gray-800">Coming Soon, Join the waitlist</p>
+    </div>
+
+    <hr class="border-t border-gray-300 my-8" />
+    
+    <div>
+      <p class="text-lg pt-1 font-medium text-gray-600 mb-3">Built by engineers from</p>
+      <div class="flex items-center justify-center gap-6 flex-wrap">
+        <img src="/meta.svg" alt="Meta" class="h-8 w-8 opacity-50 hover:opacity-100 transition-opacity" />  
+        <img src="/roblox.svg" alt="Roblox" class="h-8 w-16 opacity-50 hover:opacity-100 transition-opacity" />
+        <img src="/google.svg" alt="Google" class="h-8 w-8 opacity-50 hover:opacity-100 transition-opacity " />
+        <img src="/coinbase.svg" alt="Coinbase" class="h-8 w-16 opacity-50 hover:opacity-100 transition-opacity" />
+        <img src="/oracle.svg" alt="Oracle" class="h-6 w-9 opacity-50 hover:opacity-100 transition-opacity" />
+        <img src="/aws.svg" alt="Amazon" class="mt-1 h-8 w-8 opacity-50 hover:opacity-100 transition-opacity" />
+        <img src="/atlassian.svg" alt="Atlassian" class="-mt-2 h-8 w-8 opacity-50 hover:opacity-100 transition-opacity" />
       </div>
     </div>
-  </main>
+  </div>
+</main>
   
-  <style>
-    /* Smooth transitions for blobs */
-    .absolute {
-      transition: all 0.5s ease-out;
-    }
-  </style>
+<style>
+  /* Smooth transitions for blobs */
+  .absolute {
+    transition: all 0.5s ease-out;
+  }
+</style>
