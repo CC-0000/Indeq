@@ -22,11 +22,6 @@ jobs:
     - name: Checkout Repository
       uses: actions/checkout@v2
 
-    - name: Check File Directory
-      run: |
-        echo "Checking file directory..."
-        ls -la
-
     - name: Install Protocol Buffers Compiler
       run: |
         sudo apt-get update
@@ -96,15 +91,6 @@ jobs:
         chmod +x ./generate_env.sh
         ./generate_env.sh
 
-    - name: Print Files in Directories
-      run: |
-        echo "Files in backend/gateway:"
-        ls -la backend/gateway
-        echo "Files in backend/authentication:"
-        ls -la backend/authentication
-        echo "Files in backend/query:"
-        ls -la backend/query
-
     - name: Generate Code
       run: |
         cd backend/common && make gen
@@ -118,6 +104,10 @@ jobs:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ env.AWS_REGION }}
+
+    - name: Update kubeconfig
+      run: |
+        aws eks update-kubeconfig --name $EKS_CLUSTER_NAME --region $AWS_REGION
 
     - name: Login to Amazon ECR
       run: |
