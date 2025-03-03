@@ -8,14 +8,24 @@ const DB_URI = MONGODB_URI || 'mongodb://localhost:27017';
 const DB_NAME = 'indeq';
 const COLLECTION_NAME = 'waitlist';
 
-// Create a MongoDB client
-const client = new MongoClient(DB_URI);
+// Create a MongoDB client with proper options
+const client = new MongoClient(DB_URI, {
+  // Add connection pooling options for better performance
+  maxPoolSize: 10,
+  minPoolSize: 5
+});
+
+// Use a singleton pattern for the database connection
+let dbConnection: ReturnType<typeof client.db> | null = null;
 
 // Connect to MongoDB
 async function connectToDatabase() {
+  if (dbConnection) return dbConnection;
+  
   try {
     await client.connect();
-    return client.db(DB_NAME);
+    dbConnection = client.db(DB_NAME);
+    return dbConnection;
   } catch (error) {
     console.error('Failed to connect to MongoDB:', error);
     throw error;
@@ -43,25 +53,37 @@ export const POST: RequestHandler = async ({ request }) => {
       return json({ success: false, message: 'Please provide a valid email address' }, { status: 400 });
     }
 
+    // Normalize email to lowercase
+    const normalizedEmail = email.toLowerCase();
+
     // Connect to MongoDB
     const db = await connectToDatabase();
     const collection = db.collection(COLLECTION_NAME);
     
-    // Check if email already exists
-    const existingEmail = await collection.findOne({ email: email.toLowerCase() });
-    if (existingEmail) {
+    // Use updateOne with upsert option to handle race conditions
+    // This will either:
+    // 1. Insert the document if it doesn't exist
+    // 2. Do nothing if it already exists (due to the filter)
+    const result = await collection.updateOne(
+      { email: normalizedEmail }, // filter
+      { 
+        $setOnInsert: { 
+          email: normalizedEmail,
+          createdAt: new Date(),
+          source: 'website'
+        } 
+      },
+      { upsert: true } // create if doesn't exist
+    );
+    
+    // Check if a new document was inserted
+    if (result.upsertedCount === 0 && result.matchedCount > 0) {
+      // Email already exists
       return json({ 
         success: false, 
         message: 'Email is already on the waitlist' 
       }, { status: 400 });
     }
-    
-    // Insert email into MongoDB (store as lowercase for consistency)
-    await collection.insertOne({ 
-      email: email.toLowerCase(), 
-      createdAt: new Date(),
-      source: 'website'
-    });
     
     return json({ 
       success: true, 
