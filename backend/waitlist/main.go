@@ -76,7 +76,7 @@ func main() {
 	
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		log.Fatalf("DATABASE_RUL environment variable is required")
+		log.Fatalf("DATABASE_URL environment variable is required")
 	}
 
 	// Load the TLS configuration values
