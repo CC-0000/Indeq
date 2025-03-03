@@ -58,6 +58,15 @@ jobs:
         chmod +x ./generate_env.sh
         ./generate_env.sh
 
+    - name: Print Files in Directories
+      run: |
+        echo "Files in backend/gateway:"
+        ls -la backend/gateway
+        echo "Files in backend/authentication:"
+        ls -la backend/authentication
+        echo "Files in backend/query:"
+        ls -la backend/query
+        
     - name: Generate Code
       run: |
         cd backend/common && make gen
