@@ -4,7 +4,7 @@
 echo "Creating .env files..."
 
 # Define the directories
-declare -a dirs=("backend/gateway" "backend/authentication" "backend/query")
+declare -a dirs=("backend/gateway" "backend/authentication" "backend/query", "backend/common/config")
 
 # Loop through each directory and create the .env file
 for dir in "${dirs[@]}"; do
