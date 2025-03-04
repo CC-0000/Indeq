@@ -176,6 +176,7 @@ jobs:
 
     - name: Deploy to EKS
       run: |
+        kubectl version --short
         kubectl apply -f backend/k8s-manifest.yml
         kubectl apply -f configmap.yaml
 
