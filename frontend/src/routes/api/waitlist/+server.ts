@@ -45,12 +45,12 @@ export const POST: RequestHandler = async ({ request }) => {
     
     // Check if email is provided
     if (!email) {
-      return json({ success: false, message: 'Email is required' }, { status: 400 });
+      return json({ success: false, message: 'Email is required!' }, { status: 400 });
     }
     
     // Validate email format
     if (!isValidEmail(email)) {
-      return json({ success: false, message: 'Please provide a valid email address' }, { status: 400 });
+      return json({ success: false, message: 'Please provide a valid email address!' }, { status: 400 });
     }
 
     // Normalize email to lowercase
@@ -81,7 +81,7 @@ export const POST: RequestHandler = async ({ request }) => {
       // Email already exists
       return json({ 
         success: false, 
-        message: 'Email is already on the waitlist' 
+        message: 'Email is already on the waitlist! 😊' 
       }, { status: 400 });
     }
     
@@ -93,7 +93,7 @@ export const POST: RequestHandler = async ({ request }) => {
     console.error('Waitlist API error:', error);
     return json({ 
       success: false, 
-      message: 'Server error processing your request' 
+      message: 'Server error processing your request! 😢' 
     }, { status: 500 });
   }
 };
