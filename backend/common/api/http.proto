@@ -49,8 +49,8 @@ message HttpGetIntegrationsResponse {
 }
 
 message HttpConnectIntegrationRequest {
-  string provider = 1;
-  string auth_code = 2;
+  string Provider = 1;
+  string AuthCode = 2;
 }
 
 message HttpConnectIntegrationResponse {

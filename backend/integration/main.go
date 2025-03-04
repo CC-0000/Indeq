@@ -287,7 +287,6 @@ func (s *integrationServer) ConnectIntegration(ctx context.Context, req *pb.Conn
 			ErrorDetails: err.Error(),
 		}, nil
 	}
-
 	var existingRefreshToken string
 	err = s.db.QueryRowContext(ctx, `
 		SELECT refresh_token
