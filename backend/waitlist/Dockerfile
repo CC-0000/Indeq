@@ -17,28 +17,27 @@ COPY authentication/go.mod authentication/go.sum ./authentication/
 COPY waitlist/go.mod waitlist/go.sum ./waitlist/
 
 # Download dependencies
-RUN cd gateway && go mod download
+RUN cd waitlist && go mod download
 
 # Copy proto files
-COPY common/api/query.proto ./common/api/
-RUN protoc --go_out=. --go-grpc_out=. common/api/query.proto
+COPY common/api/waitlist.proto ./common/api/
+RUN protoc --go_out=. --go-grpc_out=. common/api/waitlist.proto
 
 # Copy source code
-COPY gateway/ ./gateway/
+COPY waitlist/ ./waitlist/
 COPY common/ ./common/
-COPY query/ ./query/
 
 # Build binary with module replacement
-RUN cd gateway && \
-    CGO_ENABLED=0 GOOS=linux go build -o ../gateway-service .
+RUN cd waitlist && \
+    CGO_ENABLED=0 GOOS=linux go build -o ../waitlist-service .
 
 # Runtime stage  
 FROM alpine:latest
 RUN apk --no-cache add ca-certificates
 
 WORKDIR /app/
-COPY --from=builder /app/gateway-service .
+COPY --from=builder /app/waitlist-service .
 COPY --from=builder /app/common/config/.env . 
 
-EXPOSE 8080
-CMD ["./gateway-service"]
+EXPOSE 50055
+CMD ["./waitlist-service"]

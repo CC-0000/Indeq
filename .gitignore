@@ -42,3 +42,4 @@ backend-config.yaml
 .cache/
 
 package-lock.json
+node_modules
