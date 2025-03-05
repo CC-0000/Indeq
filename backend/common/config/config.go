@@ -40,6 +40,46 @@ func LoadServerTLSFromEnv(certEnvName string, keyEnvName string) (*tls.Config, e
 }
 
 func LoadClientTLSFromEnv(certEnvName string, keyEnvName string, cacrtEnvName string) (*tls.Config, error) {
+	certPEM, err := base64.StdEncoding.DecodeString(os.Getenv(certEnvName))
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode cert: %v", err)
+	}
+
+	keyPEM, err := base64.StdEncoding.DecodeString(os.Getenv(keyEnvName))
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode key: %v", err)
+	}
+
+	cacrtPEM, err := base64.StdEncoding.DecodeString(os.Getenv(cacrtEnvName))
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode key: %v", err)
+	}
+
+	// Import client certificate/key pair
+	clientCert, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load key pair: %v", err)
+	}
+
+	// Add CA to cert pool
+	certpool := x509.NewCertPool()
+	if ok := certpool.AppendCertsFromPEM(cacrtPEM); !ok {
+		return nil, fmt.Errorf("failed to parse CA certificate")
+	}
+
+	// Create TLS configuration
+	tlsConfig := &tls.Config{
+		RootCAs: certpool,
+		// ClientCAs:          certpool,
+		Certificates:       []tls.Certificate{clientCert},
+		MinVersion:         tls.VersionTLS13,
+		InsecureSkipVerify: false,
+	}
+
+	return tlsConfig, nil
+}
+
+func LoadMTLSFromEnv(certEnvName string, keyEnvName string, cacrtEnvName string) (*tls.Config, error) {
 	certpool := x509.NewCertPool()
 
 	certPEM, err := base64.StdEncoding.DecodeString(os.Getenv(certEnvName))
@@ -70,11 +110,11 @@ func LoadClientTLSFromEnv(certEnvName string, keyEnvName string, cacrtEnvName st
 
 	// Create TLS configuration
 	tlsConfig := &tls.Config{
-		RootCAs:            certpool,
 		ClientCAs:          certpool,
 		Certificates:       []tls.Certificate{cert},
 		MinVersion:         tls.VersionTLS13,
-		InsecureSkipVerify: false, // Use this only for testing
+		ClientAuth:         tls.RequireAndVerifyClientCert,
+		InsecureSkipVerify: false,
 	}
 
 	return tlsConfig, nil

@@ -21,3 +21,12 @@ message GetChunksFromUserResponse {
     repeated TextChunkMessage chunks = 2;
     string error = 3;
 }
+
+message NewCrawl {
+    repeated string filePaths = 1;
+    repeated string fileHashes = 2;
+}
+
+message FileDoneMessage {
+    string file_path = 1;
+}
