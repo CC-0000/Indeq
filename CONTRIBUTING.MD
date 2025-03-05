@@ -30,7 +30,7 @@ Here you will find all the necessary information for developers to install and s
      2. Go to **Certificates**
      3. Toggle `CA Certificates` to be `on`
      4. Next to `PEM file`, select and choose `root_ca.crt`
-   - For other software, just search up "*how to add a trusted CA certificate in <software_of_choice>*"
+   - For other software, just search up "_how to add a trusted CA certificate in <software_of_choice>_"
 5. Run `docker-compose up --build` to run the services in docker containers
 6. Run `docker-compose down` to spin down your containers afterwards (optionally use the `-v` flag to clear all databases and data)
 7. Run `docker exec <container_name> ollama pull <model_name>` to download and set up the model (you should only need to do this once). The default should be `docker exec ollama ollama pull deepseek-r1:1.5b` and `docker exec ollama ollama pull nomic-embed-text`
@@ -43,6 +43,17 @@ Here you will find all the necessary information for developers to install and s
 4. Create a `*.proto` file in **/common/api/** for your gRPC endpoints
 5. Add your module to the `go.work` file
 
+#### Generating Certs
+
+##### Generating Root.key and Root.crt
+
+##### Generating Server.key and Server.crt
+
+1. `openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out server.key`
+2. `openssl req -new -key server.key -sha256 -out server.csr -subj "/UID=<your-service-name>/CN=www.indeq.app/O=Indeq LLC" -addext "subjectAltName = DNS:<service_name>,DNS:<alternative_service_name>,DNS:<service_name>.indeq-net"`
+3. `echo "subjectAltName = DNS:<service_name>,DNS:<alternative_service_name>,DNS:<service_name>.indeq-net" > v3.ext`
+4. `openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out server.crt -days 365 -sha256 -extfile v3.ext`
+
 #### Troubleshooting
 
 - If docker isn't running, try `sudo dockerd` to run it manually or `systemctl restart docker` if you have it set to run in the background.
@@ -53,11 +64,12 @@ Here you will find all the necessary information for developers to install and s
 - For postgresql containers, `psql -U <postgres_username>` will open the postgres terminal
 - If you are running into CORS issues, make sure you have your CA certificate set up correctly and add your frontend IP to the .env file
 
-
 ### Frontend
 
 ### Production
+
 #### Misc Notes
+
 - Before deploying to production, make sure to change all necessary variables in the `.env` file to support production deployments. This includes:
   - database urls, strings, usernames, passwords
   - rabbitMQ urls, strings, usernames, passwords
