@@ -30,8 +30,9 @@ type vectorServer struct {
 
 func (s *vectorServer) DeleteFile(ctx context.Context, req *pb.VectorFileDeleteRequest) (*pb.VectorFileDeleteReponse, error) {
 	// UNTESTED
-	collectionName := "user_" + strings.ReplaceAll(req.UserId, "-", "_")
-	filter := fmt.Sprintf("file_id == '%s' && platform == %d", req.FileId, req.Platform)
+	// collectionName := "user_" + strings.ReplaceAll(req.UserId, "-", "_")
+	collectionName := "collection_1"
+	filter := fmt.Sprintf("user_id == '%s' && file_id == '%s' && platform == %d", req.UserId, req.FilePath, req.Platform)
 	err := s.milvusClient.Delete(ctx, collectionName, "", filter)
 	if err != nil {
 		return &pb.VectorFileDeleteReponse{Success: false, Error: err.Error()}, fmt.Errorf("failed to delete data: %v", err.Error())
@@ -46,28 +47,30 @@ func (s *vectorServer) GetTopKChunks(ctx context.Context, req *pb.GetTopKChunksR
 }
 
 func (s *vectorServer) SetupCollection(ctx context.Context, req *pb.SetupCollectionRequest) (*pb.SetupCollectionResponse, error) {
-	collectionName := "user_" + strings.ReplaceAll(req.UserId, "-", "_")
+	collectionName := req.CollectionName
 	dimension, err := strconv.Atoi(os.Getenv("VECTOR_DIMENSION"))
 	if err != nil {
 		return &pb.SetupCollectionResponse{Success: false, Error: err.Error()}, fmt.Errorf("failed to create collection: %v", err)
 	}
 
 	idField := entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true).WithIsAutoID(true)
+	userIdField := entity.NewField().WithName("user_id").WithDataType(entity.FieldTypeVarChar).WithTypeParams(entity.TypeParamMaxLength, "255")
 	dateCreatedField := entity.NewField().WithName("date_created").WithDataType(entity.FieldTypeInt64)
 	dateLastModifiedField := entity.NewField().WithName("date_modified").WithDataType(entity.FieldTypeInt64)
-	fileIdField := entity.NewField().WithName("file_id").WithDataType(entity.FieldTypeVarChar).WithTypeParams(entity.TypeParamMaxLength, "64")
+	fileIdField := entity.NewField().WithName("file_id").WithDataType(entity.FieldTypeVarChar).WithTypeParams(entity.TypeParamMaxLength, "255")
 	pageNumberField := entity.NewField().WithName("page_number").WithDataType(entity.FieldTypeInt64)
 	rowStartField := entity.NewField().WithName("row_start").WithDataType(entity.FieldTypeInt64)
 	colStartField := entity.NewField().WithName("col_start").WithDataType(entity.FieldTypeInt64)
 	rowEndField := entity.NewField().WithName("row_end").WithDataType(entity.FieldTypeInt64)
 	colEndField := entity.NewField().WithName("col_end").WithDataType(entity.FieldTypeInt64)
-	titleField := entity.NewField().WithName("title").WithDataType(entity.FieldTypeVarChar).WithTypeParams(entity.TypeParamMaxLength, "100")
+	titleField := entity.NewField().WithName("title").WithDataType(entity.FieldTypeVarChar).WithTypeParams(entity.TypeParamMaxLength, "255")
 	platformField := entity.NewField().WithName("platform").WithDataType(entity.FieldTypeInt8)
 
 	vector := entity.NewField().WithName("vector").WithDataType(entity.FieldTypeFloatVector).WithDim(int64(dimension))
 
 	schema := entity.NewSchema().WithName(collectionName).
 		WithField(idField).
+		WithField(userIdField).
 		WithField(dateCreatedField).
 		WithField(dateLastModifiedField).
 		WithField(fileIdField).
@@ -99,6 +102,60 @@ func (s *vectorServer) SetupCollection(ctx context.Context, req *pb.SetupCollect
 	}
 
 	return &pb.SetupCollectionResponse{Success: true}, nil
+}
+
+func (s *vectorServer) SetupPartition(ctx context.Context, req *pb.SetupPartitionRequest) (*pb.SetupPartitionResponse, error) {
+
+	// TODO: convert 1 collection set up to multi-collection, multi-partition, hash-based binning
+	// we have 5 collections on the zilliz free tier
+	// each collection can have 64 partitions
+	// partitionName := "user_" + strings.ReplaceAll(req.UserId, "-", "_") <-- example
+
+	// TEMPORARY
+	collectionName := "collection_1"
+	ok, err := s.milvusClient.HasCollection(ctx, collectionName)
+	if err != nil {
+		return &pb.SetupPartitionResponse{
+			Success: false,
+			Error:   err.Error(),
+		}, err
+	}
+	if !ok {
+		res, err := s.SetupCollection(ctx, &pb.SetupCollectionRequest{
+			CollectionName: collectionName,
+		})
+		if !res.Success || err != nil {
+			return &pb.SetupPartitionResponse{
+				Success: false,
+				Error:   err.Error(),
+			}, nil
+		}
+	}
+	return &pb.SetupPartitionResponse{
+		Success: true,
+	}, nil
+}
+
+// TEMPORARY
+func (s *vectorServer) findCollectionForPartition(ctx context.Context, partitionName string) (string, error) {
+	for i := range 5 {
+		collectionName := "collection_" + strconv.Itoa(i)
+		exists, err := s.milvusClient.HasCollection(ctx, collectionName)
+		if err != nil {
+			return "", err
+		}
+		if exists {
+			// collection exists check for the partition
+			exists, err = s.milvusClient.HasPartition(ctx, collectionName, partitionName)
+			if err != nil {
+				return "", err
+			}
+			if exists {
+				return collectionName, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("there are no collections with the partition name: %v", partitionName)
 }
 
 func insertRow(ctx context.Context, milvusClient client.Client, textChunkMessage *pb.TextChunkMessage, embedding []float32) error {

@@ -10,12 +10,13 @@ service VectorService {
     rpc DeleteFile(VectorFileDeleteRequest) returns (VectorFileDeleteReponse);
     rpc GetTopKChunks(GetTopKChunksRequest) returns (GetTopKChunksResponse);
     rpc SetupCollection(SetupCollectionRequest) returns (SetupCollectionResponse);
+    rpc SetupPartition(SetupPartitionRequest) returns (SetupPartitionResponse);
 }
 
 message VectorFileDeleteRequest {
     string user_id = 1;
     Platform platform = 2;
-    string file_id = 3;   // file paths should be unique per platform
+    string file_path = 3;   // file paths should be unique per platform
 }
 
 message VectorFileDeleteReponse {
@@ -34,10 +35,19 @@ message GetTopKChunksResponse {
 }
 
 message SetupCollectionRequest {
-    string user_id = 1;
+    string collectionName = 2;
 }
 
 message SetupCollectionResponse {
+    bool success = 1;
+    string error = 2;
+}
+
+message SetupPartitionRequest {
+    string user_id = 1;
+}
+
+message SetupPartitionResponse {
     bool success = 1;
     string error = 2;
 }

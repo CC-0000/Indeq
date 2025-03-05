@@ -258,7 +258,7 @@ func (s *authServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb
 		return &pb.RegisterResponse{
 			Success: false,
 			Error:   fmt.Sprintf("invalid email: %v", err),
-		}, nil
+		}, err
 	}
 
 	// Make sure name is good
@@ -266,7 +266,7 @@ func (s *authServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb
 		return &pb.RegisterResponse{
 			Success: false,
 			Error:   fmt.Sprintf("invalid name: %v", err),
-		}, nil
+		}, err
 	}
 
 	// Make sure password is good
@@ -274,13 +274,16 @@ func (s *authServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb
 		return &pb.RegisterResponse{
 			Success: false,
 			Error:   fmt.Sprintf("invalid password: %v", err),
-		}, nil
+		}, err
 	}
 
 	// Generate a random salt
 	salt := make([]byte, p.saltLength)
 	if _, err := rand.Read(salt); err != nil {
-		return nil, err
+		return &pb.RegisterResponse{
+			Success: false,
+			Error:   fmt.Sprintf("couldn't make a salt: %v", err),
+		}, err
 	}
 
 	// Generate a password hash
@@ -307,7 +310,10 @@ func (s *authServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb
 	// Store in the database
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to begin transaction: %v", err)
+		return &pb.RegisterResponse{
+			Success: false,
+			Error:   err.Error(),
+		}, fmt.Errorf("failed to begin transaction: %v", err)
 	}
 	defer tx.Rollback()
 
@@ -324,18 +330,18 @@ func (s *authServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb
 		return &pb.RegisterResponse{
 			Success: false,
 			Error:   "email already exists",
-		}, nil
+		}, err
 	}
 
 	// Try to create a corresponding entry in the vector collection
-	res, err := s.vectorClient.SetupCollection(ctx, &pb.SetupCollectionRequest{
+	res, err := s.vectorClient.SetupPartition(ctx, &pb.SetupPartitionRequest{
 		UserId: userId,
 	})
 	if err != nil || !res.Success {
 		return &pb.RegisterResponse{
 			Success: false,
 			Error:   "failed to setup user datastores",
-		}, nil
+		}, err
 	}
 
 	if err := tx.Commit(); err != nil {
