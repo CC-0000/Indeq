@@ -22,7 +22,7 @@ func main() {
 	}
 
 	// Configure TLS
-	tlsConfig, err := config.LoadServerTLSFromEnv("MQTT_CRT", "MQTT_KEY")
+	tlsConfig, err := config.LoadMTLSFromEnv("MQTT_CRT", "MQTT_KEY", "NEW_CA_CRT")
 	if err != nil {
 		log.Print(err)
 		log.Fatal("Error loading TLS config for mqtt service")
@@ -46,11 +46,11 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// // Create TCP listener on port 1883
-	// tcp := listeners.NewTCP(listeners.Config{
-	// 	ID:      "tcp1",
-	// 	Address: ":1883",
-	// })
+	// Create TCP listener on port 1883
+	tcp := listeners.NewTCP(listeners.Config{
+		ID:      "tcp1",
+		Address: ":1883",
+	})
 
 	// Create TLS listener on port 8883
 	tlsTCP := listeners.NewTCP(listeners.Config{
@@ -60,10 +60,10 @@ func main() {
 	})
 
 	// Add listeners to the server
-	// err = server.AddListener(tcp)
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
+	err = server.AddListener(tcp)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	err = server.AddListener(tlsTCP)
 	if err != nil {
