@@ -1,9 +1,8 @@
 name: Deploy to Amazon EKS
-
-on:
-  push:
-    branches:
-      - cicd  # Trigger deployment on the cicd branch
+# on:
+#   push:
+#     branches:
+#       - cicd  # Trigger deployment on the cicd branch (currently deactivated)
 
 env:
   AWS_REGION: us-east-1
@@ -127,18 +126,60 @@ jobs:
         docker tag gateway:$IMAGE_TAG ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/gateway:$IMAGE_TAG
         docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/gateway:$IMAGE_TAG
 
-        docker build -t waitlist:$IMAGE_TAG -f backend/waitlist/Dockerfile backend
-        docker tag waitlist:$IMAGE_TAG ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/waitlist:$IMAGE_TAG
-        docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/waitlist:$IMAGE_TAG
-    # - name: Deploy to EC2
-    #   run: |
-    #     ssh -o StrictHostKeyChecking=no -i private_key.pem ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
-    #       aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 123456789012.dkr.ecr.us-east-1.amazonaws.com
-    #       cd /home/${{ secrets.EC2_USER }}/app
-    #       git pull origin main
-    #       docker-compose down
-    #       docker-compose pull
-    #       docker-compose up -d --remove-orphans
-    #       docker system prune -f
-    #     EOF
+    - name: Create config.yaml with GitHub secrets
+      run: |
+        echo "apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: backend-config
+        data:
+          AUTH_PORT: \"\${{ secrets.AUTH_PORT }}\"
+          AUTH_ADDRESS: \"\${{ secrets.AUTH_ADDRESS }}\"
+          QUERY_PORT: \"\${{ secrets.QUERY_PORT }}\"
+          QUERY_ADDRESS: \"\${{ secrets.QUERY_ADDRESS }}\"
+          VECTOR_PORT: \"\${{ secrets.VECTOR_PORT }}\"
+          VECTOR_ADDRESS: \"\${{ secrets.VECTOR_ADDRESS }}\"
+          GATEWAY_ADDRESS: \"\${{ secrets.GATEWAY_ADDRESS }}\"
+          DATABASE_URL: \"\${{ secrets.DATABASE_URL }}\"
+          POSTGRES_USER: \"\${{ secrets.POSTGRES_USER }}\"
+          POSTGRES_PASSWORD: \"\${{ secrets.POSTGRES_PASSWORD }}\"
+          POSTGRES_DB: \"\${{ secrets.POSTGRES_DB }}\"
+          JWT_SECRET: \"\${{ secrets.JWT_SECRET }}\"
+          ARGON2_MEMORY: \"\${{ secrets.ARGON2_MEMORY }}\"
+          ARGON2_ITERATIONS: \"\${{ secrets.ARGON2_ITERATIONS }}\"
+          ARGON2_PARALLELISM: \"\${{ secrets.ARGON2_PARALLELISM }}\"
+          ARGON2_SALT_LENGTH: \"\${{ secrets.ARGON2_SALT_LENGTH }}\"
+          ARGON2_KEY_LENGTH: \"\${{ secrets.ARGON2_KEY_LENGTH }}\"
+          MIN_PASSWORD_LENGTH: \"\${{ secrets.MIN_PASSWORD_LENGTH }}\"
+          MAX_PASSWORD_LENGTH: \"\${{ secrets.MAX_PASSWORD_LENGTH }}\"
+          MAX_EMAIL_LENGTH: \"\${{ secrets.MAX_EMAIL_LENGTH }}\"
+          RABBITMQ_URL: \"\${{ secrets.RABBITMQ_URL }}\"
+          RABBITMQ_DEFAULT_USER: \"\${{ secrets.RABBITMQ_DEFAULT_USER }}\"
+          RABBITMQ_DEFAULT_PASS: \"\${{ secrets.RABBITMQ_DEFAULT_PASS }}\"
+          RABBITMQ_LOGS: \"\${{ secrets.RABBITMQ_LOGS }}\"
+          OLLAMA_URL: \"\${{ secrets.OLLAMA_URL }}\"
+          LLM_MODEL: \"\${{ secrets.LLM_MODEL }}\"
+          ZILLIZ_ADDRESS: \"\${{ secrets.ZILLIZ_ADDRESS }}\"
+          ZILLIZ_API_KEY: \"\${{ secrets.ZILLIZ_API_KEY }}\"
+          CA_CRT: \"\${{ secrets.CA_CRT }}\"
+          QUERY_CRT: \"\${{ secrets.QUERY_CRT }}\"
+          QUERY_KEY: \"\${{ secrets.QUERY_KEY }}\"
+          AUTH_CRT: \"\${{ secrets.AUTH_CRT }}\"
+          AUTH_KEY: \"\${{ secrets.AUTH_KEY }}\"
+          ALLOWED_CLIENT_IP: \"\${{ secrets.ALLOWED_CLIENT_IP }}\"
+        " > configmap.yaml
 
+    - name: Configure kubectl
+      run: |
+        aws eks update-kubeconfig --name $EKS_CLUSTER_NAME --region $AWS_REGION
+
+    - name: Deploy to EKS
+      run: |
+        kubectl version --short
+        kubectl apply -f backend/k8s-manifest.yml
+        kubectl apply -f configmap.yaml
+
+    - name: Debug Environment Variables
+      run: |
+        echo "Current GOPATH: $(go env GOPATH)"
+        echo "Current PATH: $PATH"
