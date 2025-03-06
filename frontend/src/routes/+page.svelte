@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { BoxIcon, MailIcon } from "svelte-feather-icons";
+  import { BoxIcon, MailIcon, LoaderIcon } from "svelte-feather-icons";
   import { onMount } from "svelte";
   import { toast } from "svelte-sonner";
   
@@ -80,15 +80,22 @@
         <input
           bind:value={email}
           placeholder="Enter your email..."
-          class="w-full pl-10 p-2 bg-white border border-gray-200 rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary placeholder-gray-400"
+          class="w-full pl-10 p-2 bg-white border border-gray-200 rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary placeholder-gray-400 disabled:bg-gray-100 disabled:text-gray-500"
+          disabled={submitStatus === 'loading'}
         />
       </div>
       <button
         type="submit"
-        class="p-2 rounded-lg bg-primary text-white hover:bg-blue-600 transition-colors"
+        class="p-2 rounded-lg bg-primary text-white hover:bg-blue-600 transition-colors flex items-center justify-center min-w-[90px]"
         disabled={submitStatus === 'loading'}
       >
-        Notify Me
+        {#if submitStatus === 'loading'}
+          <div class="animate-spin">
+            <LoaderIcon size="18" />
+          </div>
+        {:else}
+          Notify Me
+        {/if}
       </button>
     </form>
 
@@ -98,7 +105,7 @@
         size="18" 
         class="text-primary mt-1 transition-transform duration-300 hover:scale-125 hover:rotate-12" 
       />
-      <p class="text-lg pt-1 font-medium text-gray-800">Get notified the moment we launch</p>
+      <p class="text-lg pt-1 font-medium text-gray-800">Get notified the moment we launch!</p>
     </div>
 
     <hr class="border-t border-gray-300 my-8" />
@@ -122,5 +129,15 @@
   /* Smooth transitions for blobs */
   .absolute {
     transition: all 0.5s ease-out;
+  }
+  
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  
+  .animate-spin {
+    animation: spin 1s linear infinite;
   }
 </style>
