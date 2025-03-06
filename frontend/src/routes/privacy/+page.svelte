@@ -1,8 +1,13 @@
 <script>
     export let lastUpdated = "February 8, 2025";
 </script>
-  
-  <section class="max-w-4xl mx-auto px-4 py-8 text-gray-800">
+
+<svelte:head>
+    <title>Privacy Policy | Indeq</title>
+    <meta name="description" content="Privacy Policy for Indeq" />
+</svelte:head>
+
+<section class="max-w-4xl mx-auto px-4 py-8 text-gray-800">
     <!-- Title -->
     <h1 class="text-3xl font-bold mb-4">Privacy Policy</h1>
     <p class="text-sm mb-6 italic">Last Updated: {lastUpdated}</p>
