@@ -12,16 +12,6 @@
     <h1 class="text-3xl font-bold mb-4">Terms of Service</h1>
     <p class="text-sm mb-6 italic">Last Updated: {lastUpdated}</p>
   
-    <!-- Disclaimer -->
-    <div class="bg-yellow-100 border-l-4 border-yellow-400 p-4 mb-6">
-      <p class="text-sm">
-        <strong>Disclaimer:</strong> The following Terms of Service (the “Terms”) are provided for 
-        informational purposes only and do not constitute legal advice. You should consult with 
-        a qualified attorney to ensure that these Terms comply with all applicable laws and 
-        regulations in the relevant jurisdictions.
-      </p>
-    </div>
-  
     <!-- Introduction -->
     <p class="mb-6">
       Welcome to Indeq (“Company,” “we,” “us,” or “our”). We provide a 
