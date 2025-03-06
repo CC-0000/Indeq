@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { LockIcon, MailIcon } from "svelte-feather-icons";
+  import { BoxIcon, MailIcon } from "svelte-feather-icons";
   import { onMount } from "svelte";
   import { toast } from "svelte-sonner";
   
@@ -71,7 +71,7 @@
   <div class="w-full max-w-md text-center relative z-10">
     <!-- App Name -->
     <h1 class="text-4xl text-gray-900 mb-3">Indeq</h1>
-    <p class="text-gray-600 text-lg">Next generation private data search</p>
+    <p class="text-gray-600 text-lg">Find What Matters, Across Every Platform.</p>
 
     <!-- Email Signup Form -->
     <form class="flex items-center gap-3 mt-8" on:submit={handleSubmit}>
@@ -94,8 +94,11 @@
 
     <!-- Coming Soon Message -->
     <div class="flex items-center justify-center gap-3 mt-4">
-      <LockIcon size="18" class="text-primary" />
-      <p class="text-lg pt-1 font-medium text-gray-800">Coming Soon, Join the waitlist</p>
+      <BoxIcon 
+        size="18" 
+        class="text-primary mt-1 transition-transform duration-300 hover:scale-125 hover:rotate-12" 
+      />
+      <p class="text-lg pt-1 font-medium text-gray-800">Get notified the moment we launch</p>
     </div>
 
     <hr class="border-t border-gray-300 my-8" />
