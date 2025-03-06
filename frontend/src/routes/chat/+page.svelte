@@ -1,8 +1,13 @@
 <script>
     import { SearchIcon } from "svelte-feather-icons";
-  </script>
+</script>
+
+<svelte:head>
+    <title>Indeq</title>
+    <meta name="description" content="Chat with Indeq" />
+</svelte:head>
   
-  <main class="min-h-screen flex flex-col items-center justify-center p-6">
+<main class="min-h-screen flex flex-col items-center justify-center p-6">
     <!-- Centered Search Box -->
     <div class="w-full max-w-3xl p-8 text-center">
       <!-- Header -->
