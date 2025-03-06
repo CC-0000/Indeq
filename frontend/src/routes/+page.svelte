@@ -100,12 +100,14 @@
     </form>
 
     <!-- Coming Soon Message -->
-    <div class="flex items-center justify-center gap-3 mt-4">
-      <BoxIcon 
-        size="18" 
-        class="text-primary mt-1 transition-transform duration-300 hover:scale-125 hover:rotate-12" 
-      />
-      <p class="text-lg pt-1 font-medium text-gray-800">Get notified the moment we launch!</p>
+    <div class="flex justify-center mt-6 px-2">
+      <span class="inline-flex items-center text-center">
+        <BoxIcon 
+          size="18" 
+          class="hidden sm:block text-primary transition-transform duration-300 hover:scale-125 hover:rotate-12 flex-shrink-0" 
+        />
+        <p class="text-lg font-medium text-gray-800 sm:ml-2">Get notified the moment we launch!</p>
+      </span>
     </div>
 
     <hr class="border-t border-gray-300 my-8" />
