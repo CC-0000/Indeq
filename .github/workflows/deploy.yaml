@@ -1,9 +1,9 @@
 name: Deploy to Amazon EKS
 
-on:
-  push:
-    branches:
-      - cicd  # Trigger deployment on the cicd branch
+# on:
+#   push:
+#     branches:
+#       - cicd  # Trigger deployment on the cicd branch
 
 env:
   AWS_REGION: us-east-1
