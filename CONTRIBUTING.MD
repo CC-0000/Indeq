@@ -51,7 +51,7 @@ Here you will find all the necessary information for developers to install and s
   `docker exec -it <name_of_running_container> bash` while your container is running
 - For postgresql containers, `psql -U <postgres_username>` will open the postgres terminal
 - If you are running into CORS issues, make sure you have your CA certificate set up correctly and add your frontend IP to the .env file
-
+- If need to inject env variables, add them to backend-config.yaml and run ./setsecrets.ps1  in backend dir
 
 ### Frontend
 

@@ -24,7 +24,11 @@ foreach ($secret in $data) {
 
     # Extract the key and value
     $name = $keyValue[0].Trim()  # This will be the key
-    $value = $keyValue[1].Trim()  # This will be the value if it exists
+    if ($name -eq 'EC2_KEY_PAIR' -or $name -eq 'ROOT_CA_CERT') {
+        $value = $keyValue[1].Trim() -replace '^\s+|\s+$', ''  # Trim extra whitespace for specific variables
+    } else {
+        $value = $keyValue[1].Trim()  # This will be the value if it exists
+    }
 
     # Debug output to check the extracted values
     $value = $value -replace '^"|"$', ''  # Remove extra outer double quotes from the value
