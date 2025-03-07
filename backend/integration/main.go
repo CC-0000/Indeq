@@ -7,7 +7,9 @@ import (
 	"log"
 	"net"
 	"os"
+	"bytes"
     "encoding/json"
+	"encoding/base64"
 	"errors"
 	"net/http"
 	"strings"
@@ -28,7 +30,7 @@ type integrationServer struct {
 // TokenResponse represents the OAuth token response from our providers
 type TokenResponse struct {
 	AccessToken string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
+	RefreshToken string `json:"refresh_token,omitempty"`
 	ExpiresIn int `json:"expires_in"`
 	TokenType string `json:"token_type"`
 	Scope string `json:"scope"`
@@ -37,7 +39,6 @@ type TokenResponse struct {
 
 // OAuthProviderConfig represents the token exchange and refresh
 type OAuthProviderConfig struct {
-	AuthURL string
 	TokenURL string
 	ClientID string
 	ClientSecret string
@@ -60,9 +61,9 @@ var providers = map[string]OAuthProviderConfig{
 	},
 	"NOTION": {
 		TokenURL:     "https://api.notion.com/v1/oauth/token",
-		ClientID:     "your_notion_client_id",
-		ClientSecret: "your_notion_client_secret",
-		RedirectURI:  "your_redirect_uri",
+		ClientID:     os.Getenv("NOTION_CLIENT_ID"),
+		ClientSecret: os.Getenv("NOTION_CLIENT_SECRET"),
+		RedirectURI:  os.Getenv("NOTION_REDIRECT_URI"),
 	},
 }
 
@@ -74,17 +75,42 @@ func ExchangeAuthCodeForToken(provider string, authCode string) (*TokenResponse,
 	}
 	log.Printf("Exchanging auth code for token with provider: %s and auth code: %s", provider, authCode)
 
-	data := fmt.Sprintf(
-		"client_id=%s&client_secret=%s&code=%s&grant_type=authorization_code&redirect_uri=%s",
-		config.ClientID, config.ClientSecret, authCode, config.RedirectURI,
-	)
+	var req *http.Request
+	var err error
 
-	req, err := http.NewRequest("POST", config.TokenURL, strings.NewReader(data))
-	if err != nil {
-		return nil, err
+	if provider == "NOTION" {
+		authHeader := "Basic " + base64.StdEncoding.EncodeToString(
+			[]byte(config.ClientID + ":" + config.ClientSecret))
+		
+		data := map[string]string{
+			"grant_type": "authorization_code",
+			"code": authCode,
+			"redirect_uri": config.RedirectURI,
+		}
+		
+		jsonData, err := json.Marshal(data)
+		if err != nil {
+			return nil, err
+		}
+		
+		req, err = http.NewRequest("POST", config.TokenURL, bytes.NewBuffer(jsonData))
+		if err != nil {
+			return nil, err
+		}
+		
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", authHeader)
+	} else {
+		data := fmt.Sprintf(
+			"client_id=%s&client_secret=%s&code=%s&grant_type=authorization_code&redirect_uri=%s",
+			config.ClientID, config.ClientSecret, authCode, config.RedirectURI,
+		)
+		req, err = http.NewRequest("POST", config.TokenURL, strings.NewReader(data))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	}
-
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
@@ -92,7 +118,7 @@ func ExchangeAuthCodeForToken(provider string, authCode string) (*TokenResponse,
 		return nil, err
 	}
 	defer resp.Body.Close()
-
+	
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("failed to exchange auth code: %s", resp.Status)
 	}
@@ -105,6 +131,7 @@ func ExchangeAuthCodeForToken(provider string, authCode string) (*TokenResponse,
 	tokenRes.ExpiresAt = time.Now().Add(time.Duration(tokenRes.ExpiresIn) * time.Second)
 	return &tokenRes, nil
 }
+
 
 // Refresh an expired access token
 func RefreshOAuthToken(provider string, refreshToken string) (*TokenResponse, error) {
