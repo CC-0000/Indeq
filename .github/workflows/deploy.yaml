@@ -125,15 +125,28 @@ jobs:
         docker build -t waitlist:$IMAGE_TAG -f backend/waitlist/Dockerfile backend
         docker tag waitlist:$IMAGE_TAG ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/waitlist:$IMAGE_TAG
         docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/waitlist:$IMAGE_TAG
-    # - name: Deploy to EC2
-    #   run: |
-    #     ssh -o StrictHostKeyChecking=no -i private_key.pem ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
-    #       aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 123456789012.dkr.ecr.us-east-1.amazonaws.com
-    #       cd /home/${{ secrets.EC2_USER }}/app
-    #       git pull origin main
-    #       docker-compose down
-    #       docker-compose pull
-    #       docker-compose up -d --remove-orphans
-    #       docker system prune -f
-    #     EOF
+    
+    - name: Deploy to EC2
+      run: |
+        # Install AWS CLI if not already installed
+        if ! command -v aws &> /dev/null; then
+          echo "AWS CLI not found. Installing..."
+          sudo apt-get update
+          sudo apt-get install -y awscli
+        fi
+        
+        # Copy the Docker image to the EC2 instance
+        aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com
+        docker pull ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/authentication:$IMAGE_TAG
+        docker pull ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/query:$IMAGE_TAG
+        docker pull ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/gateway:$IMAGE_TAG
+        docker pull ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/waitlist:$IMAGE_TAG
+        
+        # SSH into the EC2 instance and run the Docker containers
+        ssh -o StrictHostKeyChecking=no -i ${{ secrets.EC2_KEY_PAIR }} ec2-user@${{ secrets.EC2_PUBLIC_IP }} << 'EOF'
+          docker run -d --restart always --name authentication -p 80:80 ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/authentication:$IMAGE_TAG
+          docker run -d --restart always --name query -p 81:80 ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/query:$IMAGE_TAG
+          docker run -d --restart always --name gateway -p 82:80 ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/gateway:$IMAGE_TAG
+          docker run -d --restart always --name waitlist -p 83:80 ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/waitlist:$IMAGE_TAG
+        EOF
 
