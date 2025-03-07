@@ -145,8 +145,10 @@ jobs:
         docker pull ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/gateway:13714734156
         docker pull ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/waitlist:13714734156
         
+        echo "Content of the PEM file:"
+        cat private_key.pem
         # SSH into the EC2 instance and run the Docker containers
-        ssh -o StrictHostKeyChecking=no -i private_key.pem ec2-user@${{ secrets.EC2_PUBLIC_IP }} << 'EOF'
+        ssh -o -v StrictHostKeyChecking=no -i private_key.pem ec2-user@${{ secrets.EC2_PUBLIC_IP }} << 'EOF'
           docker run -d --restart always --name authentication -p 80:80 ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/authentication:13714734156
           docker run -d --restart always --name query -p 81:80 ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/query:13714734156
           docker run -d --restart always --name gateway -p 82:80 ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/gateway:13714734156
