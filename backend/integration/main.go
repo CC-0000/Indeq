@@ -35,6 +35,7 @@ type TokenResponse struct {
 	TokenType string `json:"token_type"`
 	Scope string `json:"scope"`
 	ExpiresAt time.Time `json:"-"`
+	RequiresRefresh bool `json:"-"`
 }
 
 // OAuthProviderConfig represents the token exchange and refresh
@@ -127,8 +128,12 @@ func ExchangeAuthCodeForToken(provider string, authCode string) (*TokenResponse,
 	if err := json.NewDecoder(resp.Body).Decode(&tokenRes); err != nil {
 		return nil, err
 	}
-
-	tokenRes.ExpiresAt = time.Now().Add(time.Duration(tokenRes.ExpiresIn) * time.Second)
+	if provider != "NOTION" {
+		tokenRes.ExpiresAt = time.Now().Add(time.Duration(tokenRes.ExpiresIn) * time.Second)
+		tokenRes.RequiresRefresh = true
+	} else {
+		tokenRes.RequiresRefresh = false
+	}
 	return &tokenRes, nil
 }
 
@@ -187,9 +192,10 @@ func refreshAllExpiredTokens(db *sql.DB) {
 	defer cancel()
 
 	rows, err := db.QueryContext(ctx, `
-		SELECT user_id, provider, refresh_token, expires_at
+		SELECT user_id, provider, refresh_token, expires_at, requires_refresh
 		FROM oauth_tokens
 		WHERE expires_at < NOW() + INTERVAL '5 minutes'
+		AND requires_refresh = TRUE
 	`)
 	
 	if err != nil {
@@ -203,13 +209,13 @@ func refreshAllExpiredTokens(db *sql.DB) {
 		var provider string
 		var refreshToken string
 		var expiresAt time.Time
-
-		if err := rows.Scan(&userID, &provider, &refreshToken, &expiresAt); err != nil {
+		var requiresRefresh bool
+		if err := rows.Scan(&userID, &provider, &refreshToken, &expiresAt, &requiresRefresh); err != nil {
 			log.Printf("Error scanning token row: %v", err)
 			continue
 		}
 
-		if refreshToken == "" {
+		if refreshToken == "" || !requiresRefresh {
 			log.Printf("No refresh token found for user %s and provider %s", userID, provider)
 			continue
 		}
@@ -227,9 +233,9 @@ func refreshAllExpiredTokens(db *sql.DB) {
 		
 		_, err = db.ExecContext(ctx, `
 			UPDATE oauth_tokens
-			SET access_token = $1, refresh_token = $2, expires_at = $3, updated_at = NOW()
-			WHERE user_id = $4 AND provider = $5
-		`, tokenData.AccessToken, tokenData.RefreshToken, tokenData.ExpiresAt, userID, provider)
+			SET access_token = $1, refresh_token = $2, expires_at = $3, updated_at = NOW(), requires_refresh = $4
+			WHERE user_id = $5 AND provider = $6
+		`, tokenData.AccessToken, tokenData.RefreshToken, tokenData.ExpiresAt, tokenData.RequiresRefresh, userID, provider)
 
 		if err != nil {
 			log.Printf("Error updating token for user %s: %v", userID, err)
@@ -314,49 +320,54 @@ func (s *integrationServer) ConnectIntegration(ctx context.Context, req *pb.Conn
 			ErrorDetails: err.Error(),
 		}, nil
 	}
-	var existingRefreshToken string
-	err = s.db.QueryRowContext(ctx, `
-		SELECT refresh_token
-		FROM oauth_tokens
-		WHERE user_id = $1 AND provider = $2
-	`,
-		req.UserId,
-		providerStr,
-	).Scan(&existingRefreshToken)
-	if err != nil && err != sql.ErrNoRows {
-		return &pb.ConnectIntegrationResponse{
-			Success: false,
-			Message: fmt.Sprintf("Database error querying token: %v", err),
-			ErrorDetails: err.Error(),
-		}, nil
-	}
 
-	if tokenRes.RefreshToken == "" {
-		if existingRefreshToken != "" {
-			log.Println("No refresh token returned from provider, using existing token")
-			tokenRes.RefreshToken = existingRefreshToken
-		} else {
-			return &pb.ConnectIntegrationResponse{
-				Success: false,
-				Message: "No refresh token returned from provider",
-			}, nil
-		}
-	}
+	// if providerStr != "NOTION" && tokenRes.RefreshToken == "" {
+	// 	var existingRefreshToken string
+	// 	err = s.db.QueryRowContext(ctx, `
+	// 		SELECT refresh_token
+	// 		FROM oauth_tokens
+	// 		WHERE user_id = $1 AND provider = $2
+	// 	`,
+	// 		req.UserId,
+	// 		providerStr,
+	// 	).Scan(&existingRefreshToken)
+		
+	// 	if err != nil && err != sql.ErrNoRows {
+	// 		return &pb.ConnectIntegrationResponse{
+	// 			Success: false,
+	// 			Message: fmt.Sprintf("Database error querying token: %v", err),
+	// 			ErrorDetails: err.Error(),
+	// 		}, nil
+	// 	}
+
+	// 	if existingRefreshToken != "" {
+	// 		log.Println("No refresh token returned from provider, using existing token")
+	// 		tokenRes.RefreshToken = existingRefreshToken
+	// 	} else {
+	// 		return &pb.ConnectIntegrationResponse{
+	// 			Success: false,
+	// 			Message: "No refresh token returned from provider",
+	// 		}, nil
+	// 	}
+	// }
+
 	_, err = s.db.ExecContext(ctx, `
-	INSERT INTO oauth_tokens (user_id, provider, access_token, refresh_token, expires_at)
-	VALUES ($1, $2, $3, $4, $5)
+	INSERT INTO oauth_tokens (user_id, provider, access_token, refresh_token, expires_at, requires_refresh)
+	VALUES ($1, $2, $3, $4, $5, $6)
 	ON CONFLICT (user_id, provider)
 	DO UPDATE SET
 		access_token = EXCLUDED.access_token,
 		refresh_token = COALESCE(NULLIF(EXCLUDED.refresh_token, ''), oauth_tokens.refresh_token),
 		expires_at = EXCLUDED.expires_at,
-		updated_at = NOW()
+		updated_at = NOW(),
+		requires_refresh = EXCLUDED.requires_refresh
 	`,
 		req.UserId,
 		providerStr,
 		tokenRes.AccessToken,
 		tokenRes.RefreshToken,
 		tokenRes.ExpiresAt,
+		tokenRes.RequiresRefresh,
 	)
 
 	if err != nil {
@@ -449,10 +460,11 @@ func main() {
             user_id UUID NOT NULL,
             provider TEXT NOT NULL CHECK (provider IN ('GOOGLE', 'MICROSOFT', 'NOTION')),
             access_token TEXT NOT NULL,
-            refresh_token TEXT NOT NULL,
-            expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+            refresh_token TEXT NULL,
+            expires_at TIMESTAMP WITH TIME ZONE NULL,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			requires_refresh BOOLEAN DEFAULT TRUE,
 			UNIQUE (user_id, provider)
         );
     `)
