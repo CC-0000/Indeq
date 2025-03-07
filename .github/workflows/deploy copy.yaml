@@ -129,7 +129,7 @@ jobs:
 
     - name: Deploy to EC2
       run: |
-        echo ${{ secrets.EC2_KEY_PAIR }} > private_key.pem
+        echo "${{ secrets.SSH_KEY }}" | tr -d '\r' > private_key.pem
         chmod 600 private_key.pem
         # Install AWS CLI if not already installed
         if ! command -v aws &> /dev/null; then
