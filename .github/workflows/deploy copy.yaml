@@ -126,10 +126,8 @@ jobs:
     #     docker tag waitlist:$IMAGE_TAG ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/waitlist:$IMAGE_TAG
     #     docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/waitlist:$IMAGE_TAG
 
-
     - name: Deploy to EC2
       run: |
-         
         # Extract markers
         BEGIN_MARKER="-----BEGIN RSA PRIVATE KEY-----"
         END_MARKER="-----END RSA PRIVATE KEY-----"
