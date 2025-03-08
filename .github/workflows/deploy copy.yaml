@@ -153,17 +153,17 @@ jobs:
         # Copy the Docker image to the EC2 instance
         aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com
         authImage="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/indeq/authentication:13714734156"
-        # queryImage="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/indeq/query:13714734156"
-        # gatewayImage="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/indeq/gateway:13714734156"
-        # waitlistImage="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/indeq/waitlist:13714734156"
+        queryImage="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/indeq/query:13714734156"
+        gatewayImage="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/indeq/gateway:13714734156"
+        waitlistImage="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/indeq/waitlist:13714734156"
 
         docker pull $authImage
-        # docker pull $queryImage
-        # docker pull $gatewayImage
-        # docker pull $waitlistImage
-        # docker pull ollama/ollama:latest
-        # docker pull rabbitmq:3-management
-        # docker pull postgres:latest
+        docker pull $queryImage
+        docker pull $gatewayImage
+        docker pull $waitlistImage
+        docker pull ollama/ollama:latest
+        docker pull rabbitmq:3-management
+        docker pull postgres:latest
 
         # Replace placeholder image references with actual ECR URLs
         sed -i "s|authImage|$authImage|g" backend/docker-compose-ec2.yaml
@@ -172,10 +172,10 @@ jobs:
         sed -i "s|waitlistImage|$waitlistImage|g" backend/docker-compose-ec2.yaml
         
         # Copy the docker-compose file to EC2
-        scp -v -o StrictHostKeyChecking=no -i private_key.pem backend/docker-compose-ec2.yaml ec2-user@${{ secrets.EC2_PUBLIC_IP }}:/home/ec2-user/
+        scp -o StrictHostKeyChecking=no -i private_key.pem backend/docker-compose-ec2.yaml ec2-user@${{ secrets.EC2_PUBLIC_IP }}:/home/ec2-user/
 
         # SSH into the EC2 instance and run the Docker containers
-        ssh -v -o StrictHostKeyChecking=no -i private_key.pem ec2-user@${{ secrets.EC2_PUBLIC_IP }} << EOF
+        ssh -o StrictHostKeyChecking=no -i private_key.pem ec2-user@${{ secrets.EC2_PUBLIC_IP }} << EOF
 
            # check curr dir and if the docker-compose-ec2.yaml file has been modified
           echo "Current directory: $(pwd)"
@@ -215,7 +215,7 @@ jobs:
           aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
           
           # Try running docker compose
-          docker compose -f docker-compose-ec2.yaml up -d
+          docker compose up -f docker-compose-ec2.yaml -d
 
         EOF
 
