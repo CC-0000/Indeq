@@ -273,8 +273,8 @@ jobs:
         
         # Copy the docker-compose file to EC2
         scp -o StrictHostKeyChecking=no -i private_key.pem backend/docker-compose-ec2.yaml ec2-user@${{ secrets.EC2_PUBLIC_IP }}:/home/ec2-user/
-        scp -o StrictHostKeyChecking=no -i private_key.pem backend/common/config/.env ec2-user@${{ secrets.EC2_PUBLIC_IP }}:/home/ec2-user/common/config/.env
-        
+        scp -o StrictHostKeyChecking=no -i private_key.pem .env ec2-user@${{ secrets.EC2_PUBLIC_IP }}:/home/ec2-user/common/config/.env
+
         # SSH into the EC2 instance and run the Docker containers
         ssh -o StrictHostKeyChecking=no -i private_key.pem ec2-user@${{ secrets.EC2_PUBLIC_IP }} << 'EOF'
           # Install Docker if not already installed
