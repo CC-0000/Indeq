@@ -131,7 +131,6 @@ jobs:
       run: |
         
         echo ${{ secrets.EC2_KEY_PAIR }} > private_key.pem
-        vim --clean private_key.pem
         chmod 600 private_key.pem
         echo "length of private key: $(wc -c < private_key.pem)"
         # Install AWS CLI if not already installed
