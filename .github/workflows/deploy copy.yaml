@@ -157,4 +157,3 @@ jobs:
           docker run -d --restart always --name waitlist -p 83:80 ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/waitlist:13714734156
         EOF
 
-
