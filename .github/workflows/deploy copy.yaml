@@ -168,6 +168,9 @@ jobs:
         
         # check if the docker-compose-ec2.yaml file has been modified
         echo "Content of the docker-compose-ec2.yaml file:"
+        echo "Current directory: $(pwd)"
+        ls -la
+        ls -la backend/
         cat backend/docker-compose-ec2.yaml
 
         # Copy the docker-compose file to EC2
