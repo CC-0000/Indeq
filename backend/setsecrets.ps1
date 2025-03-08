@@ -24,12 +24,22 @@ foreach ($secret in $data) {
 
     # Extract the key and value
     $name = $keyValue[0].Trim()  # This will be the key
-    if ($name -eq 'EC2_KEY_PAIR' -or $name -eq 'ROOT_CA_CERT') {
-        $value = $keyValue[1].Trim() -replace '^\s+|\s+$', ''  # Trim extra whitespace for specific variables
-    } else {
-        $value = $keyValue[1].Trim()  # This will be the value if it exists
-    }
+    $value = $keyValue[1].Trim()  # This will be the value if it exists
 
+    # For EC2_KEY_PAIR, ensure proper line endings
+    if ($name -eq 'EC2_KEY_PAIR') {
+        # Read the key file
+        $keyContent = $value
+        
+        # Split the key into parts
+        $beginMarker = "-----BEGIN RSA PRIVATE KEY-----"
+        $endMarker = "-----END RSA PRIVATE KEY-----"
+        $keyBody = $keyContent -replace $beginMarker, "" -replace $endMarker, "" -replace "\s+", ""
+    
+        
+        # Reconstruct the key with proper format
+        $value = $beginMarker  + $formattedKey + $endMarker
+    }
     # Debug output to check the extracted values
     $value = $value -replace '^"|"$', ''  # Remove extra outer double quotes from the value
     Write-Host "Extracted secret: Name='$name', Value='$value'"
@@ -38,6 +48,7 @@ foreach ($secret in $data) {
         Write-Host "Warning: The value for secret '$name' is empty or commented out. Skipping..."
         continue
     }
+
 
     # Set the secret in GitHub
     gh secret set $name --body $value
