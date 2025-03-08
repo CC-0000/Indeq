@@ -187,7 +187,10 @@ jobs:
           # Install Docker Compose V2 if not present
           if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/null; then
             echo "Installing Docker Compose V2..."
-            sudo yum install -y docker-compose-plugin
+            # For Amazon Linux 2023
+            sudo mkdir -p /usr/local/lib/docker/cli-plugins
+            sudo curl -SL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 -o /usr/local/lib/docker/cli-plugins/docker-compose
+            sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
           fi
 
           # Stop and remove containers safely
@@ -207,7 +210,8 @@ jobs:
           # Login to ECR without credentials (using IAM role)
           aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
           
-          # Run docker compose with absolute path
-          docker compose -f /home/ec2-user/docker-compose-ec2.yaml up -d
+          # Run docker compose with absolute path (using new compose command)
+          cd /home/ec2-user
+          docker compose up -d
         EOF
 
