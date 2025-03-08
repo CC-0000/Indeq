@@ -129,7 +129,7 @@ jobs:
 
     - name: Deploy to EC2
       run: |
-        
+         
         # Extract markers
         BEGIN_MARKER="-----BEGIN RSA PRIVATE KEY-----"
         END_MARKER="-----END RSA PRIVATE KEY-----"
