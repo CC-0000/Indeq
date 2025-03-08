@@ -1,0 +1,109 @@
+services:
+  query:
+    image: query-service
+    build:
+      context: .
+      dockerfile: query/Dockerfile
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - indeq-net
+
+  # this docker setup doesn't utilize the GPU
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    environment:
+      - OLLAMA_NUM_PARALLEL=4 # Number of threads to utilize
+    mem_limit: 16g
+    networks:
+      - indeq-net
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    env_file:
+      - ./common/config/.env
+    ports:
+      - 5672:5672 # AMQP protocol port
+      - 15672:15672 # Management UI port
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - indeq-net
+
+  authentication:
+    image: authentication-service
+    build:
+      context: .
+      dockerfile: authentication/Dockerfile
+    env_file:
+      - ./common/config/.env
+    depends_on:
+      appDB:
+        condition: service_healthy
+    networks:
+      - indeq-net
+
+  gateway:
+    image: gateway-service
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    ports:
+      - "8080:8080"
+    depends_on:
+      query:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - indeq-net
+  waitlist:
+    image: waitlist-service
+    build:
+      context: .
+      dockerfile: waitlist/Dockerfile
+    env_file:
+      - ./common/config/.env
+    depends_on:
+      appDB:
+        condition: service_healthy
+    networks:
+      - indeq-net
+  appDB:
+    image: postgres:latest
+    env_file:
+      - ./common/config/.env
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    command:
+      - -c
+      - ssl=off
+    expose:
+      - "5432"
+    volumes:
+      - app_data:/var/lib/postgresql/data
+    networks:
+      - indeq-net
+
+volumes:
+  app_data:
+  ollama_models:
+  rabbitmq_data:
+
+networks:
+  indeq-net:
+    driver: bridge
