@@ -1,4 +1,4 @@
-name: Deploy to Amazon EKS
+name: Deploy to Amazon EC2
 
 on:
   push:
@@ -147,12 +147,31 @@ jobs:
         
         # Copy the Docker image to the EC2 instance
         aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com
-        docker pull ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/authentication:13714734156
-        docker pull ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/query:13714734156
-        docker pull ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/gateway:13714734156
-        docker pull ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/waitlist:13714734156
+        $authImage = ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/indeq/authentication:13714734156
+        $queryImage = ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/indeq/query:13714734156
+        $gatewayImage = ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/indeq/gateway:13714734156
+        $waitlistImage = ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/indeq/waitlist:13714734156
+
+        docker pull $authImage
+        docker pull $queryImage
+        docker pull $gatewayImage
+        docker pull $waitlistImage
+        docker pull ollama/ollama:latest
+        docker pull rabbitmq:3-management
+        docker pull postgres:latest
+
+        # Replace placeholder image references with actual ECR URLs
+        sed -i "s|authImage|$authImage|g" backend/docker-compose-ec2.yaml
+        sed -i "s|queryImage|$queryImage|g" backend/docker-compose-ec2.yaml
+        sed -i "s|gatewayImage|$gatewayImage|g" backend/docker-compose-ec2.yaml
+        sed -i "s|waitlistImage|$waitlistImage|g" backend/docker-compose-ec2.yaml
         
-        echo "Content of the PEM file:"
+        # check if the docker-compose-ec2.yaml file has been modified
+        echo "Content of the docker-compose-ec2.yaml file:"
+        cat backend/docker-compose-ec2.yaml
+
+        # Copy the docker-compose file to EC2
+        scp -i private_key.pem backend/docker-compose-ec2.yaml ec2-user@${{ secrets.EC2_PUBLIC_IP }}:~/docker-compose.yaml
 
         # SSH into the EC2 instance and run the Docker containers
         ssh -v -o StrictHostKeyChecking=no -i private_key.pem ec2-user@${{ secrets.EC2_PUBLIC_IP }} << EOF
@@ -171,8 +190,9 @@ jobs:
           docker --version
 
           # Stop and remove all running containers
-          docker stop $(docker ps -a -q) || true
-          docker rm $(docker ps -a -q) || true
+          echo "Cleaning up all existing containers..."
+          docker stop \$(docker ps -aq) || true
+          docker rm \$(docker ps -aq) || true
 
           # Configure AWS CLI
           aws configure set region us-east-1
@@ -183,15 +203,8 @@ jobs:
           # Login to ECR without credentials (using IAM role)
           aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
           
-          # Try pulling an image
-          docker pull ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/indeq/authentication:13714734156
-          docker pull ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/indeq/query:13714734156
-          docker pull ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/indeq/gateway:13714734156
-          docker pull ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/indeq/waitlist:13714734156
+          # Try running docker compose
+          docker compose -f docker-compose-ec2.yaml up -d
 
-          docker run -d --restart always --name authentication -p 80:80 ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/authentication:13714734156
-          docker run -d --restart always --name query -p 81:80 ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/query:13714734156
-          docker run -d --restart always --name gateway -p 82:80 ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/gateway:13714734156
-          docker run -d --restart always --name waitlist -p 83:80 ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/waitlist:13714734156
         EOF
 

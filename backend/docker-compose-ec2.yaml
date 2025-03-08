@@ -1,9 +1,6 @@
 services:
   query:
-    image: query-service
-    build:
-      context: .
-      dockerfile: query/Dockerfile
+    image: queryImage
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -42,10 +39,7 @@ services:
       - indeq-net
 
   authentication:
-    image: authentication-service
-    build:
-      context: .
-      dockerfile: authentication/Dockerfile
+    image: authImage
     env_file:
       - ./common/config/.env
     depends_on:
@@ -55,10 +49,7 @@ services:
       - indeq-net
 
   gateway:
-    image: gateway-service
-    build:
-      context: .
-      dockerfile: gateway/Dockerfile
+    image: gatewayImage
     ports:
       - "8080:8080"
     depends_on:
@@ -69,10 +60,7 @@ services:
     networks:
       - indeq-net
   waitlist:
-    image: waitlist-service
-    build:
-      context: .
-      dockerfile: waitlist/Dockerfile
+    image: waitlistImage
     env_file:
       - ./common/config/.env
     depends_on:
