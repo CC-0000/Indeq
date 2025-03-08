@@ -38,7 +38,7 @@ foreach ($secret in $data) {
     
         
         # Reconstruct the key with proper format
-        $value = $beginMarker  + $formattedKey + $endMarker
+        $value = $keyBody
     }
     # Debug output to check the extracted values
     $value = $value -replace '^"|"$', ''  # Remove extra outer double quotes from the value

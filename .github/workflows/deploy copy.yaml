@@ -130,9 +130,16 @@ jobs:
     - name: Deploy to EC2
       run: |
         
-        echo ${{ secrets.EC2_KEY_PAIR }} > private_key.pem
+        # Extract markers
+        BEGIN_MARKER="-----BEGIN RSA PRIVATE KEY-----"
+        END_MARKER="-----END RSA PRIVATE KEY-----"
+        
+        # Create PEM file with proper formatting
+        echo "$BEGIN_MARKER" > private_key.pem
+        echo "${{ secrets.EC2_KEY_PAIR }}" | sed 's/.\{64\}/&\n/g' >> private_key.pem
+        echo "$END_MARKER" >> private_key.pem
+
         chmod 600 private_key.pem
-        echo "length of private key: $(wc -c < private_key.pem)"
         # Install AWS CLI if not already installed
         if ! command -v aws &> /dev/null; then
           echo "AWS CLI not found. Installing..."
