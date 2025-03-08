@@ -173,7 +173,19 @@ jobs:
           # Stop and remove all running containers
           docker stop $(docker ps -a -q) || true
           docker rm $(docker ps -a -q) || true
-          
+
+          # Configure AWS CLI
+          aws configure set region us-east-1
+
+          # Test ECR Login
+          aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
+
+          # Try pulling an image
+          docker pull ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/indeq/authentication:13714734156
+          docker pull ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/indeq/query:13714734156
+          docker pull ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/indeq/gateway:13714734156
+          docker pull ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/indeq/waitlist:13714734156
+
           docker run -d --restart always --name authentication -p 80:80 ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/authentication:13714734156
           docker run -d --restart always --name query -p 81:80 ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/query:13714734156
           docker run -d --restart always --name gateway -p 82:80 ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/gateway:13714734156
