@@ -215,7 +215,7 @@ jobs:
           aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
           
           # Try running docker compose
-          docker compose up -f docker-compose-ec2.yaml -d
+          docker compose -f /home/ec2-user/docker-compose-ec2.yaml up -d
 
         EOF
 
