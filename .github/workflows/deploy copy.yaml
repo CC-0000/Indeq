@@ -271,6 +271,14 @@ jobs:
         sed -i "s|gatewayImage|$gatewayImage|g" backend/docker-compose-ec2.yaml
         sed -i "s|waitlistImage|$waitlistImage|g" backend/docker-compose-ec2.yaml
         
+        # SSH into EC2 to create directories first
+        ssh -o StrictHostKeyChecking=no -i private_key.pem ec2-user@${{ secrets.EC2_PUBLIC_IP }} << 'EOF'
+          # Create necessary directories if they don't exist
+          if [ ! -d "/home/ec2-user/common/config" ]; then
+            mkdir -p /home/ec2-user/common/config
+          fi
+        EOF
+
         # Copy the docker-compose file to EC2
         scp -o StrictHostKeyChecking=no -i private_key.pem backend/docker-compose-ec2.yaml ec2-user@${{ secrets.EC2_PUBLIC_IP }}:/home/ec2-user/
         scp -o StrictHostKeyChecking=no -i private_key.pem .env ec2-user@${{ secrets.EC2_PUBLIC_IP }}:/home/ec2-user/common/config/.env
