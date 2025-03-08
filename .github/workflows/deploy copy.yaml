@@ -18,8 +18,8 @@ jobs:
       contents: read
 
     steps:
-    # - name: Checkout Repository
-    #   uses: actions/checkout@v2
+    - name: Checkout Repository
+      uses: actions/checkout@v2
 
     # - name: Install Protocol Buffers Compiler
     #   run: |
@@ -144,6 +144,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y awscli
         fi
+
+        echo "Current directory: $(pwd)"
+        ls -la
+        ls -la backend/
+        cat backend/docker-compose-ec2.yaml
         
         # Copy the Docker image to the EC2 instance
         aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com
@@ -168,10 +173,6 @@ jobs:
         
         # check if the docker-compose-ec2.yaml file has been modified
         echo "Content of the docker-compose-ec2.yaml file:"
-        echo "Current directory: $(pwd)"
-        ls -la
-        ls -la backend/
-        cat backend/docker-compose-ec2.yaml
 
         # Copy the docker-compose file to EC2
         scp -i private_key.pem backend/docker-compose-ec2.yaml ec2-user@${{ secrets.EC2_PUBLIC_IP }}:~/docker-compose.yaml
