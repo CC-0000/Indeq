@@ -77,6 +77,5 @@ export const GET = async ({ params }) => {
     }
     
     const authUrl = buildAuthUrl(provider);
-	console.log(authUrl);
     throw redirect(302, authUrl);
 }

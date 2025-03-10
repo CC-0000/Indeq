@@ -29,24 +29,24 @@ export const GET = async ({ params, url, cookies}) => {
             if (!response.ok) {
                 // const errorText = await response.text();
                 // console.error('Error connecting to provider:', errorText);
-                throw redirect(302, `/profile/integration?error=${encodeURIComponent('Failed to connect to ' + provider.charAt(0).toUpperCase() + provider.slice(1).toLowerCase() + '.')}`);
+                throw redirect(302, `/profile/integration?status=error&action=connect&provider=${encodeURIComponent(provider)}`);
             }
             
             const data = await response.json();
             
             if (data.error) {
-                throw redirect(302, `/profile/integration?error=${encodeURIComponent(data.error)}`);
+                throw redirect(302, `/profile/integration?status=error&action=connect&provider=${encodeURIComponent(provider)}`);
             }
             
         } catch (error) {
             if (!(error instanceof redirect)) {
                 // console.error('Integration error:', error);
-                throw redirect(302, `/profile/integration?error=${encodeURIComponent('Failed to connect to ' + provider.charAt(0).toUpperCase() + provider.slice(1).toLowerCase() + '.')}`);
+                throw redirect(302, `/profile/integration?status=error&action=connect&provider=${encodeURIComponent(provider)}`);
             }
             throw error;
         }
         
-        throw redirect(302, `/profile/integration?success=${encodeURIComponent('Connected successfully with ' + provider.charAt(0).toUpperCase() + provider.slice(1).toLowerCase() + '!')}`);
+        throw redirect(302, `/profile/integration?status=success&action=connect&provider=${encodeURIComponent(provider)}`);
     }
 
     throw redirect(302, '/profile/integration');

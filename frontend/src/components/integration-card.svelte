@@ -23,8 +23,13 @@
 	export let isIntegrated = false;
 
 	function handleAction() {
-		window.location.href = `/auth/${company.toUpperCase()}${isIntegrated ? '/disconnect' : ''}`;
+		if (isIntegrated) {
+			window.location.href = `/profile/integration/disconnect?provider=${company.toUpperCase()}`;
+		} else {
+			window.location.href = `/auth/${company.toUpperCase()}`;
+		}
 	}
+
 </script>
 
 <Button variant="outline" on:click={handleAction}>

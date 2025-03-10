@@ -4,24 +4,39 @@
 	import { onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
 
+	const capitalize = (s: string) => {
+		return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+	};
+
 	onMount(() => {
-		const success = $page.url.searchParams.get('success');
-		if (success) {
-			toast.success(success);
+		const params = new URLSearchParams(window.location.search);
+		const status = params.get('status');
+		const action = params.get('action');
+		const provider = params.get('provider');
 
-			const url = new URL(window.location.href);
-			url.searchParams.delete('success');
-			window.history.replaceState({}, '', url.toString());
+		if (!status || !action || !provider) {
+			return;
 		}
 
-		const error = $page.url.searchParams.get('error');
-		if (error) {
-			toast.error(error);
-
-			const url = new URL(window.location.href);
-			url.searchParams.delete('error');
-			window.history.replaceState({}, '', url.toString());
+		if (status === 'success') {
+			if (action === 'connect') {
+				toast.success(`Connected successfully with ${capitalize(provider)}!`);
+			} else if (action === 'disconnect') {
+				toast.success(`Disconnected successfully from ${capitalize(provider)}!`);
+			}
+		} else if (status === 'error') {
+			if (action === 'connect') {
+				toast.error(`Failed to connect with ${capitalize(provider)}!`);
+			} else if (action === 'disconnect') {
+				toast.error(`Failed to disconnect from ${capitalize(provider)}!`);
+			}
 		}
+
+		const url = new URL(window.location.href);
+		url.searchParams.delete('status');
+		url.searchParams.delete('action');
+		url.searchParams.delete('provider');
+		window.history.replaceState({}, '', url.toString());
 	});
 
 	// List of companies and their data
