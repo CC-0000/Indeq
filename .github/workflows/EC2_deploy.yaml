@@ -21,31 +21,31 @@ jobs:
     - name: Checkout Repository
       uses: actions/checkout@v2
 
-    # - name: Install Protocol Buffers Compiler
-    #   run: |
-    #     sudo apt-get update
-    #     sudo apt-get install -y protobuf-compiler
+    - name: Install Protocol Buffers Compiler
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y protobuf-compiler
 
-    # - name: Install Go
-    #   run: |
-    #     sudo apt-get update
-    #     sudo apt-get install -y golang-go
+    - name: Install Go
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y golang-go
 
-    # - name: Install protoc-gen-go
-    #   run: |
-    #     go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-    #     echo "GOPATH=$(go env GOPATH)" >> $GITHUB_ENV
-    #     echo "PATH=$PATH:$(go env GOPATH)/bin" >> $GITHUB_ENV
+    - name: Install protoc-gen-go
+      run: |
+        go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+        echo "GOPATH=$(go env GOPATH)" >> $GITHUB_ENV
+        echo "PATH=$PATH:$(go env GOPATH)/bin" >> $GITHUB_ENV
 
-    # - name: Install protoc-gen-go-grpc
-    #   run: |
-    #     go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
-    #     echo "GOPATH=$(go env GOPATH)" >> $GITHUB_ENV
-    #     echo "PATH=$PATH:$(go env GOPATH)/bin" >> $GITHUB_ENV
+    - name: Install protoc-gen-go-grpc
+      run: |
+        go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+        echo "GOPATH=$(go env GOPATH)" >> $GITHUB_ENV
+        echo "PATH=$PATH:$(go env GOPATH)/bin" >> $GITHUB_ENV
 
-    # - name: Check protoc-gen-go Installation
-    #   run: |
-    #     protoc-gen-go --version || echo "protoc-gen-go not found"
+    - name: Check protoc-gen-go Installation
+      run: |
+        protoc-gen-go --version || echo "protoc-gen-go not found"
 
     - name: Generate .env Files
       env:
@@ -188,17 +188,13 @@ jobs:
         echo "EC2_PUBLIC_IP=$EC2_PUBLIC_IP" >> .env
         echo "EC2_PUBLIC_HOST=$EC2_PUBLIC_HOST" >> .env
         echo "ROOT_CA_CERT=$ROOT_CA_CERT" >> .env
-      
-    #   run: |
-    #     chmod +x ./generate_env.sh
-    #     ./generate_env.sh
 
-    # - name: Generate Code
-    #   run: |
-    #     cd backend/common && make gen
+    - name: Generate Code
+      run: |
+        cd backend/common && make gen
 
-    # - name: Set up Docker Buildx
-    #   uses: docker/setup-buildx-action@v1
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v1
 
     - name: Configure AWS Credentials
       uses: aws-actions/configure-aws-credentials@v2
@@ -211,19 +207,19 @@ jobs:
       run: |
         aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com
 
-    # - name: Build and Push Docker Images
-    #   run: |
-    #     docker build -t authentication:$IMAGE_TAG -f backend/authentication/Dockerfile backend
-    #     docker tag authentication:$IMAGE_TAG ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/authentication:$IMAGE_TAG
-    #     docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/authentication:$IMAGE_TAG
+    - name: Build and Push Docker Images
+      run: |
+        docker build -t authentication:$IMAGE_TAG -f backend/authentication/Dockerfile backend
+        docker tag authentication:$IMAGE_TAG ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/authentication:$IMAGE_TAG
+        docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/authentication:$IMAGE_TAG
 
-    #     docker build -t query:$IMAGE_TAG -f backend/query/Dockerfile backend
-    #     docker tag query:$IMAGE_TAG ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/query:$IMAGE_TAG
-    #     docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/query:$IMAGE_TAG
+        docker build -t query:$IMAGE_TAG -f backend/query/Dockerfile backend
+        docker tag query:$IMAGE_TAG ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/query:$IMAGE_TAG
+        docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/query:$IMAGE_TAG
 
-    #     docker build -t gateway:$IMAGE_TAG -f backend/gateway/Dockerfile backend
-    #     docker tag gateway:$IMAGE_TAG ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/gateway:$IMAGE_TAG
-    #     docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/gateway:$IMAGE_TAG
+        docker build -t gateway:$IMAGE_TAG -f backend/gateway/Dockerfile backend
+        docker tag gateway:$IMAGE_TAG ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/gateway:$IMAGE_TAG
+        docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/gateway:$IMAGE_TAG
 
     - name: Deploy to EC2
       run: |
@@ -251,9 +247,9 @@ jobs:
         
         # Copy the Docker image to the EC2 instance
         aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com
-        authImage="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/indeq/authentication:13714734156"
-        queryImage="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/indeq/query:13714734156"
-        gatewayImage="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/indeq/gateway:13714734156"
+        authImage="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/indeq/authentication:$IMAGE_TAG"
+        queryImage="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/indeq/query:$IMAGE_TAG"
+        gatewayImage="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/indeq/gateway:$IMAGE_TAG"
 
         docker pull $authImage
         docker pull $queryImage
