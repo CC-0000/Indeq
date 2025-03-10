@@ -211,18 +211,26 @@ jobs:
     - name: Build and Push Docker Images
       run: |
         docker build -t authentication:$IMAGE_TAG -f backend/authentication/Dockerfile backend
-        docker tag authentication:$IMAGE_TAG ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/authentication:$IMAGE_TAG
-        docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/authentication:$IMAGE_TAG
+        authImage = ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/authentication:$IMAGE_TAG
+        docker tag authentication:$IMAGE_TAG $authImage
+        docker push $authImage
 
         docker build -t query:$IMAGE_TAG -f backend/query/Dockerfile backend
-        docker tag query:$IMAGE_TAG ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/query:$IMAGE_TAG
-        docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/query:$IMAGE_TAG
+        queryImage = ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/query:$IMAGE_TAG
+        docker tag query:$IMAGE_TAG $queryImage
+        docker push $queryImage
 
         docker build -t gateway:$IMAGE_TAG -f backend/gateway/Dockerfile backend
-        docker tag gateway:$IMAGE_TAG ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/gateway:$IMAGE_TAG
-        docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/gateway:$IMAGE_TAG
+        gatewayImage = ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/gateway:$IMAGE_TAG
+        docker tag gateway:$IMAGE_TAG $gatewayImage
+        docker push $gatewayImage
 
-    - name: Deploy to EC2
+        # Replace placeholder image references with actual ECR URLs
+        sed -i "s|authImage|$authImage|g" backend/docker-compose-ec2.yaml
+        sed -i "s|queryImage|$queryImage|g" backend/docker-compose-ec2.yaml
+        sed -i "s|gatewayImage|$gatewayImage|g" backend/docker-compose-ec2.yaml
+
+    - name: Extract EC2 Key Pair
       run: |
         # Extract markers
         BEGIN_MARKER="-----BEGIN RSA PRIVATE KEY-----"
@@ -234,31 +242,18 @@ jobs:
         echo "$END_MARKER" >> private_key.pem
 
         chmod 600 private_key.pem
-        # Install AWS CLI if not already installed
-        if ! command -v aws &> /dev/null; then
-          echo "AWS CLI not found. Installing..."
-          sudo apt-get update
-          sudo apt-get install -y awscli
-        fi
-        
-        # Copy the Docker image to the EC2 instance
-        aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com
-        authImage="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/indeq/authentication:$IMAGE_TAG"
-        queryImage="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/indeq/query:$IMAGE_TAG"
-        gatewayImage="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/indeq/gateway:$IMAGE_TAG"
 
-        # Replace placeholder image references with actual ECR URLs
-        sed -i "s|authImage|$authImage|g" backend/docker-compose-ec2.yaml
-        sed -i "s|queryImage|$queryImage|g" backend/docker-compose-ec2.yaml
-        sed -i "s|gatewayImage|$gatewayImage|g" backend/docker-compose-ec2.yaml
-        
-        echo "Current directory: $(pwd)"
-        ls -la
-        ls -la backend/
-        cat backend/docker-compose-ec2.yaml
-
+    - name: Predeploy Cleanup
+      run: |
         # SSH into EC2 to create directories first for clean up
         ssh -vvv -o StrictHostKeyChecking=no -i private_key.pem ec2-user@${{ secrets.EC2_PUBLIC_IP }} << 'EOF'
+
+          # Print current directory and list contents
+          pwd
+          ls -la
+          ls -la backend/
+          cat backend/docker-compose-ec2.yaml
+
           # Create necessary directories if they don't exist
           if [ ! -d "/home/ec2-user/common/config" ]; then
             mkdir -p /home/ec2-user/common/config
@@ -269,13 +264,32 @@ jobs:
             rm /home/ec2-user/common/config/.env
           fi
 
+          # Stop and remove containers safely
+          if [ "$(docker ps -q)" ]; then
+            docker stop $(docker ps -q)
+          fi
+          if [ "$(docker ps -aq)" ]; then
+            docker rm $(docker ps -aq)
+          fi
+
           docker image prune -a
           docker network prune -a
         EOF
 
+    - name: Copy docker-compose file to EC2
+      run: |
         # Copy the docker-compose file to EC2
         scp -o StrictHostKeyChecking=no -i private_key.pem backend/docker-compose-ec2.yaml ec2-user@${{ secrets.EC2_PUBLIC_IP }}:/home/ec2-user/
         scp -o StrictHostKeyChecking=no -i private_key.pem backend/common/config/.env ec2-user@${{ secrets.EC2_PUBLIC_IP }}:/home/ec2-user/common/config/.env
+
+    - name: Deploy to EC2
+      run: |
+        # Install AWS CLI if not already installed
+        if ! command -v aws &> /dev/null; then
+          echo "AWS CLI not found. Installing..."
+          sudo apt-get update
+          sudo apt-get install -y awscli
+        fi
 
         # SSH into the EC2 instance and run the Docker containers
         ssh -vvv-o StrictHostKeyChecking=no -i private_key.pem ec2-user@${{ secrets.EC2_PUBLIC_IP }} << 'EOF'
@@ -299,13 +313,6 @@ jobs:
             sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
           fi
 
-          # Stop and remove containers safely
-          if [ "$(docker ps -q)" ]; then
-            docker stop $(docker ps -q)
-          fi
-          if [ "$(docker ps -aq)" ]; then
-            docker rm $(docker ps -aq)
-          fi
 
           # Configure AWS CLI
           aws configure set region us-east-1
