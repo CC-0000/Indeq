@@ -188,6 +188,7 @@ jobs:
         echo "EC2_PUBLIC_IP=$EC2_PUBLIC_IP" >> .env
         echo "EC2_PUBLIC_HOST=$EC2_PUBLIC_HOST" >> .env
         echo "ROOT_CA_CERT=$ROOT_CA_CERT" >> .env
+        mv .env backend/common/config/.env
 
     - name: Generate Code
       run: |
