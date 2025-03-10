@@ -324,5 +324,5 @@ jobs:
           
           # Run docker compose with absolute path
           docker compose -f /home/ec2-user/docker-compose-ec2.yaml up -d
-          docker exec ec2-user-ollama-1 ollama pull deepseek-r1:1.5b # For later
+          # docker exec ec2-user-ollama-1 ollama pull deepseek-r1:1.5b # For later
         EOF
