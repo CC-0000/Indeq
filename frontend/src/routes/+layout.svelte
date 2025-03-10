@@ -1,7 +1,12 @@
 <script lang="ts">
 	import '../app.css';
 	import { Toaster } from "$lib/components/ui/sonner";
+    import AppSidebar from '$lib/components/sidebar/app-sidebar.svelte';    
     import { injectAnalytics } from '@vercel/analytics/sveltekit'
+    import { page } from '$app/stores';
+    import { sidebarExpanded } from '$lib/stores/sidbarStore';
+    import { isValidRoute } from '$lib/config/sidebar-routes';
+    import { browser } from '$app/environment';
 
 	let { children } = $props();
 
@@ -33,4 +38,10 @@
 </svelte:head>
 
 <Toaster theme="light" />
-{@render children()}
+{#if browser && isValidRoute($page.url.pathname)}
+    <AppSidebar isExpanded={$sidebarExpanded}>
+        <main>{@render children()}</main>
+    </AppSidebar>
+{:else if browser}
+    <main>{@render children()}</main>
+{/if}

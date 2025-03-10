@@ -8,6 +8,7 @@ export interface User {
 	id: number | null;
 	username: string;
 	email: string;
+	avatar: string;
 	// Add more fields if you wish, e.g. avatarUrl, role, etc.
 }
 
