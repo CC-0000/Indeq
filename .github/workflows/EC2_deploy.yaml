@@ -211,17 +211,17 @@ jobs:
     - name: Build and Push Docker Images
       run: |
         docker build -t authentication:$IMAGE_TAG -f backend/authentication/Dockerfile backend
-        authImage = ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/authentication:$IMAGE_TAG
+        authImage="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/authentication:$IMAGE_TAG"
         docker tag authentication:$IMAGE_TAG $authImage
         docker push $authImage
 
         docker build -t query:$IMAGE_TAG -f backend/query/Dockerfile backend
-        queryImage = ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/query:$IMAGE_TAG
+        queryImage="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/query:$IMAGE_TAG"
         docker tag query:$IMAGE_TAG $queryImage
         docker push $queryImage
 
         docker build -t gateway:$IMAGE_TAG -f backend/gateway/Dockerfile backend
-        gatewayImage = ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/gateway:$IMAGE_TAG
+        gatewayImage="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/gateway:$IMAGE_TAG"
         docker tag gateway:$IMAGE_TAG $gatewayImage
         docker push $gatewayImage
 
