@@ -225,10 +225,6 @@ jobs:
     #     docker tag gateway:$IMAGE_TAG ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/gateway:$IMAGE_TAG
     #     docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/gateway:$IMAGE_TAG
 
-    #     docker build -t waitlist:$IMAGE_TAG -f backend/waitlist/Dockerfile backend
-    #     docker tag waitlist:$IMAGE_TAG ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/waitlist:$IMAGE_TAG
-    #     docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAMESPACE/waitlist:$IMAGE_TAG
-
     - name: Deploy to EC2
       run: |
         # Extract markers
@@ -258,18 +254,15 @@ jobs:
         authImage="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/indeq/authentication:13714734156"
         queryImage="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/indeq/query:13714734156"
         gatewayImage="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/indeq/gateway:13714734156"
-        waitlistImage="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/indeq/waitlist:13714734156"
 
         docker pull $authImage
         docker pull $queryImage
         docker pull $gatewayImage
-        docker pull $waitlistImage
 
         # Replace placeholder image references with actual ECR URLs
         sed -i "s|authImage|$authImage|g" backend/docker-compose-ec2.yaml
         sed -i "s|queryImage|$queryImage|g" backend/docker-compose-ec2.yaml
         sed -i "s|gatewayImage|$gatewayImage|g" backend/docker-compose-ec2.yaml
-        sed -i "s|waitlistImage|$waitlistImage|g" backend/docker-compose-ec2.yaml
         
         # SSH into EC2 to create directories first
         ssh -o StrictHostKeyChecking=no -i private_key.pem ec2-user@${{ secrets.EC2_PUBLIC_IP }} << 'EOF'
@@ -324,6 +317,6 @@ jobs:
           
           # Run docker compose with absolute path
           docker compose -f /home/ec2-user/docker-compose-ec2.yaml up -d
-
+          docker exec ec2-user-ollama-1 ollama pull deepseek-r1:1.5b # For later
         EOF
 
