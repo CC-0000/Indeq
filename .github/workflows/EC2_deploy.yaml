@@ -303,6 +303,9 @@ jobs:
             docker rm $(docker ps -aq)
           fi
 
+          docker image prune -a
+          docker network prune -a
+
           # Configure AWS CLI
           aws configure set region us-east-1
 
