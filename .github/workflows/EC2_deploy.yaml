@@ -240,11 +240,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y awscli
         fi
-
-        echo "Current directory: $(pwd)"
-        ls -la
-        ls -la backend/
-        cat backend/docker-compose-ec2.yaml
         
         # Copy the Docker image to the EC2 instance
         aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com
@@ -261,6 +256,11 @@ jobs:
         sed -i "s|queryImage|$queryImage|g" backend/docker-compose-ec2.yaml
         sed -i "s|gatewayImage|$gatewayImage|g" backend/docker-compose-ec2.yaml
         
+        echo "Current directory: $(pwd)"
+        ls -la
+        ls -la backend/
+        cat backend/docker-compose-ec2.yaml
+
         # SSH into EC2 to create directories first
         ssh -o StrictHostKeyChecking=no -i private_key.pem ec2-user@${{ secrets.EC2_PUBLIC_IP }} << 'EOF'
           # Create necessary directories if they don't exist
@@ -303,8 +303,8 @@ jobs:
             docker rm $(docker ps -aq)
           fi
 
-          docker image prune -a
-          docker network prune -a
+          # docker image prune -a
+          # docker network prune -a
 
           # Configure AWS CLI
           aws configure set region us-east-1
