@@ -8,17 +8,17 @@ services:
       - indeq-net
 
   # this docker setup doesn't utilize the GPU
-  ollama:
-    image: ollama/ollama:latest
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_models:/root/.ollama
-    environment:
-      - OLLAMA_NUM_PARALLEL=4 # Number of threads to utilize
-    mem_limit: 16g
-    networks:
-      - indeq-net
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ollama_models:/root/.ollama
+  #   environment:
+  #     - OLLAMA_NUM_PARALLEL=4 # Number of threads to utilize
+  #   mem_limit: 16g
+  #   networks:
+  #     - indeq-net
 
   rabbitmq:
     image: rabbitmq:3-management
