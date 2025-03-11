@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { LockIcon, MailIcon } from "svelte-feather-icons";
+  import { BoxIcon, MailIcon, LoaderIcon } from "svelte-feather-icons";
   import { onMount } from "svelte";
   import { toast } from "svelte-sonner";
   
@@ -71,7 +71,7 @@
   <div class="w-full max-w-md text-center relative z-10">
     <!-- App Name -->
     <h1 class="text-4xl text-gray-900 mb-3">Indeq</h1>
-    <p class="text-gray-600 text-lg">Next generation private data search</p>
+    <p class="text-gray-600 text-lg">Find What Matters, Across Every Platform.</p>
 
     <!-- Email Signup Form -->
     <form class="flex items-center gap-3 mt-8" on:submit={handleSubmit}>
@@ -80,22 +80,34 @@
         <input
           bind:value={email}
           placeholder="Enter your email..."
-          class="w-full pl-10 p-2 bg-white border border-gray-200 rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary placeholder-gray-400"
+          class="w-full pl-10 p-2 bg-white border border-gray-200 rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary placeholder-gray-400 disabled:bg-gray-100 disabled:text-gray-500"
+          disabled={submitStatus === 'loading'}
         />
       </div>
       <button
         type="submit"
-        class="p-2 rounded-lg bg-primary text-white hover:bg-blue-600 transition-colors"
+        class="p-2 rounded-lg bg-primary text-white hover:bg-blue-600 transition-colors flex items-center justify-center min-w-[90px]"
         disabled={submitStatus === 'loading'}
       >
-        Notify Me
+        {#if submitStatus === 'loading'}
+          <div class="animate-spin">
+            <LoaderIcon size="18" />
+          </div>
+        {:else}
+          Notify Me
+        {/if}
       </button>
     </form>
 
     <!-- Coming Soon Message -->
-    <div class="flex items-center justify-center gap-3 mt-4">
-      <LockIcon size="18" class="text-primary" />
-      <p class="text-lg pt-1 font-medium text-gray-800">Coming Soon, Join the waitlist</p>
+    <div class="flex justify-center mt-6 px-2">
+      <span class="inline-flex items-center text-center">
+        <BoxIcon 
+          size="18" 
+          class="hidden sm:block text-primary transition-transform duration-300 hover:scale-125 hover:rotate-12 flex-shrink-0" 
+        />
+        <p class="text-lg font-medium text-gray-800 sm:ml-2">Get notified the moment we launch!</p>
+      </span>
     </div>
 
     <hr class="border-t border-gray-300 my-8" />
@@ -119,5 +131,15 @@
   /* Smooth transitions for blobs */
   .absolute {
     transition: all 0.5s ease-out;
+  }
+  
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  
+  .animate-spin {
+    animation: spin 1s linear infinite;
   }
 </style>

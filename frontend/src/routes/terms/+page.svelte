@@ -1,21 +1,16 @@
 <script>
     export let lastUpdated = "February 8, 2025";
 </script>
+
+<svelte:head>
+    <title>Terms of Service | Indeq</title>
+    <meta name="description" content="Terms of Service for Indeq" />
+</svelte:head>
   
-  <section class="max-w-4xl mx-auto px-4 py-8 text-gray-800">
+<section class="max-w-4xl mx-auto px-4 py-8 text-gray-800">
     <!-- Title -->
     <h1 class="text-3xl font-bold mb-4">Terms of Service</h1>
     <p class="text-sm mb-6 italic">Last Updated: {lastUpdated}</p>
-  
-    <!-- Disclaimer -->
-    <div class="bg-yellow-100 border-l-4 border-yellow-400 p-4 mb-6">
-      <p class="text-sm">
-        <strong>Disclaimer:</strong> The following Terms of Service (the “Terms”) are provided for 
-        informational purposes only and do not constitute legal advice. You should consult with 
-        a qualified attorney to ensure that these Terms comply with all applicable laws and 
-        regulations in the relevant jurisdictions.
-      </p>
-    </div>
   
     <!-- Introduction -->
     <p class="mb-6">
