@@ -250,9 +250,6 @@ jobs:
 
           # Print current directory and list contents
           pwd
-          ls -la
-          ls -la backend/
-          cat backend/docker-compose-ec2.yaml
 
           # Create necessary directories if they don't exist
           if [ ! -d "/home/ec2-user/common/config" ]; then
@@ -272,8 +269,8 @@ jobs:
             docker rm $(docker ps -aq)
           fi
 
-          docker image prune -a -f
-          docker network prune -a -f
+          docker image prune -f
+          docker network prune -f
         EOF
 
     - name: Copy docker-compose file to EC2
