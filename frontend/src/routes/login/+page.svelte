@@ -20,6 +20,11 @@
     export let form;
 </script>
 
+<svelte:head>
+    <title>Login | Indeq</title>
+    <meta name="description" content="Login to Indeq" />
+</svelte:head>
+
 <div class="min-h-screen flex items-center justify-center">
 	<div class="flex flex-col gap-4 min-w-96">
 		<Card.Root class="w-full max-w-sm mx-auto">

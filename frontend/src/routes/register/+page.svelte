@@ -21,6 +21,11 @@
     export let form;
 </script>
 
+<svelte:head>
+    <title>Sign Up | Indeq</title>
+    <meta name="description" content="Sign up for Indeq" />
+</svelte:head>
+
 <div class="min-h-screen flex items-center justify-center">
 	<div class="min-w-96 flex flex-col gap-4">
 		<Card.Root class="w-full max-w-sm mx-auto">
