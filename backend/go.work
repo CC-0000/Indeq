@@ -3,6 +3,7 @@ go 1.23.5
 use (
 	./authentication
 	./common
+	./crawling
 	./gateway
 	./query
 	./waitlist

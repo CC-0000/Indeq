@@ -18,27 +18,27 @@ COPY waitlist/go.mod waitlist/go.sum ./waitlist/
 COPY crawling/go.mod crawling/go.sum ./crawling/
 
 # Download dependencies
-RUN cd authentication && go mod download
+RUN cd crawling && go mod download
 
 # Copy proto files
-COPY common/api/authentication.proto ./common/api/
-RUN protoc --go_out=. --go-grpc_out=. common/api/authentication.proto
+COPY common/api/crawling.proto ./common/api/
+RUN protoc --go_out=. --go-grpc_out=. common/api/crawling.proto
 
 # Copy source code
-COPY authentication/ ./authentication/
+COPY crawling/ ./crawling/
 COPY common/ ./common/
 
 # Build binary with module replacement
-RUN cd authentication && \
-    CGO_ENABLED=0 GOOS=linux go build -o ../authentication-service .
+RUN cd crawling && \
+    CGO_ENABLED=0 GOOS=linux go build -o ../crawling-service .
 
 # Runtime stage  
 FROM alpine:latest
 RUN apk --no-cache add ca-certificates
 
 WORKDIR /app/
-COPY --from=builder /app/authentication-service .
+COPY --from=builder /app/crawling-service .
 COPY --from=builder /app/common/config/.env . 
 
-EXPOSE 50052
-CMD ["./authentication-service"]
+EXPOSE 50055
+CMD ["./crawling-service"]

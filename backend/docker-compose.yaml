@@ -68,6 +68,16 @@ services:
         condition: service_healthy
     networks:
       - indeq-net
+  crawling:
+    image: crawling-service
+    build:
+      context: .
+      dockerfile: crawling/Dockerfile
+    depends_on:
+      appDB:
+        condition: service_healthy
+    networks:
+      - indeq-net
   waitlist:
     image: waitlist-service
     build:

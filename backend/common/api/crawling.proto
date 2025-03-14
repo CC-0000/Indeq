@@ -1,0 +1,63 @@
+syntax = "proto3";
+
+option go_package = "github.com/cc-0000/indeq/common/api";
+
+import "google/protobuf/timestamp.proto";
+
+package api;
+
+// CrawlingService definition
+service CrawlingService {
+    rpc GetAccessToken (GetAccessTokenRequest) returns (AccessTokenResponse);
+    rpc SendChunkToVector (TextChunkMessage) returns (SendChunkToVectorResponse);
+}
+
+// Request message for getting access token from Integration Service
+message GetAccessTokenRequest {
+    string user_id = 1;      // Unique user identifier, e.g., "4i23uh5o9385h6dahl1"
+    string provider = 2;     // Provider name, e.g., "GOOGLE"
+}
+
+// Response message from Integration Service with access token
+message AccessTokenResponse {
+    bool success = 1;        // Indicates if the request succeeded, e.g., true
+    string access_token = 2; // Access token, e.g., "4i23uh5i-2342-g452-g5gg-o9385h6dahl1"
+    string error = 3;        // Error message if success is false
+}
+
+// Enum for supported platforms
+enum Platform {
+    PLATFORM_LOCAL = 0;
+    PLATFORM_GOOGLE_DRIVE = 1;
+    PLATFORM_GOOGLE_DOCS = 2;
+    PLATFORM_MICROSOFT = 3;
+    PLATFORM_NOTION = 4;
+}
+
+// Metadata for a file or resource
+message Metadata {
+    google.protobuf.Timestamp date_created = 1;      // e.g., "2017-02-17T00:12:00Z"
+    google.protobuf.Timestamp date_last_modified = 2;// e.g., "2017-02-19T01:04:00Z"
+    string user_id = 3;         // e.g., "af948791-409b-43f3-807a-9dcf6589b056"
+    string file_id = 4;         // e.g., "4i23uh5i-2342-g452-g5gg-o9385h6dahl1"
+    string resource_type = 5;   // e.g., "text/plain"
+    string file_path = 6;       // e.g., "/docs/myfolder/file.txt"
+    string file_url = 7;        // e.g., "https://drive.google.com/file/xyz"
+    string chunk_id = 8;        // e.g., "chunk-001"
+    uint64 chunk_size = 9;      // Size in bytes, e.g., 1024
+    uint64 chunk_number = 10;   // Sequence number, e.g., 1
+    string title = 11;          // e.g., "My Journal"
+    Platform platform = 12;     // e.g., PLATFORM_GOOGLE_DRIVE
+}
+
+// Message for sending text chunks to Blank Service
+message TextChunkMessage {
+    Metadata metadata = 1;      // Metadata about the file and chunk
+    string content = 2;         // Actual content, e.g., "This is the first part..."
+}
+
+// Response from Vector Service after receiving a chunk
+message SendChunkToVectorResponse {
+    bool success = 1;           // e.g., true if chunk was processed
+    string error = 3;           // e.g., "Processing failed" if success is false
+}
