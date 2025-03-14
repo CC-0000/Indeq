@@ -5,6 +5,7 @@ go 1.23.5
 require (
 	github.com/lib/pq v1.10.9
 	golang.org/x/oauth2 v0.28.0
+	golang.org/x/time v0.11.0
 	google.golang.org/api v0.225.0
 )
 

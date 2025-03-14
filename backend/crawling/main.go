@@ -42,6 +42,14 @@ type ListofFiles struct {
 	Files []File
 }
 
+func TimeExecution(name string, fn func() error) error {
+	start := time.Now()
+	err := fn()
+	elapsed := time.Since(start)
+	log.Printf("%s took %v to complete", name, elapsed)
+	return err
+}
+
 // function that makes request to integration service to get access token, scopes, by sending user_id
 
 // Things that will be crawled Google, Microsoft, Notion
@@ -158,8 +166,8 @@ func main() {
 	// }
 	// log.Fatalf("Database (crawling) setup completed: crawled_sync_token table is ready.")
 	ctx := context.Background()
-	//accessToken := "ya29.a0AeXRPp49VLZcHscXIn_b77HVvHumjc_cOh7AqxHBdEOeSubV7Qd5AJWM4L-xuc-c_byOI2qfe4g-698Sp5iXrpgLPfQP62iJJ_5foiPH5eCMLYagVni5pdERU2k9s1KSx0gFYK9kRxeJ06DEe6NaBcDIZpC_eKawqnSawww-aCgYKAScSARISFQHGX2MirhLmldeDi5hBmaxxZyGVAw0175"
-	accessToken := "ya29.a0AeXRPp7gSq_6SdATPen3cJdLYuztoAFVhzQuC2xfbBHoSXICJd2Vee_xFc75RRcKMPlslH6vQExrssnIUy4q8rbg9pUIbTmbbB7WME-56OVi4HE8-LXcm4JddDa3i3ULGIK_ZsMjCz-o1_FmUUj1kgMVAMTWXMgopY918wZiaCgYKAXISARMSFQHGX2Mi5Lv2EIBMXYzylwfi3pRs_w0175"
 
+	// Get access token from integration service
+	accessToken := ""
 	NewCrawler(ctx, accessToken, "GOOGLE", []string{"https://www.googleapis.com/auth/drive.readonly"})
 }
