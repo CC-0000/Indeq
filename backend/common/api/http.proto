@@ -70,7 +70,6 @@ message HttpDisconnectIntegrationResponse {
 
 message HttpGetOAuthURLRequest {
   string provider = 1;
-  string state = 2;
 }
 
 message HttpGetOAuthURLResponse {

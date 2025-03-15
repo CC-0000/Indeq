@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"fmt"
 	"log"
 	"net"
 	"os"
 	"bytes"
+	"net/url"
     "encoding/json"
 	"encoding/base64"
 	"errors"
@@ -261,6 +263,50 @@ func enumToString(provider pb.Provider) (string, error) {
 	default:
 		return "", fmt.Errorf("invalid provider: %v", provider)
 	}
+}
+
+func generateState() string {
+	b := make([]byte, 32)
+	_, err := rand.Read(b)
+	if err != nil {
+		return ""
+	}
+	return base64.URLEncoding.EncodeToString(b)
+}
+
+func (s *integrationServer) GetOAuthURL(ctx context.Context, req *pb.GetOAuthURLRequest) (*pb.GetOAuthURLResponse, error) {
+	providerStr, err := enumToString(req.Provider)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert provider to string: %v", err)
+	}
+	
+	state := generateState()
+	var authURL string
+	params := url.Values{}
+	if providerStr == "NOTION" {
+		authURL = os.Getenv("NOTION_AUTH_URL") + "&state=" + state
+	} else {
+		params.Add("response_type", "code")
+		params.Add("state", state)
+		if providerStr == "GOOGLE" {
+			params.Add("access_type", "offline")
+			params.Add("prompt", "consent")
+			params.Add("redirect_uri", os.Getenv("GOOGLE_REDIRECT_URI"))
+			params.Add("scope", os.Getenv("GOOGLE_SCOPES"))
+			params.Add("client_id", os.Getenv("GOOGLE_CLIENT_ID"))
+			authURL = os.Getenv("GOOGLE_AUTH_URL") + "?" + params.Encode()
+		} else if providerStr == "MICROSOFT" {
+			params.Add("response_mode", "query")
+			params.Add("redirect_uri", os.Getenv("MICROSOFT_REDIRECT_URI"))
+			params.Add("scope", os.Getenv("MICROSOFT_SCOPES"))
+			params.Add("client_id", os.Getenv("MICROSOFT_CLIENT_ID"))
+			authURL = os.Getenv("MICROSOFT_AUTH_URL") + "?" + params.Encode()
+		}
+	}
+
+	return &pb.GetOAuthURLResponse{
+		Url: authURL,
+	}, nil
 }
 
 func (s *integrationServer) GetIntegrations(ctx context.Context, req *pb.GetIntegrationsRequest) (*pb.GetIntegrationsResponse, error) {

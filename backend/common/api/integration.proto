@@ -28,7 +28,6 @@ message GetIntegrationsResponse {
 
 message GetOAuthURLRequest {
     Provider provider = 1;
-    string state = 2;
 }
 
 message GetOAuthURLResponse {

@@ -242,6 +242,58 @@ func stringToEnumProvider(provider string) (pb.Provider, error) {
 	}
 }
 
+func handleOAuthURLGenerator(clients *ServiceClients) http.HandlerFunc {
+	return func(w http.ResponseWriter, r * http.Request) {
+		var getOAuthURLRequest pb.HttpGetOAuthURLRequest
+		log.Println("Received request to get OAuth URL")
+		ctx := r.Context()
+
+		if err := json.NewDecoder(r.Body).Decode(&getOAuthURLRequest); err != nil {
+			http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+			return
+		}
+
+		if getOAuthURLRequest.Provider == "" {
+			http.Error(w, "Missing provider", http.StatusBadRequest)
+			return
+		}
+		// NOTE: expects authentication middleware to have already verified the token!!!
+		// Grab the token --> userId
+		auth_header := r.Header.Get("Authorization")
+		auth_token := strings.TrimPrefix(auth_header, "Bearer ")
+		verifyRes, err := clients.authClient.Verify(ctx, &pb.VerifyRequest{
+			Token: auth_token,
+		})
+
+		if err != nil || !verifyRes.Valid {
+			log.Println("Invalid token")
+			http.Error(w, "Invalid token", http.StatusUnauthorized)
+			return
+		}
+
+		provider, err := stringToEnumProvider(getOAuthURLRequest.Provider)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		oAuthURLRes, err := clients.integrationClient.GetOAuthURL(ctx, &pb.GetOAuthURLRequest{
+			Provider: provider,
+		})
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to get OAuth URL: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		respBody := &pb.HttpGetOAuthURLResponse{
+			Url: oAuthURLRes.Url,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		json.NewEncoder(w).Encode(respBody)
+	}
+}
+
 func handleGetIntegrationsGenerator(clients *ServiceClients) http.HandlerFunc {
 	return func(w http.ResponseWriter, r * http.Request) {
 		log.Println("Received request to get users integrations")
@@ -577,6 +629,7 @@ func main() {
 	mux.HandleFunc("POST /api/connect", authMiddleware(handleConnectIntegrationGenerator(serviceClients), serviceClients))
 	mux.HandleFunc("POST /api/disconnect", authMiddleware(handleDisconnectIntegrationGenerator(serviceClients), serviceClients))
 	mux.HandleFunc("GET /api/integrations", authMiddleware(handleGetIntegrationsGenerator(serviceClients), serviceClients))
+	mux.HandleFunc("POST /api/oauth", handleOAuthURLGenerator(serviceClients))
 	httpPort := os.Getenv("GATEWAY_ADDRESS")
 	server := &http.Server{
 		Addr:      httpPort,
