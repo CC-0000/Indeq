@@ -5,7 +5,6 @@ export const GET = async ({ params, url, cookies}) => {
     const provider = params.provider 
     const code = url.searchParams.get('code');
     const state = url.searchParams.get('state');
-    // TODO: check if state is valid through redis
 
     // if valid, exchange code for token
     if (code && state && provider) {
