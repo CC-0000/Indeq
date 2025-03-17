@@ -38,16 +38,17 @@ type RateLimiterService struct {
 func NewRateLimiterService() *RateLimiterService {
 	// User-specific rate limits
 	userConfigs := map[string]RateLimitConfig{
-		"GOOGLE_DOCS":   {50, 300}, // 5 requests per second per user
-		"GOOGLE_SLIDES": {10, 300}, // 10 requests per second per user
+		"GOOGLE_DOCS":   {50, 300},  // 5 requests per second per user
+		"GOOGLE_SLIDES": {10, 300},  // 10 requests per second per user
+		"GOOGLE_GMAIL":  {250, 500}, // 250 requests per second per user
 	}
 
 	// Project-wide rate limits
 	projectConfigs := map[string]RateLimitConfig{
-		"GOOGLE_DOCS":   {50, 1500},  // 50 requests per second across all users
-		"GOOGLE_SLIDES": {50, 1500},  // 50 requests per second across all users
-		"GOOGLE_DRIVE":  {200, 6000}, // 200 requests per second across all users
-		//"GMAIL":        {30, 30},   // 30 requests per second across all users
+		"GOOGLE_DOCS":   {50, 1500},     // 50 requests per second across all users
+		"GOOGLE_SLIDES": {50, 1500},     // 50 requests per second across all users
+		"GOOGLE_DRIVE":  {200, 6000},    // 200 requests per second across all users
+		"GOOGLE_GMAIL":  {20000, 40000}, // 20000 requests per second across all users
 		//"CALENDAR":     {50, 50},   // 50 requests per second across all users
 	}
 

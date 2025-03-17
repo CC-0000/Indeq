@@ -23,7 +23,7 @@ type Metadata struct {
 	ChunkNumber uint64 // Identifies the chunk in that sequence
 
 	Hierarchy string // Folder structure
-	Platform  string // Platform identifier ("google", "microsoft", "notion")
+	Platform  string // Platform identifier ("GOOGLE_DRIVE", "GOOGLE_GMAIL", "MICROSOFT", "NOTION")
 	Provider  string // Provider identifier ("GOOGLE", "MICROSOFT", "NOTION")
 }
 

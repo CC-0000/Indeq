@@ -36,15 +36,13 @@ func GoogleCrawler(ctx context.Context, client *http.Client, scopes []string) er
 }
 
 func RetrieveGoogleCrawler(ctx context.Context, client *http.Client, metadata Metadata) (TextChunkMessage, error) {
-	if metadata.Platform != "GOOGLE_DRIVE" {
+	if metadata.Platform == "GOOGLE_DRIVE" {
 		return RetrieveFromDrive(ctx, client, metadata)
 	}
+	if metadata.Platform == "GOOGLE_GMAIL" {
+		return RetrieveFromGmail(ctx, client, metadata)
+	}
 	return TextChunkMessage{}, nil
-}
-
-// TODO: Crawls Gmail
-func CrawlGmail(ctx context.Context, client *http.Client) error {
-	return nil
 }
 
 // TODO: Crawls Google Calendar
