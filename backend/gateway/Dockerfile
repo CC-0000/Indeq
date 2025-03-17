@@ -15,6 +15,7 @@ COPY common/go.mod common/go.sum ./common/
 COPY query/go.mod query/go.sum ./query/
 COPY authentication/go.mod authentication/go.sum ./authentication/
 COPY integration/go.mod integration/go.sum ./integration/
+COPY waitlist/go.mod waitlist/go.sum ./waitlist/
 
 # Download dependencies
 RUN cd gateway && go mod download

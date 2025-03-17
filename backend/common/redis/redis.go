@@ -56,7 +56,9 @@ func (c *RedisClient) ValidateOAuthState(ctx context.Context, state string) (str
     }
     if delCount == 0 {
         return "", fmt.Errorf("state key was not deleted (key may not exist)")
-    }
+    } else {
+		log.Printf("Deleted state %s from Redis for user %s", key, userId)
+	}
 
     return userId, nil
 }

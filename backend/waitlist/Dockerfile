@@ -18,27 +18,27 @@ COPY integration/go.mod integration/go.sum ./integration/
 COPY waitlist/go.mod waitlist/go.sum ./waitlist/
 
 # Download dependencies
-RUN cd query && go mod download
+RUN cd waitlist && go mod download
 
 # Copy proto files
-COPY common/api/query.proto ./common/api/
-RUN protoc --go_out=. --go-grpc_out=. common/api/query.proto
+COPY common/api/waitlist.proto ./common/api/
+RUN protoc --go_out=. --go-grpc_out=. common/api/waitlist.proto
 
 # Copy source code
-COPY query/ ./query/
+COPY waitlist/ ./waitlist/
 COPY common/ ./common/
 
 # Build binary with module replacement
-RUN cd query && \
-    CGO_ENABLED=0 GOOS=linux go build -o ../query-service .
+RUN cd waitlist && \
+    CGO_ENABLED=0 GOOS=linux go build -o ../waitlist-service .
 
 # Runtime stage  
 FROM alpine:latest
 RUN apk --no-cache add ca-certificates
 
 WORKDIR /app/
-COPY --from=builder /app/query-service .
+COPY --from=builder /app/waitlist-service .
 COPY --from=builder /app/common/config/.env . 
 
-EXPOSE 50051
-CMD ["./query-service"]
+EXPOSE 50055
+CMD ["./waitlist-service"]

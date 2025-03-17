@@ -7,8 +7,8 @@ import { APP_ENV } from '$env/static/private';
 export const handle: Handle = async ({ event, resolve }) => {
     const jwt = event.cookies.get('jwt');
 
-    const publicRoutes = ['/', '/login', '/register', '/terms', '/privacy'];
-    const productionRoutes = ['/', '/terms', '/privacy'];
+    const publicRoutes = ['/', '/login', '/register', '/terms', '/privacy', '/api/waitlist', '/sitemap.xml'];
+    const productionRoutes = ['/', '/terms', '/privacy', '/api/waitlist', '/sitemap.xml'];
 
     if (APP_ENV === 'PRODUCTION' && !productionRoutes.includes(event.url.pathname)) {
         return redirect(302, '/');

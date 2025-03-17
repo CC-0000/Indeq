@@ -76,3 +76,13 @@ message HttpGetOAuthURLRequest {
 message HttpGetOAuthURLResponse {
   string url = 1;
 }
+
+
+message HttpAddToWaitlistRequest {
+  string email = 1;
+}
+
+message HttpAddToWaitlistResponse {
+  bool success = 1;
+  string message = 2;
+}

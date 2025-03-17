@@ -74,6 +74,18 @@ services:
         condition: service_started
     networks:
       - indeq-net
+  waitlist:
+    image: waitlist-service
+    build:
+      context: .
+      dockerfile: waitlist/Dockerfile
+    env_file:
+      - ./common/config/.env
+    depends_on:
+      appDB:
+        condition: service_healthy
+    networks:
+      - indeq-net
   
   integration:
     image: integration-service

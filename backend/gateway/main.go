@@ -25,6 +25,7 @@ type ServiceClients struct {
 	queryClient  pb.QueryServiceClient
 	authClient   pb.AuthenticationServiceClient
 	integrationClient pb.IntegrationServiceClient
+	waitlistClient pb.WaitlistServiceClient
 	rabbitMQConn *amqp.Connection
 	redisClient *redis.RedisClient
 }
@@ -467,6 +468,35 @@ func handleDisconnectIntegrationGenerator(clients *ServiceClients) http.HandlerF
 }
 
 
+func handleAddToWaitlist(clients *ServiceClients) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var addToWaitlistRequest pb.HttpAddToWaitlistRequest
+		log.Println("Received add to waitlist request")
+		if err := json.NewDecoder(r.Body).Decode(&addToWaitlistRequest); err != nil {
+			log.Printf("Error: %v", err)
+			http.Error(w, "Bad Request", http.StatusBadRequest)
+			return
+		}
+
+		// Call the waitlist service
+		res, err := clients.waitlistClient.AddToWaitlist(r.Context(), &pb.AddToWaitlistRequest{
+			Email: addToWaitlistRequest.Email,
+		})
+		
+		if err != nil {
+			http.Error(w, "Failed to add to waitlist", http.StatusInternalServerError)
+			return
+		}
+		
+		httpResponse := &pb.HttpAddToWaitlistResponse{
+			Success: res.Success,
+			Message: res.Message,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(httpResponse)
+	}
+}
+
 func handleRegisterGenerator(clients *ServiceClients) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var registerRequest pb.HttpRegisterRequest
@@ -637,11 +667,25 @@ func main() {
 	}
 	defer redisClient.Client.Close()
 
+	// Connect to the waitlist service
+	waitlistConn, err := grpc.NewClient(
+		os.Getenv("WAITLIST_ADDRESS"),
+		grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
+			RootCAs: certPool,
+		})),
+	)
+	if err != nil {
+		log.Fatalf("Failed to establish connection with waitlist-service: %v", err)
+	}
+	defer waitlistConn.Close()
+	waitlistServiceClient := pb.NewWaitlistServiceClient(waitlistConn)
+
 	// Save the service clients for future use
 	serviceClients := &ServiceClients{
 		queryClient:  queryServiceClient,
 		authClient:   authServiceClient,
 		integrationClient: integrationServiceClient,
+		waitlistClient: waitlistServiceClient,
 		rabbitMQConn: rabbitMQConn,
 		redisClient: redisClient,
 	}
@@ -658,6 +702,8 @@ func main() {
 	mux.HandleFunc("POST /api/disconnect", authMiddleware(handleDisconnectIntegrationGenerator(serviceClients), serviceClients))
 	mux.HandleFunc("GET /api/integrations", authMiddleware(handleGetIntegrationsGenerator(serviceClients), serviceClients))
 	mux.HandleFunc("POST /api/oauth", handleOAuthURLGenerator(serviceClients))
+	mux.HandleFunc("POST /api/waitlist", handleAddToWaitlist(serviceClients))
+
 	httpPort := os.Getenv("GATEWAY_ADDRESS")
 	server := &http.Server{
 		Addr:      httpPort,
