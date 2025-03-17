@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
 	"database/sql"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -141,6 +144,76 @@ func ExchangeAuthCodeForToken(provider string, authCode string) (*TokenResponse,
 	return &tokenRes, nil
 }
 
+func Encrypt(plaintext string) (string, error) {
+	base64Key := os.Getenv("ENCRYPTION_KEY")
+	
+	if base64Key == "" {
+		return "", fmt.Errorf("ENCRYPTION_KEY is not set")
+	}
+
+	key, err := base64.StdEncoding.DecodeString(base64Key)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode encryption key: %v", err)
+	}
+
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", fmt.Errorf("failed to create cipher: %v", err)
+	}
+
+	aesGCM, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", fmt.Errorf("failed to create GCM: %v", err)
+	}
+
+	nonce := make([]byte, aesGCM.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return "", fmt.Errorf("failed to generate nonce: %v", err)
+	}
+
+	ciphertext := aesGCM.Seal(nonce, nonce, []byte(plaintext), nil)
+	return base64.StdEncoding.EncodeToString(ciphertext), nil
+}
+
+func Decrypt(ciphertext string) (string, error) {
+	base64Key := os.Getenv("ENCRYPTION_KEY")
+	if base64Key == "" {
+		return "", fmt.Errorf("ENCRYPTION_KEY is not set")
+	}
+
+	key, err := base64.StdEncoding.DecodeString(base64Key)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode encryption key: %v", err)
+	}
+	
+	decodedCiphertext, err := base64.StdEncoding.DecodeString(ciphertext)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode ciphertext: %v", err)
+	}
+
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", fmt.Errorf("failed to create cipher: %v", err)
+	}
+
+	aesGCM, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", fmt.Errorf("failed to create GCM: %v", err)
+	}
+
+	nonceSize := aesGCM.NonceSize()
+	if len(decodedCiphertext) < nonceSize {
+		return "", fmt.Errorf("ciphertext too short")
+	}
+
+	nonce, encryptedData := decodedCiphertext[:nonceSize], decodedCiphertext[nonceSize:]
+	plaintext, err := aesGCM.Open(nil, nonce, encryptedData, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to decrypt ciphertext: %v", err)
+	}
+
+	return string(plaintext), nil
+}
 
 // Refresh an expired access token
 func RefreshOAuthToken(provider string, refreshToken string) (*TokenResponse, error) {
@@ -211,20 +284,26 @@ func refreshAllExpiredTokens(db *sql.DB) {
 	for rows.Next() {
 		var userID string
 		var provider string
-		var refreshToken string
+		var encRefreshToken string
 		var expiresAt time.Time
 		var requiresRefresh bool
-		if err := rows.Scan(&userID, &provider, &refreshToken, &expiresAt, &requiresRefresh); err != nil {
+		if err := rows.Scan(&userID, &provider, &encRefreshToken, &expiresAt, &requiresRefresh); err != nil {
 			log.Printf("Error scanning token row: %v", err)
 			continue
 		}
 
-		if refreshToken == "" || !requiresRefresh {
+		if encRefreshToken == "" || !requiresRefresh {
 			log.Printf("No refresh token found for user %s and provider %s", userID, provider)
 			continue
 		}
 
-		tokenData, err := RefreshOAuthToken(provider, refreshToken)
+		decryptedRefreshToken, err := Decrypt(encRefreshToken)
+		if err != nil {
+			log.Printf("Error decrypting refresh token for user %s: %v", userID, err)
+			continue
+		}
+
+		tokenData, err := RefreshOAuthToken(provider, decryptedRefreshToken)
 		if err != nil {
 			log.Printf("Error refreshing token for user %s: %v", userID, err)
 			continue
@@ -232,21 +311,34 @@ func refreshAllExpiredTokens(db *sql.DB) {
 
 		if tokenData.RefreshToken == "" {
 			log.Printf("No new refresh token returned for user %s; reusing old one", userID)
-			tokenData.RefreshToken = refreshToken
+			tokenData.RefreshToken = decryptedRefreshToken
+		}
+
+		// encrypt new tokens before saving
+		encryptedAccessToken, err := Encrypt(tokenData.AccessToken)
+		if err != nil {
+			log.Printf("Error encrypting access token for user %s: %v", userID, err)
+			continue
+		}
+
+		encryptedRefreshToken, err := Encrypt(tokenData.RefreshToken)
+		if err != nil {
+			log.Printf("Error encrypting refresh token for user %s: %v", userID, err)
+			continue
 		}
 		
 		_, err = db.ExecContext(ctx, `
 			UPDATE oauth_tokens
 			SET access_token = $1, refresh_token = $2, expires_at = $3, updated_at = NOW(), requires_refresh = $4
 			WHERE user_id = $5 AND provider = $6
-		`, tokenData.AccessToken, tokenData.RefreshToken, tokenData.ExpiresAt, tokenData.RequiresRefresh, userID, provider)
+		`, encryptedAccessToken, encryptedRefreshToken, tokenData.ExpiresAt, tokenData.RequiresRefresh, userID, provider)
 
 		if err != nil {
 			log.Printf("Error updating token for user %s: %v", userID, err)
 			continue
 		}
 
-		if tokenData.RefreshToken != refreshToken {
+		if tokenData.RefreshToken != decryptedRefreshToken {
 			log.Printf("Successfully refreshed access token and refresh token for user %s", userID)
 		} else {
 			log.Printf("Successfully refreshed the access token for user %s", userID)
@@ -379,6 +471,24 @@ func (s *integrationServer) ConnectIntegration(ctx context.Context, req *pb.Conn
 		}, nil
 	}
 
+	encryptedAccessToken, err := Encrypt(tokenRes.AccessToken)
+	if err != nil {
+		return &pb.ConnectIntegrationResponse{
+			Success: false,
+			Message: fmt.Sprintf("Failed to encrypt access token: %v", err),
+			ErrorDetails: err.Error(),
+		}, nil
+	}
+
+	encryptedRefreshToken, err := Encrypt(tokenRes.RefreshToken)
+	if err != nil {
+		return &pb.ConnectIntegrationResponse{
+			Success: false,
+			Message: fmt.Sprintf("Failed to encrypt refresh token: %v", err),
+			ErrorDetails: err.Error(),
+		}, nil
+	}
+	
 	// if providerStr != "NOTION" && tokenRes.RefreshToken == "" {
 	// 	var existingRefreshToken string
 	// 	err = s.db.QueryRowContext(ctx, `
@@ -422,8 +532,8 @@ func (s *integrationServer) ConnectIntegration(ctx context.Context, req *pb.Conn
 	`,
 		req.UserId,
 		providerStr,
-		tokenRes.AccessToken,
-		tokenRes.RefreshToken,
+		encryptedAccessToken,
+		encryptedRefreshToken,
 		tokenRes.ExpiresAt,
 		tokenRes.RequiresRefresh,
 	)
