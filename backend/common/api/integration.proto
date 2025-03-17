@@ -28,6 +28,7 @@ message GetIntegrationsResponse {
 
 message GetOAuthURLRequest {
     Provider provider = 1;
+    string user_id = 2;
 }
 
 message GetOAuthURLResponse {

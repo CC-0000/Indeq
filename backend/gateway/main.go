@@ -11,9 +11,9 @@ import (
 	"net/http"
 	"os"
 	"strings"
-
 	pb "github.com/cc-0000/indeq/common/api"
 	"github.com/cc-0000/indeq/common/config"
+	"github.com/cc-0000/indeq/common/redis"
 	"github.com/golang/protobuf/jsonpb"
 	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -26,6 +26,7 @@ type ServiceClients struct {
 	authClient   pb.AuthenticationServiceClient
 	integrationClient pb.IntegrationServiceClient
 	rabbitMQConn *amqp.Connection
+	redisClient *redis.RedisClient
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -279,6 +280,7 @@ func handleOAuthURLGenerator(clients *ServiceClients) http.HandlerFunc {
 
 		oAuthURLRes, err := clients.integrationClient.GetOAuthURL(ctx, &pb.GetOAuthURLRequest{
 			Provider: provider,
+			UserId: verifyRes.UserId,
 		})
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Failed to get OAuth URL: %v", err), http.StatusInternalServerError)
@@ -345,9 +347,6 @@ func handleConnectIntegrationGenerator(clients *ServiceClients) http.HandlerFunc
 			return
 		}
 
-		log.Printf("Provider: %s", connectIntegrationRequest.Provider)
-		log.Printf("Auth code: %s", connectIntegrationRequest.AuthCode)
-
 		if connectIntegrationRequest.Provider == "" || connectIntegrationRequest.AuthCode == "" {
 			log.Println("Missing provider or auth code")
 			http.Error(w, "Missing provider or auth code", http.StatusBadRequest)
@@ -372,7 +371,27 @@ func handleConnectIntegrationGenerator(clients *ServiceClients) http.HandlerFunc
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		
+
+		// check state from redis
+		if connectIntegrationRequest.State == "" {
+			log.Println("Missing state")
+			http.Error(w, "Missing state", http.StatusBadRequest)
+			return
+		}
+
+		userId, err := clients.redisClient.ValidateOAuthState(ctx, connectIntegrationRequest.State)
+		if err != nil {
+			log.Println("Invalid or expired state")
+			http.Error(w, "Invalid or expired state", http.StatusBadRequest)
+			return
+		}
+
+		if userId != verifyRes.UserId {
+            log.Printf("User ID mismatch: stored %s != token %s\n", userId, verifyRes.UserId)
+            http.Error(w, "User ID mismatch in OAuth state", http.StatusForbidden)
+            return
+        }
+
 		connectRes, err := clients.integrationClient.ConnectIntegration(ctx, &pb.ConnectIntegrationRequest{
 			UserId: verifyRes.UserId,
 			Provider: provider,
@@ -610,12 +629,21 @@ func main() {
 	}
 	defer integrationConn.Close()
 	integrationServiceClient := pb.NewIntegrationServiceClient(integrationConn)
+	
+	// Connect to Redis
+	redisClient, err := redis.NewRedisClient(context.Background(), os.Getenv("REDIS_ADDRESS"))
+	if err != nil {
+		log.Fatalf("Failed to establish connection with redis: %v", err)
+	}
+	defer redisClient.Client.Close()
+
 	// Save the service clients for future use
 	serviceClients := &ServiceClients{
 		queryClient:  queryServiceClient,
 		authClient:   authServiceClient,
 		integrationClient: integrationServiceClient,
 		rabbitMQConn: rabbitMQConn,
+		redisClient: redisClient,
 	}
 	log.Print("Server has established connection with other services")
 

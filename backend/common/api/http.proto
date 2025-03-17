@@ -51,6 +51,7 @@ message HttpGetIntegrationsResponse {
 message HttpConnectIntegrationRequest {
   string Provider = 1;
   string AuthCode = 2;
+  string State = 3;
 }
 
 message HttpConnectIntegrationResponse {

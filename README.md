@@ -25,6 +25,7 @@ We are a unified search engine for **your data**
 [![Vercel](https://img.shields.io/badge/-Vercel-%23000000?style=for-the-badge&logo=vercel&logoColor=white)](https://vercel.com)
 [![Commitlint](https://img.shields.io/badge/-commitlint-%2300000?style=for-the-badge&logo=commitlint&logoColor=white)](https://commitlint.js.org)
 [![EKS](https://img.shields.io/badge/-Amazon%20EKS-%23FF9900?style=for-the-badge&logo=Amazon%20EKS&logoColor=white)](https://aws.amazon.com/eks)
+[![Redis](https://img.shields.io/badge/-Redis-%23DC382D?style=for-the-badge&logo=Redis&logoColor=white)](https://redis.io)
 
 **Currently Supporting**
 

@@ -9,7 +9,7 @@ export const GET = async ({ params, url, cookies}) => {
 
     // if valid, exchange code for token
     if (code && state && provider) {
-        const authData = { Provider: provider, AuthCode: code };
+        const authData = { Provider: provider, AuthCode: code, State: state };
         const token = cookies.get('jwt');
         if (!token) {
             // console.error('No JWT token found, user is not authenticated');
@@ -22,6 +22,7 @@ export const GET = async ({ params, url, cookies}) => {
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${token}`,
+
                 },
                 body: JSON.stringify(authData)
             });

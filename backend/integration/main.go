@@ -22,11 +22,13 @@ import (
 	_ "github.com/lib/pq"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"github.com/cc-0000/indeq/common/redis"
 )
 
 type integrationServer struct {
     pb.UnimplementedIntegrationServiceServer
     db *sql.DB // integration database
+	redisClient *redis.RedisClient
 }
 
 // TokenResponse represents the OAuth token response from our providers
@@ -265,13 +267,16 @@ func enumToString(provider pb.Provider) (string, error) {
 	}
 }
 
-func generateState() string {
+func generateState(provider string) (string, error) {
 	b := make([]byte, 32)
 	_, err := rand.Read(b)
 	if err != nil {
-		return ""
+		return "", err
 	}
-	return base64.URLEncoding.EncodeToString(b)
+
+	stateData := append([]byte(provider), b...)
+	state := base64.URLEncoding.EncodeToString(stateData)
+	return state, nil
 }
 
 func (s *integrationServer) GetOAuthURL(ctx context.Context, req *pb.GetOAuthURLRequest) (*pb.GetOAuthURLResponse, error) {
@@ -280,7 +285,14 @@ func (s *integrationServer) GetOAuthURL(ctx context.Context, req *pb.GetOAuthURL
 		return nil, fmt.Errorf("failed to convert provider to string: %v", err)
 	}
 	
-	state := generateState()
+	state, err := generateState(providerStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate state: %v", err)
+	}
+	err = s.redisClient.StoreOAuthState(ctx, state, req.UserId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to store oauth state: %v", err)
+	}
 	var authURL string
 	params := url.Values{}
 	if providerStr == "NOTION" {
@@ -547,8 +559,14 @@ func main() {
 		grpc.Creds(credentials.NewTLS(tlsConfig)),
 	}
 
+	redisClient, err := redis.NewRedisClient(context.Background(), os.Getenv("REDIS_ADDRESS"))
+	if err != nil {
+		log.Fatalf("Failed to connect to redis: %v", err)
+	}
+	defer redisClient.Client.Close()
+
 	grpcServer := grpc.NewServer(opts...)
-	pb.RegisterIntegrationServiceServer(grpcServer, &integrationServer{db: db})
+	pb.RegisterIntegrationServiceServer(grpcServer, &integrationServer{db: db, redisClient: redisClient})
     log.Printf("Integration Service listening on %v\n", listener.Addr())
     if err := grpcServer.Serve(listener); err != nil {
         log.Fatalf("Failed to serve: %v", err)
