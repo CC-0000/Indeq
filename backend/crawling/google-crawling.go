@@ -8,8 +8,6 @@ import (
 
 // GoogleCrawler crawls Google services based on provided OAuth scopes.
 func GoogleCrawler(ctx context.Context, client *http.Client, scopes []string) error {
-	log.Println("Starting Google Crawler")
-
 	scopeSet := make(map[string]struct{}, len(scopes))
 	for _, scope := range scopes {
 		scopeSet[scope] = struct{}{}
@@ -34,7 +32,6 @@ func GoogleCrawler(ctx context.Context, client *http.Client, scopes []string) er
 		}
 	}
 
-	log.Println("Google Crawler Completed")
 	return nil
 }
 

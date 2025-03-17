@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"time"
 
@@ -93,52 +92,6 @@ func RetrieveCrawler(ctx context.Context, metadata Metadata) error {
 	}
 }
 
-// func ChunkData(words []string, baseMetadata Metadata) []TextChunkMessage {
-// 	totalWords := uint64(len(words))
-// 	baseChunkSize := uint64(400)
-// 	baseOverlapAmount := uint64(80)
-// 	effectiveChunkSize := baseChunkSize - baseOverlapAmount
-// 	totalChunks := uint64(math.Ceil(float64(totalWords) / float64(effectiveChunkSize)))
-// 	chunks := make([]TextChunkMessage, 0, totalChunks)
-
-// 	if totalWords == 0 {
-// 		return []TextChunkMessage{}
-// 	}
-// 	if totalWords < baseChunkSize {
-// 		baseChunkSize = totalWords
-// 	}
-// 	for i := uint64(0); i < totalChunks; i++ {
-// 		start := i * effectiveChunkSize
-// 		end := start + baseChunkSize
-
-// 		if start >= totalWords {
-// 			break
-// 		}
-
-// 		if end >= totalWords {
-// 			if start+baseOverlapAmount >= totalWords {
-// 				break
-// 			}
-// 			end = totalWords
-// 			start = max(0, end-baseChunkSize)
-
-// 		}
-// 		chunkWords := words[start:end]
-
-// 		chunkMetadata := baseMetadata
-// 		chunkMetadata.ChunkNumber = i + 1
-// 		chunkMetadata.ChunkSize = uint64(len(chunkWords))
-
-// 		chunks = append(chunks, TextChunkMessage{
-// 			Metadata: chunkMetadata,
-// 			Content:  strings.Join(chunkWords, " "),
-// 		})
-
-// 	}
-
-// 	return chunks
-// }
-
 func main() {
 	log.Println("Starting the crawling server...")
 	//Load the .env file
@@ -186,44 +139,4 @@ func main() {
 	// 	log.Fatalf("Failed to create user_service index: %v", err)
 	// }
 	// log.Fatalf("Database (crawling) setup completed: crawled_sync_token table is ready.")
-	ctx := context.Background()
-
-	// Get access token from integration service
-	accessToken := "ya29.a0AeXRPp5Z8l5vpvAHGMhLI8FlCyZcRzMXPD5lMBiXzN7f6TalSbWldhwHkPYDkqpoljiqA2Zc9JRz05Odacb9EKzWxTYTUgDISnoROdHGO2VhitIijlYfKJp9F65XV0vlmGiv3qGE6CtZc0fM-kF-tPTRaRY_cCAO2UZlCVYvaCgYKAQASARMSFQHGX2MiMm3WB3VGqmK9TnucHRQURw0175"
-	NewCrawler(ctx, accessToken, "GOOGLE", []string{"https://www.googleapis.com/auth/drive.readonly"})
-
-	log.Println("\n\n--- TESTING RETRIEVAL ---")
-
-	// Create a test metadata object for retrieval
-	testMetadata := Metadata{
-		UserID:       "a",
-		ResourceID:   "1YzV312pJyFfLgpuB2Ng8qu5pFup4Q_v3XoNj8db1lbk", // Replace with a real document ID from your initial crawl
-		ResourceType: "application/vnd.google-apps.document",
-		ChunkID:      "1-0-11-2013", // Assuming this chunk exists, adjust as needed
-		Provider:     "GOOGLE",
-	}
-
-	// Print the metadata we're using for retrieval
-	fmt.Printf("Attempting to retrieve with metadata:\n")
-	fmt.Printf("  UserID: %s\n", testMetadata.UserID)
-	fmt.Printf("  ResourceID: %s\n", testMetadata.ResourceID)
-	fmt.Printf("  ResourceType: %s\n", testMetadata.ResourceType)
-	fmt.Printf("  ChunkID: %s\n", testMetadata.ChunkID)
-	fmt.Printf("  Provider: %s\n\n", testMetadata.Provider)
-
-	// Test direct retrieval
-	tokenSource := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: accessToken})
-	client := oauth2.NewClient(ctx, tokenSource)
-
-	result, err := RetrieveGoogleCrawler(ctx, client, testMetadata)
-	if err != nil {
-		log.Printf("Retrieval failed: %v", err)
-	} else {
-		fmt.Println("=== SUCCESSFULLY RETRIEVED CHUNK ===")
-		fmt.Printf("Chunk ID: %s\n", result.Metadata.ChunkID)
-		fmt.Printf("Chunk Number: %d\n", result.Metadata.ChunkNumber)
-		fmt.Printf("Chunk Size: %d\n", result.Metadata.ChunkSize)
-		fmt.Printf("Content: %s\n", result.Content)
-		fmt.Println("=====================================")
-	}
 }

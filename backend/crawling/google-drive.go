@@ -13,54 +13,21 @@ import (
 )
 
 var mimeHandlers = map[string]func(context.Context, *http.Client, File) (File, error){
-	"application/vnd.google-apps.document": ProcessGoogleDoc,
-	//"application/vnd.google-apps.presentation": processGoogleSlide,
+	"application/vnd.google-apps.document":     ProcessGoogleDoc,
+	"application/vnd.google-apps.presentation": ProcessGoogleSlides,
 	//"application/vnd.google-apps.folder":   processGoogleFolder,
 }
 
 // Crawls Google Drive Metadatafiles List
-// func CrawlGoogleDrive(ctx context.Context, client *http.Client) error {
-// 	filelist, err := GetGoogleDriveList(ctx, client)
-// 	if err != nil {
-// 		return fmt.Errorf("error retrieving Google Drive file list: %w", err)
-// 	}
-// 	processedFileList, err := ProcessAllGoogleDriveFiles(ctx, client, filelist)
-// 	if err != nil {
-// 		return fmt.Errorf("error processing Google Drive files: %w", err)
-// 	}
-// 	PrintGoogleDriveList(ctx, client, processedFileList)
-// 	return nil
-// }
-
-// Testing function to see how fast the crawler is
 func CrawlGoogleDrive(ctx context.Context, client *http.Client) error {
-	var filelist ListofFiles
-	err := TimeExecution("GetGoogleDriveList", func() error {
-		var innerErr error
-		filelist, innerErr = GetGoogleDriveList(ctx, client)
-		return innerErr
-	})
+	filelist, err := GetGoogleDriveList(ctx, client)
 	if err != nil {
 		return fmt.Errorf("error retrieving Google Drive file list: %w", err)
 	}
-
-	var processedFileList ListofFiles
-	err = TimeExecution("ProcessAllGoogleDriveFiles", func() error {
-		var innerErr error
-		processedFileList, innerErr = ProcessAllGoogleDriveFiles(ctx, client, filelist)
-		return innerErr
-	})
+	_, err = ProcessAllGoogleDriveFiles(ctx, client, filelist)
 	if err != nil {
 		return fmt.Errorf("error processing Google Drive files: %w", err)
 	}
-
-	err = TimeExecution("PrintGoogleDriveList", func() error {
-		return PrintGoogleDriveList(ctx, client, processedFileList)
-	})
-	if err != nil {
-		return fmt.Errorf("error printing Google Drive files: %w", err)
-	}
-
 	return nil
 }
 
@@ -200,32 +167,8 @@ func RetrieveFromDrive(ctx context.Context, client *http.Client, metadata Metada
 	if metadata.ResourceType == "application/vnd.google-apps.document" {
 		return RetrieveGoogleDoc(ctx, client, metadata)
 	}
-	return TextChunkMessage{}, nil
-}
-
-func PrintGoogleDriveList(ctx context.Context, client *http.Client, fileList ListofFiles) error {
-	for _, file := range fileList.Files {
-		if len(file.File) == 0 {
-			continue
-		}
-		if file.File[0].Metadata.ResourceType == "application/vnd.google-apps.document" {
-			fmt.Printf("ID: %s\n", file.File[0].Metadata.ResourceID)
-			fmt.Printf("Name: %s\n", file.File[0].Metadata.Title)
-			fmt.Printf("MIME Type: %s\n", file.File[0].Metadata.ResourceType)
-			fmt.Printf("Created Time: %s\n", file.File[0].Metadata.DateCreated.Format(time.RFC3339))
-			fmt.Printf("Modified Time: %s\n", file.File[0].Metadata.DateLastModified.Format(time.RFC3339))
-			fmt.Printf("Web View Link: %s\n", file.File[0].Metadata.FileURL)
-			fmt.Println("-----------------------------------")
-
-			// Print all chunks
-			for _, chunk := range file.File {
-				fmt.Printf("Chunk ID: %s\n", chunk.Metadata.ChunkID)
-				fmt.Printf("Chunk Number: %d\n", chunk.Metadata.ChunkNumber)
-				fmt.Printf("Chunk Size: %d\n", chunk.Metadata.ChunkSize)
-				fmt.Println("Content:", chunk.Content)
-				fmt.Println("-----------------------------------")
-			}
-		}
+	if metadata.ResourceType == "application/vnd.google-apps.presentation" {
+		return RetrieveGoogleSlides(ctx, client, metadata)
 	}
-	return nil
+	return TextChunkMessage{}, nil
 }
