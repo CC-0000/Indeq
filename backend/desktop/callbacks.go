@@ -170,9 +170,21 @@ func (s *desktopServer) makeCrawlRequest(userID string, needToReqFiles []string,
 func (s *desktopServer) handleChunk(client mqtt.Client, msg mqtt.Message) {
 	ctx := context.Background()
 
+	// user's can potentially lie about the chunks they own
+	// resolve this by topic-based user id instead of believing what's in the chunk
+	userID := msg.Topic()[10:]
+	incomingChunk := &pb.TextChunkMessage{}
+	proto.Unmarshal(msg.Payload(), incomingChunk)
+	incomingChunk.Metadata.UserId = userID
+	cleanedChunk, err := proto.Marshal(incomingChunk)
+	if err != nil {
+		log.Print("error serializing cleaned chunk: ", err)
+		return
+	}
+
 	// Write the message to the kafka stream for down-stream processing
 	message := kafka.Message{
-		Value: msg.Payload(),
+		Value: cleanedChunk,
 	}
 
 	if err := s.kafkaWriter.WriteMessages(ctx, message); err != nil {
