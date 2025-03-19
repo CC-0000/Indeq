@@ -1,1 +1,0 @@
-// server side route for chat page
