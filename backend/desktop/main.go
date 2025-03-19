@@ -189,15 +189,17 @@ func (s *desktopServer) startDesktopSignalReading(ctx context.Context) error {
 
 	go func() {
 		for {
-			msg, err := reader.ReadMessage(ctx)
 			select {
 			case <-ctx.Done():
 				log.Print("Shutting down text chunk consumer channeler")
 				return
-			case errorCh <- err:
-				continue
-			case messageCh <- msg:
-				continue
+			default:
+				msg, err := reader.ReadMessage(ctx)
+				if err != nil {
+					errorCh <- err
+				} else {
+					messageCh <- msg
+				}
 			}
 		}
 	}()
