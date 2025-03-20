@@ -1,17 +1,13 @@
 package main
 
 import (
+	"github.com/cc-0000/indeq/common/config"
+	mqtt "github.com/mochi-mqtt/server/v2"
+	"github.com/mochi-mqtt/server/v2/listeners"
+	"log"
 	"os"
 	"os/signal"
 	"syscall"
-
-	"github.com/cc-0000/indeq/common/config"
-	mqtt "github.com/mochi-mqtt/server/v2"
-	"github.com/mochi-mqtt/server/v2/hooks/auth"
-
-	"log"
-
-	"github.com/mochi-mqtt/server/v2/listeners"
 )
 
 func main() {
@@ -22,10 +18,9 @@ func main() {
 	}
 
 	// Configure TLS
-	tlsConfig, err := config.LoadMTLSFromEnv("MQTT_CRT", "MQTT_KEY", "NEW_CA_CRT")
+	tlsConfig, err := config.LoadMTLSFromEnv("MQTT_CRT", "MQTT_KEY", "CA_CRT")
 	if err != nil {
-		log.Print(err)
-		log.Fatal("Error loading TLS config for mqtt service")
+		log.Fatalf("Error loading TLS config for mqtt service: %v", err)
 	}
 
 	sigs := make(chan os.Signal, 1)
@@ -41,16 +36,11 @@ func main() {
 	defer server.Close()
 
 	// Add the auth hook to allow connections
-	err = server.AddHook(new(auth.AllowHook), nil)
+	certHook := NewCertAuthHook()
+	err = server.AddHook(certHook, nil)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("failed to add certificate hook to mqtt server: %v", err)
 	}
-
-	// Create TCP listener on port 1883
-	tcp := listeners.NewTCP(listeners.Config{
-		ID:      "tcp1",
-		Address: ":1883",
-	})
 
 	// Create TLS listener on port 8883
 	tlsTCP := listeners.NewTCP(listeners.Config{
@@ -59,22 +49,15 @@ func main() {
 		TLSConfig: tlsConfig,
 	})
 
-	// Add listeners to the server
-	err = server.AddListener(tcp)
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	err = server.AddListener(tlsTCP)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("failed to add TLS listener to mqtt server: %v", err)
 	}
 
-	// Start the broker
 	go func() {
 		err = server.Serve()
 		if err != nil {
-			log.Fatal(err)
+			log.Fatalf("encountered an error while serving the mqtt server: %v", err)
 		}
 	}()
 
