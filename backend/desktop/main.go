@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"math/rand"
 	"sync"
+	"syscall"
 
 	"log"
 	"net"
 	"os"
+	"os/signal"
 	"time"
 
 	pb "github.com/cc-0000/indeq/common/api"
@@ -237,11 +239,11 @@ func (s *desktopServer) startDesktopSignalReading(ctx context.Context) error {
 	}
 }
 
-// func(maximum amount of time it should take to connect to the database)
+// func(context, maximum amount of time it should take to connect to the database)
 //   - connects to the database and creates the crawl_stats and indexed_files tables if necessary
 //   - assumes: you will close the database connection elsewhere in the parent function(s)
-func (s *desktopServer) connectToDatabase(contextDuration time.Duration) {
-	ctx, cancel := context.WithTimeout(context.Background(), contextDuration)
+func (s *desktopServer) connectToDatabase(ctx context.Context, contextDuration time.Duration) {
+	ctx, cancel := context.WithTimeout(ctx, contextDuration)
 	defer cancel()
 
 	// get env variables
@@ -430,6 +432,10 @@ func main() {
 		log.Fatalf("Error loading .env file: %v", err)
 	}
 
+	// Graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
 	// create the clientTLSConfig for use in connecting to other services
 	clientTlsConfig, err := config.LoadClientTLSFromEnv("DESKTOP_CRT", "DESKTOP_KEY", "CA_CRT")
 	if err != nil {
@@ -442,7 +448,7 @@ func main() {
 	}
 
 	// Connect to the Desktop Database
-	server.connectToDatabase(10 * time.Second)
+	server.connectToDatabase(ctx, 10*time.Second)
 	server.startJobCheckDeadCrawling(ctx, 5*time.Minute, 30*time.Minute)
 	defer server.db.Close()
 	defer markAllCrawlingDone(ctx, server.db)
@@ -464,4 +470,7 @@ func main() {
 
 	// start the gRPC server (this is blocking)
 	server.startGRPCServer()
+
+	<-sigChan // TODO: implement worker groups
+	log.Print("gracefully shutting down...")
 }

@@ -23,13 +23,8 @@ func main() {
 		log.Fatalf("Error loading TLS config for mqtt service: %v", err)
 	}
 
-	sigs := make(chan os.Signal, 1)
-	done := make(chan bool, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-sigs
-		done <- true
-	}()
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	// Create a new MQTT Server instance
 	server := mqtt.New(nil)
@@ -61,5 +56,5 @@ func main() {
 		}
 	}()
 
-	<-done
+	<-sigChan
 }
