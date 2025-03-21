@@ -1,19 +1,26 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/subtle"
 	"crypto/tls"
 	"crypto/x509"
 	"database/sql"
 	"encoding/base64"
+	"encoding/pem"
 	"fmt"
 	"log"
+	"math/big"
 	"net"
+	"net/mail"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	pb "github.com/cc-0000/indeq/common/api"
@@ -25,34 +32,36 @@ import (
 	"google.golang.org/grpc/credentials"
 )
 
+type params struct {
+	memory      uint32 // default 64 KiB
+	iterations  uint32 // default 3
+	parallelism uint8  // default 2
+	saltLength  uint32 // default 16
+	keyLength   uint32 // default 32
+}
+
 type authServer struct {
 	pb.UnimplementedAuthenticationServiceServer
-	db           *sql.DB // password database
-	vectorClient pb.VectorServiceClient
-	jwtSecret    []byte // secret for creating jwts
-}
-
-type params struct {
-	memory      uint32
-	iterations  uint32
-	parallelism uint8
-	saltLength  uint32
-	keyLength   uint32
-}
-
-var (
-	p *params
-
+	db                *sql.DB // password database
+	vectorConn        *grpc.ClientConn
+	vectorClient      pb.VectorServiceClient
+	desktopConn       *grpc.ClientConn
+	desktopClient     pb.DesktopServiceClient
+	jwtSecret         []byte // secret for creating jwts
+	argonParams       *params
 	MinPasswordLength int
 	MaxPasswordLength int
 	MaxEmailLength    int
-)
+}
 
-func loadPasswordSettings() error {
+// func()
+//   - loads the necessary parameters required by argon2, like memory, salt length, etc. into memory
+//   - fallbacks to defaults if the parameters aren't present; if this isn't possible, an error will be returned
+func (s *authServer) loadPasswordSettings() error {
 	// Load parameters with defaults
 	memory, err := strconv.ParseUint(os.Getenv("ARGON2_MEMORY"), 10, 32)
 	if err != nil {
-		memory = 64 * 1024 // default_fallback
+		memory = 64 * 1024 // default
 	}
 
 	iterations, err := strconv.ParseUint(os.Getenv("ARGON2_ITERATIONS"), 10, 32)
@@ -75,7 +84,7 @@ func loadPasswordSettings() error {
 		keyLength = 32 // default
 	}
 
-	p = &params{
+	s.argonParams = &params{
 		memory:      uint32(memory),
 		iterations:  uint32(iterations),
 		parallelism: uint8(parallelism),
@@ -84,74 +93,99 @@ func loadPasswordSettings() error {
 	}
 
 	// Load constraints with defaults
-	MinPasswordLength, _ = strconv.Atoi(os.Getenv("MIN_PASSWORD_LENGTH"))
-	if MinPasswordLength <= 0 {
-		MinPasswordLength = 8
+	s.MinPasswordLength, err = strconv.Atoi(os.Getenv("MIN_PASSWORD_LENGTH"))
+	if err != nil || s.MinPasswordLength <= 0 {
+		s.MinPasswordLength = 8 // default
 	}
 
-	MaxPasswordLength, _ = strconv.Atoi(os.Getenv("MAX_PASSWORD_LENGTH"))
-	if MaxPasswordLength <= 0 {
-		MaxPasswordLength = 72
+	s.MaxPasswordLength, err = strconv.Atoi(os.Getenv("MAX_PASSWORD_LENGTH"))
+	if err != nil || s.MaxPasswordLength <= 0 {
+		s.MaxPasswordLength = 72 // default
 	}
 
-	MaxEmailLength, _ = strconv.Atoi(os.Getenv("MAX_EMAIL_LENGTH"))
-	if MaxEmailLength <= 0 {
-		MaxEmailLength = 255
+	s.MaxEmailLength, err = strconv.Atoi(os.Getenv("MAX_EMAIL_LENGTH"))
+	if err != nil || s.MaxEmailLength <= 0 {
+		s.MaxEmailLength = 255 // default
 	}
+
+	if _, ok := os.LookupEnv("JWT_SECRET"); !ok {
+		return fmt.Errorf("JWT_SECRET environment variable is required")
+	}
+	s.jwtSecret = []byte(os.Getenv("JWT_SECRET"))
 
 	return nil
 }
 
-// Password length validation
-func validatePassword(password string) error {
-	if len(password) < MinPasswordLength {
-		return fmt.Errorf("password must be at least %d characters", MinPasswordLength)
+// func(password string)
+//   - makes sure the password is within the configured min/max lengths
+//   - assumes: parameters are loaded into memory already (via loadPasswordSettings() or otherwise)
+func (s *authServer) validatePassword(password string) error {
+	if len(password) < s.MinPasswordLength {
+		return fmt.Errorf("password must be at least %d characters", s.MinPasswordLength)
 	}
-	if len(password) > MaxPasswordLength {
-		return fmt.Errorf("password must not exceed %d characters", MaxPasswordLength)
+	if len(password) > s.MaxPasswordLength {
+		return fmt.Errorf("password must not exceed %d characters", s.MaxPasswordLength)
 	}
 	return nil
 }
 
-// Email length validation
-func validateEmail(email string) error {
-	if len(email) > MaxEmailLength {
-		return fmt.Errorf("email must not exceed %d characters", MaxEmailLength)
+// func(email string)
+//   - checks to make sure the email is: within configured min/max lengths & formatted via RFC 5322
+func (s *authServer) validateEmail(email string) error {
+	if len(email) > s.MaxEmailLength {
+		return fmt.Errorf("email must not exceed %d characters", s.MaxEmailLength)
 	}
 	if len(email) <= 0 {
 		return fmt.Errorf("email must not be blank")
 	}
+
+	// Check email format
+	_, err := mail.ParseAddress(strings.TrimSpace(email))
+	if err != nil {
+		return fmt.Errorf("invalid email format: %w", err)
+	}
+
 	return nil
 }
 
+// TODO: implement name validation here
+func (s *authServer) validateName(name string) error {
+	return nil
+}
+
+// TODO: implement rate limiting here
 func (s *authServer) checkRateLimit(ctx context.Context, email string) (bool, error) {
-	// implement rate limiting here
 	return false, nil
 }
 
+// TODO: implement failed attempts tracking here
 func (s *authServer) incrementFailedAttempts(ctx context.Context, email string) error {
-	// implement failed attempts tracking here
 	return nil
 }
 
+// TODO: implement resetting the counter here
 func (s *authServer) resetFailedAttempts(ctx context.Context, email string) error {
-	// implement resetting the counter here
 	return nil
 }
 
+// func(password string, hashed password to compare to)
+//   - hashes the incoming password using the same settings as the encoded hash and compares them
+//   - returns (whether or not the password is right, any error)
 func comparePasswordAndEncodedHash(password string, encodedHash string) (bool, error) {
 	// Unencode the configuration variables from the password hash and salt
 	parts := strings.Split(encodedHash, "$")
 	if len(parts) != 6 {
 		return false, fmt.Errorf("invalid hash format")
 	}
+
 	// Get the version
 	var version int
 	_, err := fmt.Sscanf(parts[2], "v=%d", &version)
 	if err != nil {
 		return false, err
 	}
-	// Get the memory constraint, number of iterations, and amt of parallelism
+
+	// Get the memory constraint, number of iterations, and amnt of parallelism
 	var memory uint32
 	var iterations uint32
 	var parallelism uint8
@@ -159,11 +193,13 @@ func comparePasswordAndEncodedHash(password string, encodedHash string) (bool, e
 	if err != nil {
 		return false, err
 	}
+
 	// Get the salt
 	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
 	if err != nil {
 		return false, err
 	}
+
 	// Get the hash
 	decodedHash, err := base64.RawStdEncoding.DecodeString(parts[5])
 	if err != nil {
@@ -184,13 +220,11 @@ func comparePasswordAndEncodedHash(password string, encodedHash string) (bool, e
 	return subtle.ConstantTimeCompare(computedHash, decodedHash) == 1, nil
 }
 
-// Login route
+// rpc(context, login request)
+//   - takes a username and password and tries to find a matching entry in our user database
+//   - fails if rate limited or (user, password) is not a match
+//   - returns a new JWT and user id on success
 func (s *authServer) Login(ctx context.Context, req *pb.LoginRequest) (*pb.LoginResponse, error) {
-	var (
-		id          string
-		encodedHash string
-	)
-
 	// Rate limit
 	if exceeded, err := s.checkRateLimit(ctx, req.Email); err != nil {
 		return nil, err
@@ -199,6 +233,8 @@ func (s *authServer) Login(ctx context.Context, req *pb.LoginRequest) (*pb.Login
 	}
 
 	// get the id and encoded password hash matching user email
+	var id string
+	var encodedHash string
 	err := s.db.QueryRowContext(ctx,
 		"SELECT id, password_hash FROM users WHERE email = $1",
 		strings.ToLower(req.Email),
@@ -209,9 +245,9 @@ func (s *authServer) Login(ctx context.Context, req *pb.LoginRequest) (*pb.Login
 		dummyEncodedHash := fmt.Sprintf(
 			"$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s",
 			argon2.Version,
-			p.memory,
-			p.iterations,
-			p.parallelism,
+			s.argonParams.memory,
+			s.argonParams.iterations,
+			s.argonParams.parallelism,
 			"AAAAAAAAAAAAAAAA",
 			"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
 		)
@@ -226,19 +262,17 @@ func (s *authServer) Login(ctx context.Context, req *pb.LoginRequest) (*pb.Login
 	if err != nil {
 		return &pb.LoginResponse{Error: "invalid credentials"}, nil
 	}
-
 	if !match {
 		// Increment failed attempts counter
 		s.incrementFailedAttempts(ctx, req.Email)
 		return &pb.LoginResponse{Error: "invalid credentials"}, nil
-	} else {
-		s.resetFailedAttempts(ctx, req.Email)
 	}
+	s.resetFailedAttempts(ctx, req.Email)
 
 	currentTime := time.Now()
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub": id,
-		"exp": currentTime.Add(24 * time.Hour).Unix(),
+		"exp": currentTime.Add(24 * time.Hour).Unix(), // current 1 day expiration
 		"iat": currentTime.Unix(),
 		"nbf": currentTime.Unix(),
 	})
@@ -248,13 +282,17 @@ func (s *authServer) Login(ctx context.Context, req *pb.LoginRequest) (*pb.Login
 		return nil, err
 	}
 
-	return &pb.LoginResponse{Token: tokenString}, nil
+	return &pb.LoginResponse{Token: tokenString, UserId: id}, nil
 }
 
-// Register route
+// TODO: implement email-sending validation with redis
+// rpc(context, register request)
+//   - takes in a email, name and password and registers the user in our database
+//   - email, password must pass validation
+//   - creates corresponding Vector, and Desktop datastores for the user
 func (s *authServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb.RegisterResponse, error) {
 	// Make sure email is good
-	if err := validateEmail(req.Email); err != nil {
+	if err := s.validateEmail(req.Email); err != nil {
 		return &pb.RegisterResponse{
 			Success: false,
 			Error:   fmt.Sprintf("invalid email: %v", err),
@@ -262,7 +300,7 @@ func (s *authServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb
 	}
 
 	// Make sure name is good
-	if err := validateEmail(req.Name); err != nil {
+	if err := s.validateName(req.Name); err != nil {
 		return &pb.RegisterResponse{
 			Success: false,
 			Error:   fmt.Sprintf("invalid name: %v", err),
@@ -270,7 +308,7 @@ func (s *authServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb
 	}
 
 	// Make sure password is good
-	if err := validatePassword(req.Password); err != nil {
+	if err := s.validatePassword(req.Password); err != nil {
 		return &pb.RegisterResponse{
 			Success: false,
 			Error:   fmt.Sprintf("invalid password: %v", err),
@@ -278,7 +316,7 @@ func (s *authServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb
 	}
 
 	// Generate a random salt
-	salt := make([]byte, p.saltLength)
+	salt := make([]byte, s.argonParams.saltLength)
 	if _, err := rand.Read(salt); err != nil {
 		return &pb.RegisterResponse{
 			Success: false,
@@ -290,19 +328,19 @@ func (s *authServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb
 	hash := argon2.IDKey(
 		[]byte(req.Password),
 		salt,
-		p.iterations,
-		p.memory,
-		p.parallelism,
-		p.keyLength,
+		s.argonParams.iterations,
+		s.argonParams.memory,
+		s.argonParams.parallelism,
+		s.argonParams.keyLength,
 	)
 
 	// Keep encryption details alongside the hash
 	encodedHash := fmt.Sprintf(
 		"$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s",
 		argon2.Version,
-		p.memory,
-		p.iterations,
-		p.parallelism,
+		s.argonParams.memory,
+		s.argonParams.iterations,
+		s.argonParams.parallelism,
 		base64.RawStdEncoding.EncodeToString(salt),
 		base64.RawStdEncoding.EncodeToString(hash),
 	)
@@ -344,6 +382,17 @@ func (s *authServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb
 		}, err
 	}
 
+	// Try to create a corresponding entry in the desktop tracking collection
+	dRes, err := s.desktopClient.SetupUserStats(ctx, &pb.SetupUserStatsRequest{
+		UserId: userId,
+	})
+	if err != nil || !dRes.Success {
+		return &pb.RegisterResponse{
+			Success: false,
+			Error:   "failed to setup user datastores",
+		}, err
+	}
+
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("failed to commit transaction: %v", err)
 	}
@@ -351,10 +400,12 @@ func (s *authServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb
 	return &pb.RegisterResponse{Success: true}, nil
 }
 
-// Verify jwt route
+// rpc(context, verify request)
+//   - takes in a jwt and checks to make sure it's valid
+//   - returns the user id of the jwt on success
 func (s *authServer) Verify(ctx context.Context, req *pb.VerifyRequest) (*pb.VerifyResponse, error) {
 	// parse out the token
-	token, err := jwt.Parse(req.Token, func(token *jwt.Token) (interface{}, error) {
+	token, err := jwt.Parse(req.Token, func(token *jwt.Token) (any, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, jwt.ErrSignatureInvalid
 		}
@@ -378,59 +429,192 @@ func (s *authServer) Verify(ctx context.Context, req *pb.VerifyRequest) (*pb.Ver
 	return &pb.VerifyResponse{Valid: false, Error: "invalid token"}, nil
 }
 
-func main() {
-	log.Println("Starting the auth server...")
-	// Load all environmental variables
-	err := config.LoadSharedConfig()
+// rpc(context, sign csr request)
+//   - takes a base64 csr, signs it, and returns a base64 signed certificate
+//   - takes an adjacent login request to make sure the user is authenticate to get this certificate
+func (s *authServer) SignCSR(ctx context.Context, req *pb.SignCSRRequest) (*pb.SignCSRResponse, error) {
+	// try to authenticate the user first
+	loginRes, err := s.Login(ctx, req.LoginRequest)
 	if err != nil {
-		log.Fatalf("Error loading .env file: %v", err)
+		return nil, fmt.Errorf("user is not authenticate to make csr request: %v", err)
 	}
-	if err := loadPasswordSettings(); err != nil {
-		log.Fatalf("Failed to initialize password encryption settings: %v", err)
+	userId := loginRes.GetUserId()
+
+	// Decode the base64 CSR
+	csrBytes, err := base64.StdEncoding.DecodeString(req.CsrBase64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode CSR: %v", err)
 	}
 
-	grpcAddress := os.Getenv("AUTH_PORT")
+	// if it's in PEM format we want to extract it in DER format
+	block, _ := pem.Decode(csrBytes)
+	if block != nil && block.Type == "CERTIFICATE REQUEST" {
+		csrBytes = block.Bytes
+	}
 
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
+	// Parse the CSR
+	csr, err := x509.ParseCertificateRequest(csrBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse CSR: %v", err)
+	}
+
+	// Verify the CSR signature
+	if err := csr.CheckSignature(); err != nil {
+		return nil, fmt.Errorf("invalid CSR signature: %v", err)
+	}
+
+	// Verify the user ID in the CSR subject matches the requested user ID
+	uidFound := false
+	for _, name := range csr.Subject.Names {
+		if name.Type.String() == "0.9.2342.19200300.100.1.1" || name.Type.String() == "2.5.4.3" { // OID for UID and CN
+			if name.Value.(string) == userId {
+				uidFound = true
+				break
+			}
+		}
+	}
+
+	if !uidFound {
+		return nil, fmt.Errorf("user ID in CSR does not match authenticated user")
+	}
+
+	// Get CA certificate and key from environment variables
+	caCertPEM := os.Getenv("CA_CRT")
+	caKeyPEM := os.Getenv("CA_KEY")
+
+	if caCertPEM == "" || caKeyPEM == "" {
+		return nil, fmt.Errorf("CA certificate or key not found in environment variables")
+	}
+
+	// Decode base64 if needed
+	var caCertData, caKeyData []byte
+	var decodeErr error
+
+	// Try to decode as base64 first
+	caCertData, decodeErr = base64.StdEncoding.DecodeString(caCertPEM)
+	if decodeErr != nil {
+		return nil, fmt.Errorf("CA certificate not in base64 format")
+	}
+
+	caKeyData, decodeErr = base64.StdEncoding.DecodeString(caKeyPEM)
+	if decodeErr != nil {
+		return nil, fmt.Errorf("CA key not in base64 format")
+	}
+
+	// Parse CA certificate - assuming PEM format
+	block, _ = pem.Decode(caCertData)
+	if block == nil || block.Type != "CERTIFICATE" {
+		return nil, fmt.Errorf("failed to decode CA certificate PEM")
+	}
+
+	caCert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse CA certificate: %v", err)
+	}
+
+	// Parse CA private key - assuming PEM format
+	block, _ = pem.Decode(caKeyData)
+	if block == nil {
+		return nil, fmt.Errorf("failed to decode CA private key PEM")
+	}
+
+	var caKey any
+
+	// Try parsing as PKCS8 first (which is what openssl genpkey produces)
+	caKey, err = x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		// If PKCS8 fails, try PKCS1
+		caKey, err = x509.ParsePKCS1PrivateKey(block.Bytes)
+		if err != nil {
+			return &pb.SignCSRResponse{
+				CertificateBase64: "",
+			}, fmt.Errorf("failed to parse CA private key: %v", err)
+		}
+	}
+
+	// Ensure we have an RSA private key
+	rsaKey, ok := caKey.(*rsa.PrivateKey)
+	if !ok {
+		return nil, fmt.Errorf("CA private key is not an RSA key")
+	}
+
+	// generate a random serial number for the certificate
+	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
+	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate serial number")
+	}
+
+	// Prepare certificate template
+	now := time.Now()
+	template := x509.Certificate{
+		SerialNumber:          serialNumber,
+		Subject:               csr.Subject,
+		NotBefore:             now,
+		NotAfter:              now.Add(365 * 24 * time.Hour), // TODO: implement certificate rotation
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+	}
+
+	// Create the certificate
+	certDERBytes, err := x509.CreateCertificate(
+		rand.Reader,
+		&template,
+		caCert,
+		csr.PublicKey,
+		rsaKey,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create certificate: %v", err)
+	}
+
+	// Convert DER to PEM format
+	certPEM := &bytes.Buffer{}
+	err = pem.Encode(certPEM, &pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: certDERBytes,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode certificate to PEM: %v", err)
+	}
+
+	// Encode the PEM certificate to base64
+	certBase64 := base64.StdEncoding.EncodeToString(certPEM.Bytes())
+
+	return &pb.SignCSRResponse{
+		CertificateBase64: certBase64,
+	}, nil
+}
+
+// func(context, maximum amount of time it should take to connect to the database)
+//   - connects to the database and creates the users table if necessary
+//   - assumes: you will close the database connection elsewhere in the parent function(s)
+func (s *authServer) connectToDatabase(ctx context.Context, contextDuration time.Duration) {
+	ctx, cancel := context.WithTimeout(ctx, contextDuration)
+	defer cancel()
+
+	// get env variables
+	dbURL, ok := os.LookupEnv("DATABASE_URL")
+	if !ok {
 		log.Fatal("DATABASE_URL environment variable is required")
 	}
 
-	jwtSecret := []byte(os.Getenv("JWT_SECRET"))
-	if len(jwtSecret) == 0 {
-		log.Fatal("JWT_SECRET environment variable is required")
-	}
-
-	// Load CA certificate from .env
-	caCertB64 := os.Getenv("CA_CRT")
-	caCert, err := base64.StdEncoding.DecodeString(caCertB64)
-	if err != nil {
-		log.Fatalf("failed to decode CA cert: %v", err)
-	}
-
-	certPool := x509.NewCertPool()
-	if !certPool.AppendCertsFromPEM(caCert) {
-		log.Fatal("failed to add CA certificate")
-	}
-
-	// Load the TLS configuration values
-	tlsConfig, err := config.LoadServerTLSFromEnv("AUTH_CRT", "AUTH_KEY")
-	if err != nil {
-		log.Fatal("Error loading TLS config for authentication service")
-	}
-
-	// Connect to database
+	// connect to database
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
-	defer db.Close()
 
-	// Set up database tables
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	_, err = db.ExecContext(ctx, `
-        CREATE TABLE IF NOT EXISTS users (
+	// set up database table
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		log.Fatalf("failed to begin transaction after connecting to database: %v", err)
+	}
+	defer tx.Rollback()
+
+	if _, err = tx.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS users (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             email VARCHAR(255) UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
@@ -438,16 +622,86 @@ func main() {
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
-    `)
-	if err != nil {
-		log.Fatalf("Failed to create tables: %v", err)
+	`); err != nil {
+		log.Fatalf("failed to create tables: %v", err)
 	}
 
-	_, err = db.ExecContext(ctx, `
-        CREATE INDEX IF NOT EXISTS email_idx ON users(email)
-    `)
+	// commit the transaction (1 in this case)
+	if err = tx.Commit(); err != nil {
+		log.Fatalf("failed to commit transaction: %v", err)
+	}
+
+	s.db = db
+}
+
+// func(client TLS config)
+//   - connects to the vector service using the provided client tls config and saves the connection and function interface to the server struct
+//   - assumes: the connection will be closed in the parent function at some point
+func (s *authServer) connectToVectorService(tlsConfig *tls.Config) {
+	// Connect to the vector service
+	vectorAddy, ok := os.LookupEnv("VECTOR_ADDRESS")
+	if !ok {
+		log.Fatal("failed to retrieve vector address for connection")
+	}
+	vectorConn, err := grpc.NewClient(
+		vectorAddy,
+		grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)),
+	)
 	if err != nil {
-		log.Fatalf("Failed to create email index: %v", err)
+		log.Fatalf("Failed to establish connection with vector-service: %v", err)
+	}
+
+	s.vectorConn = vectorConn
+	s.vectorClient = pb.NewVectorServiceClient(vectorConn)
+}
+
+// func(client TLS config)
+//   - connects to the desktop service using the provided client tls config and saves the connection and function interface to the server struct
+//   - assumes: the connection will be closed in the parent function at some point
+func (s *authServer) connectToDesktopService(tlsConfig *tls.Config) {
+	// Connect to the desktop service
+	desktopAddy, ok := os.LookupEnv("DESKTOP_ADDRESS")
+	if !ok {
+		log.Fatal("failed to retrieve desktop address for connection")
+	}
+	desktopConn, err := grpc.NewClient(
+		desktopAddy,
+		grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)),
+	)
+	if err != nil {
+		log.Fatalf("Failed to establish connection with desktop-service: %v", err)
+	}
+
+	s.desktopConn = desktopConn
+	s.desktopClient = pb.NewDesktopServiceClient(desktopConn)
+}
+
+// func()
+//   - sets up the gRPC server, connects it with the global struct, and TLS
+//   - assumes: you will call grpcServer.GracefulStop() in the parent function at some point
+func (s *authServer) createGRPCServer() *grpc.Server {
+	// set up TLS for the gRPC server and serve it
+	tlsConfig, err := config.LoadServerTLSFromEnv("AUTH_CRT", "AUTH_KEY")
+	if err != nil {
+		log.Fatalf("Error loading TLS config for authentication service: %v", err)
+	}
+
+	opts := []grpc.ServerOption{
+		grpc.Creds(credentials.NewTLS(tlsConfig)),
+	}
+	grpcServer := grpc.NewServer(opts...)
+	pb.RegisterAuthenticationServiceServer(grpcServer, s)
+
+	return grpcServer
+}
+
+// func(pointer to a fully set up grpc server)
+//   - starts the authentication-service grpc server
+//   - this is a blocking call
+func (s *authServer) startGRPCServer(grpcServer *grpc.Server) {
+	grpcAddress, ok := os.LookupEnv("AUTH_PORT")
+	if !ok {
+		log.Fatal("failed to find the authentication service port in env variables")
 	}
 
 	listener, err := net.Listen("tcp", grpcAddress)
@@ -455,35 +709,58 @@ func main() {
 		log.Fatalf("Failed to listen: %v", err)
 	}
 	defer listener.Close()
+	log.Printf("Authentication gRPC Service listening on %v\n", listener.Addr())
 
-	// Connect to the vector service
-	vectorConn, err := grpc.NewClient(
-		os.Getenv("VECTOR_ADDRESS"),
-		grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
-			RootCAs: certPool,
-		})),
-	)
-	if err != nil {
-		log.Fatalf("Failed to establish connection with vector-service: %v", err)
-	}
-	defer vectorConn.Close()
-	vectorServiceClient := pb.NewVectorServiceClient(vectorConn)
-
-	log.Println("Creating the authentication server")
-
-	opts := []grpc.ServerOption{
-		grpc.Creds(credentials.NewTLS(tlsConfig)),
-	}
-	grpcServer := grpc.NewServer(opts...)
-	pb.RegisterAuthenticationServiceServer(grpcServer, &authServer{
-		db:           db,
-		vectorClient: vectorServiceClient,
-		jwtSecret:    jwtSecret,
-	})
-	log.Printf("Auth Service listening on %v\n", listener.Addr())
 	if err := grpcServer.Serve(listener); err != nil {
 		log.Fatalf("Failed to serve: %v", err)
-	} else {
-		log.Printf("Auth Service served on %v\n", listener.Addr())
 	}
+}
+
+func main() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// Load all .env variables
+	err := config.LoadSharedConfig()
+	if err != nil {
+		log.Fatalf("Error loading .env file: %v", err)
+	}
+
+	// create the clientTLSConfig for use in connecting to other services
+	clientTlsConfig, err := config.LoadClientTLSFromEnv("AUTH_CRT", "AUTH_KEY", "CA_CRT")
+	if err != nil {
+		log.Fatalf("failed to load client TLS configuration from .env: %v", err)
+	}
+
+	// create the server struct
+	server := &authServer{}
+
+	// load password settings
+	if err := server.loadPasswordSettings(); err != nil {
+		log.Fatalf("Failed to initialize password encryption settings: %v", err)
+	}
+
+	// start grpc server
+	grpcServer := server.createGRPCServer()
+	go server.startGRPCServer(grpcServer)
+	defer grpcServer.GracefulStop()
+
+	// connect to database
+	server.connectToDatabase(ctx, 10*time.Second)
+	defer server.db.Close()
+
+	// Connect to the vector service
+	server.connectToVectorService(clientTlsConfig)
+	defer server.vectorConn.Close()
+
+	// Connect to the desktop service
+	server.connectToDesktopService(clientTlsConfig)
+	defer server.desktopConn.Close()
+
+	<-sigChan // TODO: implement worker groups
+	log.Print("gracefully shutting down...")
 }

@@ -8,6 +8,7 @@ service AuthenticationService {
     rpc Login(LoginRequest) returns (LoginResponse);
     rpc Register(RegisterRequest) returns (RegisterResponse);
     rpc Verify(VerifyRequest) returns (VerifyResponse);
+    rpc SignCSR(SignCSRRequest) returns (SignCSRResponse);
 }
 
 message LoginRequest {
@@ -17,7 +18,8 @@ message LoginRequest {
 
 message LoginResponse {
     string token = 1;
-    string error = 2;
+    string user_id = 2;
+    string error = 3;
 }
 
 message RegisterRequest {
@@ -40,3 +42,13 @@ message VerifyResponse {
     string user_id = 2;
     string error = 3;
 }
+
+message SignCSRRequest {
+    string csr_base64 = 1;
+    LoginRequest loginRequest = 2;
+}
+
+message SignCSRResponse {
+    string certificate_base64 = 1;
+}
+
