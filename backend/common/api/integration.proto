@@ -9,6 +9,7 @@ service IntegrationService {
     rpc GetOAuthURL(GetOAuthURLRequest) returns (GetOAuthURLResponse);
     rpc ConnectIntegration(ConnectIntegrationRequest) returns (ConnectIntegrationResponse);
     rpc DisconnectIntegration(DisconnectIntegrationRequest) returns (DisconnectIntegrationResponse);
+    rpc ValidateOAuthState(ValidateOAuthStateRequest) returns (ValidateOAuthStateResponse);
 }
 
 enum Provider {
@@ -55,4 +56,14 @@ message DisconnectIntegrationRequest {
 message DisconnectIntegrationResponse {
     bool success = 1;
     string message = 2;
+}
+
+message ValidateOAuthStateRequest {
+    string state = 1;
+}
+
+message ValidateOAuthStateResponse {
+    bool success = 1;
+    string user_id = 2;
+    string error_details = 3;
 }

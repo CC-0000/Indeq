@@ -488,36 +488,6 @@ func (s *integrationServer) ConnectIntegration(ctx context.Context, req *pb.Conn
 			ErrorDetails: err.Error(),
 		}, nil
 	}
-	
-	// if providerStr != "NOTION" && tokenRes.RefreshToken == "" {
-	// 	var existingRefreshToken string
-	// 	err = s.db.QueryRowContext(ctx, `
-	// 		SELECT refresh_token
-	// 		FROM oauth_tokens
-	// 		WHERE user_id = $1 AND provider = $2
-	// 	`,
-	// 		req.UserId,
-	// 		providerStr,
-	// 	).Scan(&existingRefreshToken)
-		
-	// 	if err != nil && err != sql.ErrNoRows {
-	// 		return &pb.ConnectIntegrationResponse{
-	// 			Success: false,
-	// 			Message: fmt.Sprintf("Database error querying token: %v", err),
-	// 			ErrorDetails: err.Error(),
-	// 		}, nil
-	// 	}
-
-	// 	if existingRefreshToken != "" {
-	// 		log.Println("No refresh token returned from provider, using existing token")
-	// 		tokenRes.RefreshToken = existingRefreshToken
-	// 	} else {
-	// 		return &pb.ConnectIntegrationResponse{
-	// 			Success: false,
-	// 			Message: "No refresh token returned from provider",
-	// 		}, nil
-	// 	}
-	// }
 
 	_, err = s.db.ExecContext(ctx, `
 	INSERT INTO oauth_tokens (user_id, provider, access_token, refresh_token, expires_at, requires_refresh)
@@ -594,6 +564,21 @@ func (s *integrationServer) DisconnectIntegration(ctx context.Context, req *pb.D
 	return &pb.DisconnectIntegrationResponse{
 		Success: true,
 		Message: "Integration disconnected successfully",
+	}, nil
+}
+
+func (s *integrationServer) ValidateOAuthState(ctx context.Context, req *pb.ValidateOAuthStateRequest) (*pb.ValidateOAuthStateResponse, error) {
+	userId, err := s.redisClient.ValidateOAuthState(ctx, req.State)
+	if err != nil {
+		return &pb.ValidateOAuthStateResponse{
+			Success: false,
+			ErrorDetails: err.Error(),
+		}, nil
+	}
+
+	return &pb.ValidateOAuthStateResponse{
+		Success: true,
+		UserId: userId,
 	}, nil
 }
 

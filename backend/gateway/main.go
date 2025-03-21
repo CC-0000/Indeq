@@ -13,7 +13,6 @@ import (
 	"strings"
 	pb "github.com/cc-0000/indeq/common/api"
 	"github.com/cc-0000/indeq/common/config"
-	"github.com/cc-0000/indeq/common/redis"
 	"github.com/golang/protobuf/jsonpb"
 	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -27,7 +26,6 @@ type ServiceClients struct {
 	integrationClient pb.IntegrationServiceClient
 	waitlistClient pb.WaitlistServiceClient
 	rabbitMQConn *amqp.Connection
-	redisClient *redis.RedisClient
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -339,6 +337,7 @@ func handleGetIntegrationsGenerator(clients *ServiceClients) http.HandlerFunc {
 
 func handleConnectIntegrationGenerator(clients *ServiceClients) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		log.Println("Received request to connect integration")
 		var connectIntegrationRequest pb.HttpConnectIntegrationRequest
 		// Set up context
 		ctx := r.Context()
@@ -380,21 +379,27 @@ func handleConnectIntegrationGenerator(clients *ServiceClients) http.HandlerFunc
 			return
 		}
 
-		userId, err := clients.redisClient.ValidateOAuthState(ctx, connectIntegrationRequest.State)
+		validateRes, err := clients.integrationClient.ValidateOAuthState(ctx, &pb.ValidateOAuthStateRequest{
+			State: connectIntegrationRequest.State,
+		})
+
 		if err != nil {
-			log.Println("Invalid or expired state")
-			http.Error(w, "Invalid or expired state", http.StatusBadRequest)
+			http.Error(w, fmt.Sprintf("Failed to validate oauth state: %v", err), http.StatusInternalServerError)
 			return
 		}
 
-		if userId != verifyRes.UserId {
-            log.Printf("User ID mismatch: stored %s != token %s\n", userId, verifyRes.UserId)
-            http.Error(w, "User ID mismatch in OAuth state", http.StatusForbidden)
-            return
-        }
+		if !validateRes.Success {
+			http.Error(w, validateRes.ErrorDetails, http.StatusBadRequest)
+			return
+		}
+		
+		if validateRes.UserId != verifyRes.UserId {
+			http.Error(w, "User ID mismatch in OAuth state", http.StatusForbidden)
+			return
+		}
 
 		connectRes, err := clients.integrationClient.ConnectIntegration(ctx, &pb.ConnectIntegrationRequest{
-			UserId: verifyRes.UserId,
+			UserId: validateRes.UserId,
 			Provider: provider,
 			AuthCode: connectIntegrationRequest.AuthCode,
 		})
@@ -416,6 +421,7 @@ func handleConnectIntegrationGenerator(clients *ServiceClients) http.HandlerFunc
 
 func handleDisconnectIntegrationGenerator(clients *ServiceClients) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		log.Println("Received request to disconnect integration")
 		var disconnectIntegrationRequest pb.HttpDisconnectIntegrationRequest
 		// Set up context
 		ctx := r.Context()
@@ -659,13 +665,7 @@ func main() {
 	}
 	defer integrationConn.Close()
 	integrationServiceClient := pb.NewIntegrationServiceClient(integrationConn)
-	
-	// Connect to Redis
-	redisClient, err := redis.NewRedisClient(context.Background(), os.Getenv("REDIS_ADDRESS"))
-	if err != nil {
-		log.Fatalf("Failed to establish connection with redis: %v", err)
-	}
-	defer redisClient.Client.Close()
+
 
 	// Connect to the waitlist service
 	waitlistConn, err := grpc.NewClient(
@@ -687,7 +687,6 @@ func main() {
 		integrationClient: integrationServiceClient,
 		waitlistClient: waitlistServiceClient,
 		rabbitMQConn: rabbitMQConn,
-		redisClient: redisClient,
 	}
 	log.Print("Server has established connection with other services")
 
