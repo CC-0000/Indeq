@@ -39,7 +39,7 @@
 	"dependencies": {
 		"katex": "^0.16.21",
 		"@vercel/analytics": "^1.5.0",
-		"mongodb": "^6.14.0",
+		"mongodb": "^6.14.2",
 		"svelte-feather-icons": "^4.2.0"
 	}
 }
