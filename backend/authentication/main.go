@@ -43,8 +43,6 @@ type params struct {
 type authServer struct {
 	pb.UnimplementedAuthenticationServiceServer
 	db                *sql.DB // password database
-	vectorConn        *grpc.ClientConn
-	vectorClient      pb.VectorServiceClient
 	desktopConn       *grpc.ClientConn
 	desktopClient     pb.DesktopServiceClient
 	jwtSecret         []byte // secret for creating jwts
@@ -371,17 +369,6 @@ func (s *authServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb
 		}, err
 	}
 
-	// Try to create a corresponding entry in the vector collection
-	res, err := s.vectorClient.SetupPartition(ctx, &pb.SetupPartitionRequest{
-		UserId: userId,
-	})
-	if err != nil || !res.Success {
-		return &pb.RegisterResponse{
-			Success: false,
-			Error:   "failed to setup user datastores",
-		}, err
-	}
-
 	// Try to create a corresponding entry in the desktop tracking collection
 	dRes, err := s.desktopClient.SetupUserStats(ctx, &pb.SetupUserStatsRequest{
 		UserId: userId,
@@ -635,27 +622,6 @@ func (s *authServer) connectToDatabase(ctx context.Context, contextDuration time
 }
 
 // func(client TLS config)
-//   - connects to the vector service using the provided client tls config and saves the connection and function interface to the server struct
-//   - assumes: the connection will be closed in the parent function at some point
-func (s *authServer) connectToVectorService(tlsConfig *tls.Config) {
-	// Connect to the vector service
-	vectorAddy, ok := os.LookupEnv("VECTOR_ADDRESS")
-	if !ok {
-		log.Fatal("failed to retrieve vector address for connection")
-	}
-	vectorConn, err := grpc.NewClient(
-		vectorAddy,
-		grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)),
-	)
-	if err != nil {
-		log.Fatalf("Failed to establish connection with vector-service: %v", err)
-	}
-
-	s.vectorConn = vectorConn
-	s.vectorClient = pb.NewVectorServiceClient(vectorConn)
-}
-
-// func(client TLS config)
 //   - connects to the desktop service using the provided client tls config and saves the connection and function interface to the server struct
 //   - assumes: the connection will be closed in the parent function at some point
 func (s *authServer) connectToDesktopService(tlsConfig *tls.Config) {
@@ -752,10 +718,6 @@ func main() {
 	// connect to database
 	server.connectToDatabase(ctx, 10*time.Second)
 	defer server.db.Close()
-
-	// Connect to the vector service
-	server.connectToVectorService(clientTlsConfig)
-	defer server.vectorConn.Close()
 
 	// Connect to the desktop service
 	server.connectToDesktopService(clientTlsConfig)
