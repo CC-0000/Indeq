@@ -49,7 +49,7 @@ services:
     env_file:
       - ./common/config/.env
     depends_on:
-      appDB:
+      passwordDB:
         condition: service_healthy
     networks:
       - indeq-net
@@ -73,8 +73,10 @@ services:
     build:
       context: .
       dockerfile: crawling/Dockerfile
+    env_file:
+      - ./common/config/.env
     depends_on:
-      appDB:
+      passwordDB:
         condition: service_healthy
     networks:
       - indeq-net
@@ -86,11 +88,11 @@ services:
     env_file:
       - ./common/config/.env
     depends_on:
-      appDB:
+      passwordDB:
         condition: service_healthy
     networks:
       - indeq-net
-  appDB:
+  passwordDB:
     image: postgres:latest
     env_file:
       - ./common/config/.env

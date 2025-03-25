@@ -20,9 +20,9 @@ type DocProcessor struct {
 
 // WordInfo stores word position information efficiently
 type WordInfo struct {
-	ParaIndex  int    // Paragraph index
-	ParaOffset int    // Offset within paragraph
-	Word       string // The actual word
+	ParaIndex  int
+	ParaOffset int
+	Word       string
 }
 
 // NewDocProcessor initializes a new DocProcessor with a Google Docs service
@@ -56,7 +56,7 @@ func (dp *DocProcessor) DocsProcess(ctx context.Context, file File) (File, error
 		return file, err
 	}
 
-	chunks, err := dp.chunkDocument(doc, metadata)
+	chunks, err := dp.ChunkDocument(doc, metadata)
 	if err != nil {
 		return file, err
 	}
@@ -75,12 +75,12 @@ func (dp *DocProcessor) DocsRetrieve(ctx context.Context, metadata Metadata) (Te
 		return TextChunkMessage{}, err
 	}
 
-	startPara, startOffset, endPara, endOffset, err := dp.parseDocsChunkID(metadata.ChunkID)
+	startPara, startOffset, endPara, endOffset, err := dp.ParseDocsChunkID(metadata.ChunkID)
 	if err != nil {
 		return TextChunkMessage{}, err
 	}
 
-	chunkWords, err := dp.extractDocsChunk(doc, startPara, startOffset, endPara, endOffset)
+	chunkWords, err := dp.ExtractDocsChunk(doc, startPara, startOffset, endPara, endOffset)
 	if err != nil {
 		return TextChunkMessage{}, err
 	}
@@ -115,7 +115,7 @@ func (dp *DocProcessor) DocsFetchDocument(ctx context.Context, resourceID string
 }
 
 // chunkDocument splits a document into overlapping chunks
-func (dp *DocProcessor) chunkDocument(doc *docs.Document, baseMetadata Metadata) ([]TextChunkMessage, error) {
+func (dp *DocProcessor) ChunkDocument(doc *docs.Document, baseMetadata Metadata) ([]TextChunkMessage, error) {
 	var chunks []TextChunkMessage
 	chunkNumber := uint64(1)
 
@@ -155,7 +155,7 @@ func (dp *DocProcessor) chunkDocument(doc *docs.Document, baseMetadata Metadata)
 			endIndex = totalWords
 		}
 
-		if endIndex-startIndex < int(dp.baseOverlapSize) {
+		if startIndex > 0 && endIndex-startIndex < int(dp.baseOverlapSize) {
 			continue
 		}
 
@@ -176,7 +176,6 @@ func (dp *DocProcessor) chunkDocument(doc *docs.Document, baseMetadata Metadata)
 
 		chunkNumber++
 	}
-
 	return chunks, nil
 }
 
@@ -194,7 +193,7 @@ func (dp *DocProcessor) createDocsChunk(words []string, baseMetadata Metadata, c
 }
 
 // parseChunkID extracts chunk boundaries from the ChunkID string
-func (dp *DocProcessor) parseDocsChunkID(chunkID string) (startPara, startOffset, endPara, endOffset int, err error) {
+func (dp *DocProcessor) ParseDocsChunkID(chunkID string) (startPara, startOffset, endPara, endOffset int, err error) {
 	_, err = fmt.Sscanf(chunkID, "StartParagraph:%d-StartOffset:%d-EndParagraph:%d-EndOffset:%d", &startPara, &startOffset, &endPara, &endOffset)
 	if err != nil {
 		return 0, 0, 0, 0, fmt.Errorf("invalid ChunkID format: %w", err)
@@ -202,7 +201,7 @@ func (dp *DocProcessor) parseDocsChunkID(chunkID string) (startPara, startOffset
 	return startPara, startOffset, endPara, endOffset, nil
 }
 
-func (dp *DocProcessor) extractDocsChunk(doc *docs.Document, startPara, startOffset, endPara, endOffset int) ([]string, error) {
+func (dp *DocProcessor) ExtractDocsChunk(doc *docs.Document, startPara, startOffset, endPara, endOffset int) ([]string, error) {
 	var chunkWords []string
 
 	paraMap := make(map[int]*docs.StructuralElement, len(doc.Body.Content))
@@ -268,6 +267,7 @@ func (dp *DocProcessor) extractDocsChunk(doc *docs.Document, startPara, startOff
 
 // ProcessGoogleDoc is used to process a Google Doc
 func ProcessGoogleDoc(ctx context.Context, client *http.Client, file File) (File, error) {
+	fmt.Printf("ProcessGoogleDoc called for ResourceID: %s\n", file.File[0].Metadata.ResourceID)
 	processor, err := NewDocProcessor(ctx, client, rateLimiter)
 	if err != nil {
 		return file, err
@@ -282,6 +282,5 @@ func RetrieveGoogleDoc(ctx context.Context, client *http.Client, metadata Metada
 	if err != nil {
 		return TextChunkMessage{}, err
 	}
-
 	return processor.DocsRetrieve(ctx, metadata)
 }

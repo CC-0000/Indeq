@@ -54,7 +54,7 @@ func (sp *SlidesProcessor) SlidesProcess(ctx context.Context, file File) (File, 
 	if err != nil {
 		return file, err
 	}
-	chunks, err := sp.chunkPresentation(doc, metadata)
+	chunks, err := sp.ChunkPresentation(doc, metadata)
 	if err != nil {
 		return file, err
 	}
@@ -73,12 +73,12 @@ func (sp *SlidesProcessor) SlidesRetrieve(ctx context.Context, metadata Metadata
 		return TextChunkMessage{}, err
 	}
 
-	startPara, startOffset, endPara, endOffset, err := sp.parseSlidesChunkID(metadata.ChunkID)
+	startPara, startOffset, endPara, endOffset, err := sp.ParseSlidesChunkID(metadata.ChunkID)
 	if err != nil {
 		return TextChunkMessage{}, err
 	}
 
-	chunkWords, err := sp.extractSlidesChunk(doc, startPara, startOffset, endPara, endOffset)
+	chunkWords, err := sp.ExtractSlidesChunk(doc, startPara, startOffset, endPara, endOffset)
 	if err != nil {
 		return TextChunkMessage{}, err
 	}
@@ -112,7 +112,7 @@ func (sp *SlidesProcessor) SlidesFetchDocument(ctx context.Context, resourceID s
 }
 
 // ChunkPresentation splits a Google Slides presentation into text chunks
-func (sp *SlidesProcessor) chunkPresentation(presentation *slides.Presentation, baseMetadata Metadata) ([]TextChunkMessage, error) {
+func (sp *SlidesProcessor) ChunkPresentation(presentation *slides.Presentation, baseMetadata Metadata) ([]TextChunkMessage, error) {
 	var chunks []TextChunkMessage
 	chunkNumber := uint64(1)
 
@@ -146,27 +146,27 @@ func (sp *SlidesProcessor) chunkPresentation(presentation *slides.Presentation, 
 	}
 
 	totalWords := len(wordInfoList)
-	for startIdx := 0; startIdx < totalWords; startIdx += int(sp.baseChunkSize) - int(sp.baseOverlapSize) {
+	for startIndex := 0; startIndex < totalWords; startIndex += int(sp.baseChunkSize) - int(sp.baseOverlapSize) {
 
-		endIdx := startIdx + int(sp.baseChunkSize)
-		if endIdx > totalWords {
-			endIdx = totalWords
+		endIndex := startIndex + int(sp.baseChunkSize)
+		if endIndex > totalWords {
+			endIndex = totalWords
 		}
 
-		if endIdx-startIdx < int(sp.baseOverlapSize) {
+		if startIndex > 0 && endIndex-startIndex < int(sp.baseOverlapSize) {
 			continue
 		}
 
-		chunkWords := make([]string, endIdx-startIdx)
-		for i := 0; i < endIdx-startIdx; i++ {
-			chunkWords[i] = wordInfoList[startIdx+i].Word
+		chunkWords := make([]string, endIndex-startIndex)
+		for i := 0; i < endIndex-startIndex; i++ {
+			chunkWords[i] = wordInfoList[startIndex+i].Word
 		}
 
-		startInfo := wordInfoList[startIdx]
-		endInfo := wordInfoList[endIdx-1]
+		startInfo := wordInfoList[startIndex]
+		endInfo := wordInfoList[endIndex-1]
 		endOffset := endInfo.SlideOffset + len(endInfo.Word)
 
-		chunk, err := sp.createSlidesChunk(chunkWords, baseMetadata, chunkNumber, startInfo.SlideIndex, startInfo.SlideOffset, endInfo.SlideIndex, endOffset)
+		chunk, err := sp.CreateSlidesChunk(chunkWords, baseMetadata, chunkNumber, startInfo.SlideIndex, startInfo.SlideOffset, endInfo.SlideIndex, endOffset)
 		if err != nil {
 			return nil, err
 		}
@@ -179,7 +179,7 @@ func (sp *SlidesProcessor) chunkPresentation(presentation *slides.Presentation, 
 }
 
 // createChunk constructs a TextChunkMessage with metadata
-func (sp *SlidesProcessor) createSlidesChunk(words []string, baseMetadata Metadata, chunkNumber uint64, startSlide, startOffset, endSlide, endOffset int) (TextChunkMessage, error) {
+func (sp *SlidesProcessor) CreateSlidesChunk(words []string, baseMetadata Metadata, chunkNumber uint64, startSlide, startOffset, endSlide, endOffset int) (TextChunkMessage, error) {
 	chunkMetadata := baseMetadata
 	chunkMetadata.ChunkNumber = chunkNumber
 	chunkMetadata.ChunkSize = uint64(len(words))
@@ -192,7 +192,7 @@ func (sp *SlidesProcessor) createSlidesChunk(words []string, baseMetadata Metada
 }
 
 // parseChunkID extracts chunk boundaries from the ChunkID string
-func (sp *SlidesProcessor) parseSlidesChunkID(chunkID string) (startSlide, startOffset, endSlide, endOffset int, err error) {
+func (sp *SlidesProcessor) ParseSlidesChunkID(chunkID string) (startSlide, startOffset, endSlide, endOffset int, err error) {
 	_, err = fmt.Sscanf(chunkID, "%d-%d-%d-%d", &startSlide, &startOffset, &endSlide, &endOffset)
 	if err != nil {
 		return 0, 0, 0, 0, fmt.Errorf("invalid ChunkID format: %w", err)
@@ -202,7 +202,7 @@ func (sp *SlidesProcessor) parseSlidesChunkID(chunkID string) (startSlide, start
 }
 
 // extractSlidesChunk retrieves words for a specific chunk based on slide and offset boundaries
-func (sp *SlidesProcessor) extractSlidesChunk(presentation *slides.Presentation, startSlide, startOffset, endSlide, endOffset int) ([]string, error) {
+func (sp *SlidesProcessor) ExtractSlidesChunk(presentation *slides.Presentation, startSlide, startOffset, endSlide, endOffset int) ([]string, error) {
 	var chunkWords []string
 
 	slideMap := make(map[int]*slides.Page, len(presentation.Slides))

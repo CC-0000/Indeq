@@ -15,24 +15,52 @@ import (
 var mimeHandlers = map[string]func(context.Context, *http.Client, File) (File, error){
 	"application/vnd.google-apps.document":     ProcessGoogleDoc,
 	"application/vnd.google-apps.presentation": ProcessGoogleSlides,
-	//"application/vnd.google-apps.folder":   processGoogleFolder,
+	//"application/vnd.google-apps.folder":       processGoogleFolder,
 }
 
 // Crawls Google Drive Metadatafiles List
-func CrawlGoogleDrive(ctx context.Context, client *http.Client) error {
-	filelist, err := GetGoogleDriveList(ctx, client)
+func (s *crawlingServer) CrawlGoogleDrive(ctx context.Context, client *http.Client, userID string) (ListofFiles, error) {
+	filelist, err := GetGoogleDriveList(ctx, client, userID)
 	if err != nil {
-		return fmt.Errorf("error retrieving Google Drive file list: %w", err)
+		return ListofFiles{}, fmt.Errorf("error retrieving Google Drive file list: %w", err)
 	}
-	_, err = ProcessAllGoogleDriveFiles(ctx, client, filelist)
+	processedFiles, err := ProcessAllGoogleDriveFiles(ctx, client, filelist)
 	if err != nil {
-		return fmt.Errorf("error processing Google Drive files: %w", err)
+		return ListofFiles{}, fmt.Errorf("error processing Google Drive files: %w", err)
 	}
-	return nil
+	retrievalToken, err := GetStartPageToken(ctx, client)
+	if err != nil {
+		return ListofFiles{}, fmt.Errorf("error getting start page token: %w", err)
+	}
+
+	_, err = s.db.ExecContext(ctx, `
+	INSERT INTO retrievalTokens (user_id, provider, service, retrieval_token, created_at, updated_at, requires_update)
+	VALUES ($1, $2, $3, $4, $5, $6, $7)
+	ON CONFLICT (user_id, service)
+	DO UPDATE SET retrieval_token = EXCLUDED.retrieval_token, updated_at = EXCLUDED.updated_at, requires_update = EXCLUDED.requires_update
+	`, userID, "GOOGLE", "GOOGLE_DRIVE", retrievalToken, time.Now(), time.Now(), true)
+	if err != nil {
+		return ListofFiles{}, fmt.Errorf("failed to store change token: %w", err)
+	}
+
+	return processedFiles, nil
+}
+
+// UpdateCrawlGoogleDrive crawls Google Drive files periodically
+func UpdateCrawlGoogleDrive(ctx context.Context, client *http.Client, userID string, changeToken string) (string, ListofFiles, error) {
+	filelist, newChangeToken, err := GetGoogleDriveChanges(ctx, client, changeToken, userID)
+	if err != nil {
+		return "", ListofFiles{}, fmt.Errorf("error retrieving Google Drive changes: %w", err)
+	}
+	processedFiles, err := ProcessAllGoogleDriveFiles(ctx, client, filelist)
+	if err != nil {
+		return "", ListofFiles{}, fmt.Errorf("error processing Google Drive files: %w", err)
+	}
+	return newChangeToken, processedFiles, nil
 }
 
 // Return GoogleDriveList
-func GetGoogleDriveList(ctx context.Context, client *http.Client) (ListofFiles, error) {
+func GetGoogleDriveList(ctx context.Context, client *http.Client, userID string) (ListofFiles, error) {
 	srv, err := drive.NewService(ctx, option.WithHTTPClient(client))
 	if err != nil {
 		return ListofFiles{}, fmt.Errorf("failed to create Google Drive service: %w", err)
@@ -43,13 +71,12 @@ func GetGoogleDriveList(ctx context.Context, client *http.Client) (ListofFiles, 
 	const pageSize = 1000
 
 	for {
-		if err := rateLimiter.Wait(ctx, "GOOGLE_DRIVE", "a"); err != nil {
+		if err := rateLimiter.Wait(ctx, "GOOGLE_DRIVE", userID); err != nil {
 			return ListofFiles{}, fmt.Errorf("rate limit wait failed: %w", err)
 		}
 		listCall := srv.Files.List().
 			PageSize(pageSize).
-			Fields("nextPageToken, files(id, name, mimeType, createdTime, modifiedTime, webViewLink, parents, trashed)"). //Things to possible include shared, owners
-			Q("trashed = false")
+			Fields("nextPageToken, files(id, name, mimeType, createdTime, modifiedTime, webViewLink, parents, trashed)")
 		if pageToken != "" {
 			listCall = listCall.PageToken(pageToken)
 		}
@@ -78,7 +105,7 @@ func GetGoogleDriveList(ctx context.Context, client *http.Client) (ListofFiles, 
 			googleFile := Metadata{
 				DateCreated:      createdTime,
 				DateLastModified: modifiedTime,
-				UserID:           "a",
+				UserID:           userID,
 				ResourceID:       driveFile.Id,
 				Title:            driveFile.Name,
 				ResourceType:     driveFile.MimeType,
@@ -86,9 +113,10 @@ func GetGoogleDriveList(ctx context.Context, client *http.Client) (ListofFiles, 
 				FileURL:          driveFile.WebViewLink,
 				ChunkSize:        0,
 				ChunkNumber:      0,
-				Hierarchy:        hierarchy,
+				FilePath:         hierarchy,
 				Platform:         "GOOGLE_DRIVE",
 				Provider:         "GOOGLE",
+				Exists:           true,
 			}
 
 			fileList.Files = append(fileList.Files, File{
@@ -108,6 +136,94 @@ func GetGoogleDriveList(ctx context.Context, client *http.Client) (ListofFiles, 
 	}
 
 	return fileList, nil
+}
+
+func GetGoogleDriveChanges(ctx context.Context, client *http.Client, retrievalToken string, userID string) (ListofFiles, string, error) {
+	srv, err := drive.NewService(ctx, option.WithHTTPClient(client))
+	if err != nil {
+		return ListofFiles{}, "", fmt.Errorf("failed to create Google Drive service: %w", err)
+	}
+	var fileList ListofFiles
+	pageToken := retrievalToken
+	for {
+		var exist bool
+		changesCall := srv.Changes.List(pageToken).
+			Fields("nextPageToken, newStartPageToken, changes(fileId, file(id, name, mimeType, createdTime, modifiedTime, webViewLink, trashed))")
+
+		res, err := changesCall.Do()
+		if err != nil {
+			return ListofFiles{}, "", fmt.Errorf("failed to list changes: %w", err)
+		}
+		exist = true
+
+		for _, change := range res.Changes {
+
+			if change.File == nil {
+				if change.Removed {
+					googleFile := Metadata{
+						UserID:     userID,
+						ResourceID: change.FileId,
+						Platform:   "GOOGLE_DRIVE",
+						Provider:   "GOOGLE",
+						Exists:     false,
+					}
+					fileList.Files = append(fileList.Files, File{
+						File: []TextChunkMessage{{Metadata: googleFile}},
+					})
+				}
+				continue
+			}
+
+			createdTime, err := time.Parse(time.RFC3339, change.File.CreatedTime)
+			if err != nil {
+				createdTime = time.Now()
+			}
+
+			modifiedTime, err := time.Parse(time.RFC3339, change.File.ModifiedTime)
+			if err != nil {
+				modifiedTime = time.Now()
+			}
+
+			hierarchy := ""
+			if len(change.File.Parents) > 0 {
+				hierarchy = strings.Join(change.File.Parents, "/")
+			}
+
+			if change.File.Trashed || change.Removed {
+				exist = false
+			}
+
+			googleFile := Metadata{
+				DateCreated:      createdTime,
+				DateLastModified: modifiedTime,
+				UserID:           userID,
+				ResourceID:       change.File.Id,
+				Title:            change.File.Name,
+				ResourceType:     change.File.MimeType,
+				ChunkID:          "",
+				FileURL:          change.File.WebViewLink,
+				ChunkSize:        0,
+				ChunkNumber:      0,
+				FilePath:         hierarchy,
+				Platform:         "GOOGLE_DRIVE",
+				Provider:         "GOOGLE",
+				Exists:           exist,
+			}
+			fileList.Files = append(fileList.Files, File{
+				File: []TextChunkMessage{
+					{
+						Metadata: googleFile,
+						Content:  "",
+					},
+				},
+			})
+		}
+		if res.NextPageToken == "" {
+			pageToken = res.NewStartPageToken
+			return fileList, pageToken, nil
+		}
+		pageToken = res.NextPageToken
+	}
 }
 
 // ProcessAllGoogleDriveFiles processes all Google Drive files
@@ -149,7 +265,13 @@ func ProcessAllGoogleDriveFiles(ctx context.Context, client *http.Client, fileLi
 	processedList := ListofFiles{
 		Files: make([]File, len(fileList.Files)),
 	}
-	copy(processedList.Files, fileList.Files)
+
+	for i, file := range fileList.Files {
+		processedList.Files[i] = File{
+			File: make([]TextChunkMessage, len(file.File)),
+		}
+		copy(processedList.Files[i].File, file.File)
+	}
 	var firstErr error
 
 	for res := range resultChan {
@@ -158,8 +280,20 @@ func ProcessAllGoogleDriveFiles(ctx context.Context, client *http.Client, fileLi
 		}
 		processedList.Files[res.index] = res.file
 	}
-
 	return processedList, firstErr
+}
+
+// GetStartPageToken retrieves the start page token for a specific service and user
+func GetStartPageToken(ctx context.Context, client *http.Client) (string, error) {
+	srv, err := drive.NewService(ctx, option.WithHTTPClient(client))
+	if err != nil {
+		return "", fmt.Errorf("failed to create Google Drive service: %w", err)
+	}
+	changeToken, err := srv.Changes.GetStartPageToken().Do()
+	if err != nil {
+		return "", fmt.Errorf("unable to retrieve start page token: %v", err)
+	}
+	return changeToken.StartPageToken, nil
 }
 
 // RetrieveFromDrive goes to specfic retrieval

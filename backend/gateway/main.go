@@ -19,13 +19,15 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 type ServiceClients struct {
-	queryClient  pb.QueryServiceClient
-	authClient   pb.AuthenticationServiceClient
+	queryClient    pb.QueryServiceClient
+	authClient     pb.AuthenticationServiceClient
 	waitlistClient pb.WaitlistServiceClient
-	rabbitMQConn *amqp.Connection
+	crawlingClient pb.CrawlingServiceClient
+	rabbitMQConn   *amqp.Connection
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -243,12 +245,10 @@ func handleAddToWaitlist(clients *ServiceClients) http.HandlerFunc {
 		res, err := clients.waitlistClient.AddToWaitlist(r.Context(), &pb.AddToWaitlistRequest{
 			Email: addToWaitlistRequest.Email,
 		})
-		
 		if err != nil {
 			http.Error(w, "Failed to add to waitlist", http.StatusInternalServerError)
 			return
 		}
-		
 		httpResponse := &pb.HttpAddToWaitlistResponse{
 			Success: res.Success,
 			Message: res.Message,
@@ -350,6 +350,37 @@ func handleVerifyGenerator(clients *ServiceClients) http.HandlerFunc {
 	}
 }
 
+func handleManualCrawlGenerator(clients *ServiceClients) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log.Println("Received manual crawl request")
+
+		ctx := r.Context()
+		auth_header := r.Header.Get("Authorization")
+		auth_token := strings.TrimPrefix(auth_header, "Bearer ")
+		verifyRes, err := clients.authClient.Verify(ctx, &pb.VerifyRequest{
+			Token: auth_token,
+		})
+
+		if err != nil || !verifyRes.Valid {
+			log.Println("Invalid token")
+			http.Error(w, "Invalid token", http.StatusUnauthorized)
+			return
+		}
+
+		res, err := clients.crawlingClient.ManualCrawler(ctx, &pb.ManualCrawlerRequest{
+			UserId: verifyRes.UserId,
+		})
+		if err != nil {
+			log.Printf("Error updating crawler: %v", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(res)
+	}
+}
+
 func main() {
 	// Load .env variables
 	err := config.LoadSharedConfig()
@@ -408,6 +439,17 @@ func main() {
 	defer authConn.Close()
 	authServiceClient := pb.NewAuthenticationServiceClient(authConn)
 
+	//Connect to the crawling service
+	crawlingConn, err := grpc.NewClient(
+		os.Getenv("CRAWLING_ADDRESS"),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		log.Fatalf("Failed to establish connection with crawling-service: %v", err)
+	}
+	defer crawlingConn.Close()
+	crawlingServiceClient := pb.NewCrawlingServiceClient(crawlingConn)
+
 	// Connect to the waitlist service
 	waitlistConn, err := grpc.NewClient(
 		os.Getenv("WAITLIST_ADDRESS"),
@@ -423,10 +465,11 @@ func main() {
 
 	// Save the service clients for future use
 	serviceClients := &ServiceClients{
-		queryClient:  queryServiceClient,
-		authClient:   authServiceClient,
+		queryClient:    queryServiceClient,
+		authClient:     authServiceClient,
 		waitlistClient: waitlistServiceClient,
-		rabbitMQConn: rabbitMQConn,
+		crawlingClient: crawlingServiceClient,
+		rabbitMQConn:   rabbitMQConn,
 	}
 	log.Print("Server has established connection with other services")
 
@@ -438,6 +481,7 @@ func main() {
 	mux.HandleFunc("POST /api/login", handleLoginGenerator(serviceClients))
 	mux.HandleFunc("POST /api/verify", handleVerifyGenerator(serviceClients))
 	mux.HandleFunc("POST /api/waitlist", handleAddToWaitlist(serviceClients))
+	mux.HandleFunc("POST /api/manualcrawl", authMiddleware(handleManualCrawlGenerator(serviceClients), serviceClients))
 
 	httpPort := os.Getenv("GATEWAY_ADDRESS")
 	server := &http.Server{

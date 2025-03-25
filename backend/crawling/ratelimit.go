@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"golang.org/x/time/rate"
 )
@@ -38,9 +39,11 @@ type RateLimiterService struct {
 func NewRateLimiterService() *RateLimiterService {
 	// User-specific rate limits
 	userConfigs := map[string]RateLimitConfig{
-		"GOOGLE_DOCS":   {50, 300},  // 5 requests per second per user
-		"GOOGLE_SLIDES": {10, 300},  // 10 requests per second per user
-		"GOOGLE_GMAIL":  {250, 500}, // 250 requests per second per user
+		"GOOGLE_DOCS":   {50, 300},   // 50 requests per second per user
+		"GOOGLE_SLIDES": {10, 300},   // 10 requests per second per user
+		"GOOGLE_GMAIL":  {250, 500},  // 250 requests per second per user
+		"GOOGLE_DRIVE":  {100, 3000}, // 100 requests per second per user
+		"NOTION":        {10, 100},   // 10 requests per second per user
 	}
 
 	// Project-wide rate limits
@@ -49,7 +52,7 @@ func NewRateLimiterService() *RateLimiterService {
 		"GOOGLE_SLIDES": {50, 1500},     // 50 requests per second across all users
 		"GOOGLE_DRIVE":  {200, 6000},    // 200 requests per second across all users
 		"GOOGLE_GMAIL":  {20000, 40000}, // 20000 requests per second across all users
-		//"CALENDAR":     {50, 50},   // 50 requests per second across all users
+		"NOTION":        {100, 1000},    // 100 requests per second across all users
 	}
 
 	projectLimiters := make(map[string]*rate.Limiter)
@@ -112,15 +115,32 @@ func (s *RateLimiterService) GetProjectLimiter(service string) *rate.Limiter {
 
 // Wait respects both project-wide and per-user rate limits
 func (s *RateLimiterService) Wait(ctx context.Context, service, userID string) error {
-	projectLimiter := s.GetProjectLimiter(service)
-	if err := projectLimiter.Wait(ctx); err != nil {
-		return fmt.Errorf("project-wide rate limit exceeded for %s: %w", service, err)
+	maxRetries := 3
+	backoff := 1 * time.Second
+
+	for retry := 0; retry < maxRetries; retry++ {
+		projectLimiter := s.GetProjectLimiter(service)
+		if err := projectLimiter.Wait(ctx); err != nil {
+			if retry < maxRetries-1 {
+				time.Sleep(backoff)
+				backoff *= 2
+				continue
+			}
+			return fmt.Errorf("project-wide rate limit exceeded for %s: %w", service, err)
+		}
+
+		userLimiter := s.GetUserLimiter(service, userID)
+		if err := userLimiter.Wait(ctx); err != nil {
+			if retry < maxRetries-1 {
+				time.Sleep(backoff)
+				backoff *= 2
+				continue
+			}
+			return fmt.Errorf("user rate limit exceeded for %s:%s: %w", service, userID, err)
+		}
+
+		return nil
 	}
 
-	userLimiter := s.GetUserLimiter(service, userID)
-	if err := userLimiter.Wait(ctx); err != nil {
-		return fmt.Errorf("user rate limit exceeded for %s:%s: %w", service, userID, err)
-	}
-
-	return nil
+	return fmt.Errorf("max retries exceeded for rate limiting")
 }

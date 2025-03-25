@@ -6,33 +6,35 @@ import (
 	"net/http"
 )
 
-// GoogleCrawler crawls Google services based on provided OAuth scopes.
-func GoogleCrawler(ctx context.Context, client *http.Client, scopes []string) error {
+// GoogleCrawler crawls Google Drive and Gmail
+func (s *crawlingServer) GoogleCrawler(ctx context.Context, client *http.Client, userID string, scopes []string) (ListofFiles, error) {
+	var files ListofFiles
 	scopeSet := make(map[string]struct{}, len(scopes))
 	for _, scope := range scopes {
 		scopeSet[scope] = struct{}{}
 	}
 
-	crawlers := map[string]func(context.Context, *http.Client) error{
-		"https://www.googleapis.com/auth/drive.readonly":    CrawlGoogleDrive,
-		"https://www.googleapis.com/auth/gmail.readonly":    CrawlGmail,
-		"https://www.googleapis.com/auth/calendar.readonly": CrawlGoogleCalendar,
+	crawlers := map[string]func(context.Context, *http.Client, string) (ListofFiles, error){
+		"https://www.googleapis.com/auth/drive.readonly": s.CrawlGoogleDrive,
+		"https://www.googleapis.com/auth/gmail.readonly": s.CrawlGmail,
 	}
 
 	for scope, crawler := range crawlers {
 		if _, ok := scopeSet[scope]; ok {
-			err := crawler(ctx, client)
+			processedFiles, err := crawler(ctx, client, userID)
 			if err != nil {
-				log.Printf("%s crawl failed: %v", scope, err)
-				return err
+				log.Printf("%s crawl failed for user %s: %v", scope, userID, err)
+				return ListofFiles{}, err
 			}
-			log.Printf("%s crawl completed", scope)
-		} else {
-			log.Printf("Skipping %s crawl: scope not provided", scope)
+			files.Files = append(files.Files, processedFiles.Files...)
 		}
 	}
+	return files, nil
+}
 
-	return nil
+func UpdateCrawlGoogle(ctx context.Context, client *http.Client, service string, userID string, retrievalToken string) (string, ListofFiles, error) {
+	newRetrievalToken, processedFiles, err := UpdateCrawlGoogleDrive(ctx, client, userID, retrievalToken)
+	return newRetrievalToken, processedFiles, err
 }
 
 func RetrieveGoogleCrawler(ctx context.Context, client *http.Client, metadata Metadata) (TextChunkMessage, error) {
@@ -43,9 +45,4 @@ func RetrieveGoogleCrawler(ctx context.Context, client *http.Client, metadata Me
 		return RetrieveFromGmail(ctx, client, metadata)
 	}
 	return TextChunkMessage{}, nil
-}
-
-// TODO: Crawls Google Calendar
-func CrawlGoogleCalendar(ctx context.Context, client *http.Client) error {
-	return nil
 }

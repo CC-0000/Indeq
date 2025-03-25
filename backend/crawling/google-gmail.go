@@ -17,37 +17,15 @@ type CrawlResult struct {
 	Err   error
 }
 
-func CrawlGmail(ctx context.Context, client *http.Client) error {
-	print("Crawling Google Gmail...")
-
-	resultChan := make(chan CrawlResult)
-
-	go func() {
-		result, err := GetGoogleGmailList(ctx, client)
-		resultChan <- CrawlResult{Files: result.Files, Err: err}
-	}()
-
-	result := <-resultChan
-	if result.Err != nil {
-		return fmt.Errorf("error retrieving Google Gmail file list: %w", result.Err)
+func (s *crawlingServer) CrawlGmail(ctx context.Context, client *http.Client, userID string) (ListofFiles, error) {
+	result, err := GetGoogleGmailList(ctx, client, userID)
+	if err != nil {
+		return ListofFiles{}, fmt.Errorf("error retrieving Google Gmail file list: %w", err)
 	}
-
-	print("Printing Crawling google Gmail \n")
-	for _, file := range result.Files {
-		for _, chunk := range file.File {
-			fmt.Printf("Email ID: %s\nFrom: %s\nContent: %s\nCreated: %s\nFileURL: %s\n\n",
-				chunk.Metadata.ResourceID,
-				chunk.Metadata.Title,
-				chunk.Content,
-				chunk.Metadata.DateCreated.Format(time.RFC1123),
-				chunk.Metadata.FileURL,
-			)
-		}
-	}
-	return nil
+	return result, nil
 }
 
-func GetGoogleGmailList(ctx context.Context, client *http.Client) (ListofFiles, error) {
+func GetGoogleGmailList(ctx context.Context, client *http.Client, userID string) (ListofFiles, error) {
 	srv, err := gmail.NewService(ctx, option.WithHTTPClient(client))
 	if err != nil {
 		return ListofFiles{}, fmt.Errorf("failed to create Gmail service: %w", err)
@@ -96,7 +74,7 @@ func GetGoogleGmailList(ctx context.Context, client *http.Client) (ListofFiles, 
 		go func() {
 			defer wg.Done()
 			for msg := range workerChan {
-				file, err := processMessage(msg)
+				file, err := processMessage(msg, userID)
 				if err == nil {
 					mu.Lock()
 					files = append(files, file)
@@ -127,7 +105,8 @@ func GetGoogleGmailList(ctx context.Context, client *http.Client) (ListofFiles, 
 	return ListofFiles{Files: files}, nil
 }
 
-func processMessage(fullMsg *gmail.Message) (File, error) {
+// processMessage processes a single email message
+func processMessage(fullMsg *gmail.Message, userID string) (File, error) {
 	var subject, from string
 	for _, header := range fullMsg.Payload.Headers {
 		switch header.Name {
@@ -149,7 +128,7 @@ func processMessage(fullMsg *gmail.Message) (File, error) {
 	metadata := Metadata{
 		DateCreated:      createdTime,
 		DateLastModified: createdTime,
-		UserID:           "a",
+		UserID:           userID,
 		ResourceID:       fullMsg.Id,
 		Title:            from + " : " + subject,
 		ResourceType:     "gmail/message",
@@ -157,7 +136,7 @@ func processMessage(fullMsg *gmail.Message) (File, error) {
 		ChunkSize:        0,
 		ChunkNumber:      0,
 		FileURL:          "https://mail.google.com/mail/u/0/#inbox/" + fullMsg.Id,
-		Hierarchy:        "",
+		FilePath:         "",
 		Platform:         "GOOGLE_GMAIL",
 		Provider:         "GOOGLE",
 	}
@@ -205,7 +184,7 @@ func RetrieveFromGmail(ctx context.Context, client *http.Client, metadata Metada
 		return TextChunkMessage{}, fmt.Errorf("failed to retrieve email with ID %s: %w", metadata.ResourceID, err)
 	}
 
-	file, err := processMessage(fullMsg)
+	file, err := processMessage(fullMsg, metadata.UserID)
 	if err != nil {
 		return TextChunkMessage{}, err
 	}

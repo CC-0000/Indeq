@@ -8,21 +8,46 @@ package api;
 
 // CrawlingService definition
 service CrawlingService {
-    rpc GetAccessToken (GetAccessTokenRequest) returns (AccessTokenResponse);
+    rpc GetInitalCrawler (GetInitalCrawlerRequest) returns (GetInitalCrawlerResponse);
     rpc SendChunkToVector (TextChunkMessage) returns (SendChunkToVectorResponse);
+    rpc ManualCrawler (ManualCrawlerRequest) returns (ManualCrawlerResponse);
 }
 
 // Request message for getting access token from Integration Service
-message GetAccessTokenRequest {
+message GetInitalCrawlerRequest {
     string user_id = 1;      // Unique user identifier, e.g., "4i23uh5o9385h6dahl1"
-    string provider = 2;     // Provider name, e.g., "GOOGLE"
+    string access_token = 2; // Access token, e.g., "4i23uh5i-2342-g452-g5gg-o9385h6dahl1"
+    string provider = 3;     // Provider name, e.g., "GOOGLE"
+    repeated string scopes = 4; // Scopes required for the provider
 }
 
 // Response message from Integration Service with access token
-message AccessTokenResponse {
+message GetInitalCrawlerResponse {
     bool success = 1;        // Indicates if the request succeeded, e.g., true
-    string access_token = 2; // Access token, e.g., "4i23uh5i-2342-g452-g5gg-o9385h6dahl1"
-    string error = 3;        // Error message if success is false
+    string error = 2;        // Error message if success is false
+}
+
+// Request message for updating crawler
+message ManualCrawlerRequest {
+    string user_id = 1;      // Unique user identifier
+}
+
+// Response message from updating crawler
+message ManualCrawlerResponse {
+    bool success = 1;        // Indicates if the update succeeded
+    string error = 2;        // Error message if success is false
+}
+
+// Message for sending text chunks to Vector Service
+message TextChunkMessage {
+    Metadata metadata = 1;      // Metadata about the file and chunk
+    string content = 2;         // Actual content, e.g., "This is the first part..."
+}
+
+// Response from Vector Service after receiving a chunk
+message SendChunkToVectorResponse {
+    bool success = 1;           // e.g., true if chunk was processed
+    string error = 3;           // e.g., "Processing failed" if success is false
 }
 
 // Enum for supported platforms
@@ -48,16 +73,4 @@ message Metadata {
     uint64 chunk_number = 10;   // Sequence number, e.g., 1
     string title = 11;          // e.g., "My Journal"
     Platform platform = 12;     // e.g., PLATFORM_GOOGLE_DRIVE
-}
-
-// Message for sending text chunks to Blank Service
-message TextChunkMessage {
-    Metadata metadata = 1;      // Metadata about the file and chunk
-    string content = 2;         // Actual content, e.g., "This is the first part..."
-}
-
-// Response from Vector Service after receiving a chunk
-message SendChunkToVectorResponse {
-    bool success = 1;           // e.g., true if chunk was processed
-    string error = 3;           // e.g., "Processing failed" if success is false
 }
