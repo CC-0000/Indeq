@@ -9,6 +9,7 @@ import time
 import logging
 import os
 from dotenv import load_dotenv
+import base64
 
 # Import the generated gRPC code
 import embedding_pb2
@@ -24,9 +25,10 @@ MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "sentence-transformers/static-ret
 GRPC_PORT = os.getenv("EMBEDDING_PORT", "")
 MAX_WORKERS = int(os.getenv("EMBEDDING_MAX_WORKERS", "10"))
 GRACEFUL_SHUTDOWN_TIMEOUT = int(os.getenv("EMBEDDING_GRACEFUL_SHUTDOWN_TIMEOUT", "30"))
+EMBEDDING_CRT = os.getenv("EMBEDDING_CRT", "")
+EMBEDDING_KEY = os.getenv("EMBEDDING_KEY", "")
 
 # Define model cache directory as a relative path
-# This will create the cache in the current working directory of the container (most likely going to be /app)
 MODEL_CACHE_DIR = os.path.join(os.getcwd(), "model_cache")
 
 class EmbeddingServiceServicer(embedding_pb2_grpc.EmbeddingServiceServicer):
@@ -97,11 +99,18 @@ def serve():
         EmbeddingServiceServicer(), server
     )
     
-    # Listen on all interfaces (important for Docker)
-    server.add_insecure_port(f'[::]{GRPC_PORT}')
+    # Decode the base64 encoded certificate and key
+    server_cert = base64.b64decode(EMBEDDING_CRT)
+    server_key = base64.b64decode(EMBEDDING_KEY)
+    
+    # Create SSL server credentials
+    server_credentials = grpc.ssl_server_credentials([(server_key, server_cert)])
+    
+    # Listen on all interfaces with SSL (important for Docker)
+    server.add_secure_port(f'[::]{GRPC_PORT}', server_credentials)
     server.start()
     
-    logger.info(f"Server started, listening on port {GRPC_PORT}")
+    logger.info(f"Server started, listening on port {GRPC_PORT} with SSL")
 
     # Setup signal handlers for graceful shutdown
     def graceful_shutdown(signum, frame):
