@@ -7,47 +7,25 @@ import "api/kafka.proto";
 package api;
 
 service VectorService {
-    rpc DeleteFile(VectorFileDeleteRequest) returns (VectorFileDeleteReponse);
+    rpc DeleteFiles(VectorFileDeleteRequest) returns (VectorFileDeleteResponse);
     rpc GetTopKChunks(GetTopKChunksRequest) returns (GetTopKChunksResponse);
-    rpc SetupCollection(SetupCollectionRequest) returns (SetupCollectionResponse);
-    rpc SetupPartition(SetupPartitionRequest) returns (SetupPartitionResponse);
 }
 
 message VectorFileDeleteRequest {
     string user_id = 1;
     Platform platform = 2;
-    string file_path = 3;   // file paths should be unique per platform
+    bool exclusive = 3;
+    repeated string files = 4; // file paths 
 }
 
-message VectorFileDeleteReponse {
-    bool success = 1;
-    string error = 2;
-}
+message VectorFileDeleteResponse {}
 
 message GetTopKChunksRequest {
     string user_id = 1;
     string prompt = 2;
+    int32 k = 3;
 }
 
 message GetTopKChunksResponse {
-    repeated TextChunkMessage top_k_vectors = 1;
-    string error = 2;
-}
-
-message SetupCollectionRequest {
-    string collectionName = 2;
-}
-
-message SetupCollectionResponse {
-    bool success = 1;
-    string error = 2;
-}
-
-message SetupPartitionRequest {
-    string user_id = 1;
-}
-
-message SetupPartitionResponse {
-    bool success = 1;
-    string error = 2;
+    repeated Metadata top_k_metadatas = 1;
 }

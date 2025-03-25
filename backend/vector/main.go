@@ -2,199 +2,43 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log"
 	"net"
 	"os"
+	"os/signal"
 	"strconv"
-	"strings"
+	"syscall"
 	"time"
 
 	pb "github.com/cc-0000/indeq/common/api"
 
 	"github.com/cc-0000/indeq/common/config"
 	"github.com/milvus-io/milvus-sdk-go/v2/client"
-	"github.com/milvus-io/milvus-sdk-go/v2/entity"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/segmentio/kafka-go"
 )
 
 type vectorServer struct {
 	pb.UnimplementedVectorServiceServer
-	milvusClient client.Client
+	milvusClient    client.Client
+	embeddingConn   *grpc.ClientConn
+	embeddingClient pb.EmbeddingServiceClient
+	desktopWriter   *kafka.Writer
+	collectionName  string
 }
 
-func (s *vectorServer) DeleteFile(ctx context.Context, req *pb.VectorFileDeleteRequest) (*pb.VectorFileDeleteReponse, error) {
-	// UNTESTED
-	// collectionName := "user_" + strings.ReplaceAll(req.UserId, "-", "_")
-	collectionName := "collection_1"
-	filter := fmt.Sprintf("user_id == '%s' && file_id == '%s' && platform == %d", req.UserId, req.FilePath, req.Platform)
-	err := s.milvusClient.Delete(ctx, collectionName, "", filter)
-	if err != nil {
-		return &pb.VectorFileDeleteReponse{Success: false, Error: err.Error()}, fmt.Errorf("failed to delete data: %v", err.Error())
-	}
-
-	return nil, fmt.Errorf("")
-}
-
-func (s *vectorServer) GetTopKChunks(ctx context.Context, req *pb.GetTopKChunksRequest) (*pb.GetTopKChunksResponse, error) {
-	// TODO
-	return nil, fmt.Errorf("")
-}
-
-func (s *vectorServer) SetupCollection(ctx context.Context, req *pb.SetupCollectionRequest) (*pb.SetupCollectionResponse, error) {
-	collectionName := req.CollectionName
-	dimension, err := strconv.Atoi(os.Getenv("VECTOR_DIMENSION"))
-	if err != nil {
-		return &pb.SetupCollectionResponse{Success: false, Error: err.Error()}, fmt.Errorf("failed to create collection: %v", err)
-	}
-
-	idField := entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true).WithIsAutoID(true)
-	userIdField := entity.NewField().WithName("user_id").WithDataType(entity.FieldTypeVarChar).WithTypeParams(entity.TypeParamMaxLength, "255")
-	dateCreatedField := entity.NewField().WithName("date_created").WithDataType(entity.FieldTypeInt64)
-	dateLastModifiedField := entity.NewField().WithName("date_modified").WithDataType(entity.FieldTypeInt64)
-	fileIdField := entity.NewField().WithName("file_id").WithDataType(entity.FieldTypeVarChar).WithTypeParams(entity.TypeParamMaxLength, "255")
-	pageNumberField := entity.NewField().WithName("page_number").WithDataType(entity.FieldTypeInt64)
-	rowStartField := entity.NewField().WithName("row_start").WithDataType(entity.FieldTypeInt64)
-	colStartField := entity.NewField().WithName("col_start").WithDataType(entity.FieldTypeInt64)
-	rowEndField := entity.NewField().WithName("row_end").WithDataType(entity.FieldTypeInt64)
-	colEndField := entity.NewField().WithName("col_end").WithDataType(entity.FieldTypeInt64)
-	titleField := entity.NewField().WithName("title").WithDataType(entity.FieldTypeVarChar).WithTypeParams(entity.TypeParamMaxLength, "255")
-	platformField := entity.NewField().WithName("platform").WithDataType(entity.FieldTypeInt8)
-
-	vector := entity.NewField().WithName("vector").WithDataType(entity.FieldTypeFloatVector).WithDim(int64(dimension))
-
-	schema := entity.NewSchema().WithName(collectionName).
-		WithField(idField).
-		WithField(userIdField).
-		WithField(dateCreatedField).
-		WithField(dateLastModifiedField).
-		WithField(fileIdField).
-		WithField(pageNumberField).
-		WithField(rowStartField).
-		WithField(colStartField).
-		WithField(rowEndField).
-		WithField(colEndField).
-		WithField(titleField).
-		WithField(platformField).
-		WithField(vector)
-
-	err = s.milvusClient.CreateCollection(ctx, schema, 1, client.WithConsistencyLevel(entity.ClBounded))
-	if err != nil {
-		log.Print(err)
-		return &pb.SetupCollectionResponse{Success: false, Error: err.Error()}, fmt.Errorf("failed to create collection: %v", err)
-	}
-
-	// Create a vector index
-	index, err := entity.NewIndexHNSW(entity.IP, 32, 256) // {2-100, 100-500}
-	if err != nil {
-		log.Print(err)
-		return &pb.SetupCollectionResponse{Success: false, Error: err.Error()}, fmt.Errorf("failed to create index: %v", err)
-	}
-	err = s.milvusClient.CreateIndex(ctx, collectionName, "vector", index, false, client.WithIndexName("vector_index"))
-	if err != nil {
-		log.Print(err)
-		return &pb.SetupCollectionResponse{Success: false, Error: err.Error()}, fmt.Errorf("failed to set up index in database: %v", err)
-	}
-
-	return &pb.SetupCollectionResponse{Success: true}, nil
-}
-
-func (s *vectorServer) SetupPartition(ctx context.Context, req *pb.SetupPartitionRequest) (*pb.SetupPartitionResponse, error) {
-
-	// TODO: convert 1 collection set up to multi-collection, multi-partition, hash-based binning
-	// we have 5 collections on the zilliz free tier
-	// each collection can have 64 partitions
-	// partitionName := "user_" + strings.ReplaceAll(req.UserId, "-", "_") <-- example
-
-	// TEMPORARY
-	collectionName := "collection_1"
-	ok, err := s.milvusClient.HasCollection(ctx, collectionName)
-	if err != nil {
-		return &pb.SetupPartitionResponse{
-			Success: false,
-			Error:   err.Error(),
-		}, err
-	}
-	if !ok {
-		res, err := s.SetupCollection(ctx, &pb.SetupCollectionRequest{
-			CollectionName: collectionName,
-		})
-		if !res.Success || err != nil {
-			return &pb.SetupPartitionResponse{
-				Success: false,
-				Error:   err.Error(),
-			}, nil
-		}
-	}
-	return &pb.SetupPartitionResponse{
-		Success: true,
-	}, nil
-}
-
-// TEMPORARY
-func (s *vectorServer) findCollectionForPartition(ctx context.Context, partitionName string) (string, error) {
-	for i := range 5 {
-		collectionName := "collection_" + strconv.Itoa(i)
-		exists, err := s.milvusClient.HasCollection(ctx, collectionName)
-		if err != nil {
-			return "", err
-		}
-		if exists {
-			// collection exists check for the partition
-			exists, err = s.milvusClient.HasPartition(ctx, collectionName, partitionName)
-			if err != nil {
-				return "", err
-			}
-			if exists {
-				return collectionName, nil
-			}
-		}
-	}
-	return "", fmt.Errorf("there are no collections with the partition name: %v", partitionName)
-}
-
-func insertRow(ctx context.Context, milvusClient client.Client, textChunkMessage *pb.TextChunkMessage, embedding []float32) error {
-	collectionName := "user_" + strings.ReplaceAll(textChunkMessage.Metadata.UserId, "-", "_")
-	dimension, err := strconv.Atoi(os.Getenv("VECTOR_DIMENSION"))
-	if err != nil {
-		return err
-	}
-
-	if textChunkMessage.Metadata.DateCreated == nil {
-		textChunkMessage.Metadata.DateCreated = timestamppb.New(time.Unix(0, 0))
-	}
-	if textChunkMessage.Metadata.DateLastModified == nil {
-		textChunkMessage.Metadata.DateLastModified = timestamppb.New(time.Unix(0, 0))
-	}
-
-	resInsert, err := milvusClient.Insert(ctx,
-		collectionName,
-		"",
-		entity.NewColumnInt64("date_created", []int64{textChunkMessage.Metadata.DateCreated.Seconds}),
-		entity.NewColumnInt64("date_modified", []int64{textChunkMessage.Metadata.DateLastModified.Seconds}),
-		entity.NewColumnVarChar("file_id", []string{textChunkMessage.Metadata.FileId}),
-		entity.NewColumnInt64("page_number", []int64{int64(textChunkMessage.Metadata.Page)}),
-		entity.NewColumnInt64("row_start", []int64{int64(textChunkMessage.Metadata.RowStart)}),
-		entity.NewColumnInt64("col_start", []int64{int64(textChunkMessage.Metadata.ColStart)}),
-		entity.NewColumnInt64("row_end", []int64{int64(textChunkMessage.Metadata.RowEnd)}),
-		entity.NewColumnInt64("col_end", []int64{int64(textChunkMessage.Metadata.ColEnd)}),
-		entity.NewColumnVarChar("title", []string{textChunkMessage.Metadata.Title}),
-		entity.NewColumnInt8("platform", []int8{int8(textChunkMessage.Metadata.Platform)}),
-		entity.NewColumnFloatVector("vector", dimension, [][]float32{embedding}),
-	)
-	if err != nil {
-		return err
-	}
-	log.Println(resInsert.Name(), resInsert.Len())
-	return nil
-}
-
-func startTextChunkProcess(ctx context.Context, milvusClient client.Client) (error error) {
+// func(context):
+//   - starts a kafka reader on the text-chunks topic to read in text chunks that need processing
+//   - generates embeddings for the text chunks and sends signals back to the correct topic signalling processing is done
+//   - this is a blocking call
+//   - assumes: you will catch any errors and deal with it in th parent function
+func (s *vectorServer) startTextChunkProcess(ctx context.Context) error {
+	// create a kafka reader to read ALL incoming chunks, regardless of origin
 	broker, ok := os.LookupEnv("KAFKA_BROKER_ADDRESS")
 	if !ok {
 		return fmt.Errorf("failed to retrieve kafka broker address")
@@ -202,43 +46,272 @@ func startTextChunkProcess(ctx context.Context, milvusClient client.Client) (err
 
 	reader := kafka.NewReader(kafka.ReaderConfig{
 		Brokers:  []string{broker},
-		GroupID:  "vector-readers",
+		GroupID:  "vector-readers", // other nodes can also join this consumer group
 		Topic:    "text-chunks",
 		MaxBytes: 10e6, // maximum batch size 10MB
 	})
 	defer reader.Close()
 
+	// start a goroutine to read the messages and pipe them into channels
+	messageCh := make(chan kafka.Message)
+	errorCh := make(chan error)
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				msg, err := reader.ReadMessage(ctx)
+				if err != nil {
+					errorCh <- err
+				} else {
+					messageCh <- msg
+				}
+			}
+		}
+	}()
+
+	batchSize, err := strconv.Atoi(os.Getenv("VECTOR_BATCH_SIZE"))
+	if err != nil {
+		return fmt.Errorf("failed to retrieve env variable vector batch size: %w", err)
+	}
+
+	timeoutNum, err := strconv.Atoi(os.Getenv("VECTOR_BATCH_TIMEOUT"))
+	if err != nil {
+		return fmt.Errorf("failed to retrieve env variable vector batch timeout: %w", err)
+	}
+	timeout := time.Duration(timeoutNum) * time.Second
+
+	batch := make([]*pb.TextChunkMessage, 0, batchSize)
+	var timerCh <-chan time.Time
+
+	// here we check the channels
 	for {
+		// we have a message in the batch so we start counting down
+		if len(batch) > 0 && timerCh == nil {
+			timerCh = time.After(timeout)
+		}
+
 		select {
 		case <-ctx.Done():
 			log.Print("Shutting down text chunk consumer...")
 			return nil
 		default:
-			// Read message from stream
-			msg, err := reader.ReadMessage(ctx)
-			if err != nil {
-				log.Printf("Consumer error: %v", err)
-				continue
-			}
+			select {
+			// timer went off so we want to send the batch
+			case <-timerCh:
+				err := s.processBatch(ctx, batch)
+				if err != nil {
+					log.Printf("failed to process batch after timer: %v", err)
+					continue
+				} else {
+					batch = batch[:0]
+					timerCh = nil
+				}
+			// an error was detected; we want to log this
+			case err := <-errorCh:
+				if err != nil {
+					log.Printf("encountered error while reading from text chunk kafka stream: %v", err)
+					continue
+				}
+			// a message was detected; based on the content, we will do something...
+			case msg := <-messageCh:
+				var textChunk pb.TextChunkMessage
+				if err := proto.Unmarshal(msg.Value, &textChunk); err != nil {
+					log.Printf("Error unmarshalling message: %v", err)
+					continue
+				}
 
-			// Parse message out
-			var textChunk pb.TextChunkMessage
-			proto.Unmarshal(msg.Value, &textChunk)
+				// check if file is done or if crawling is done, or if we're just processing a text chunk
+				if textChunk.Content == "<file_done>" {
+					// we want fire off the batch immediately to finish the rest of this file's chunks
+					err := s.processBatch(ctx, batch)
+					if err != nil {
+						log.Printf("failed to process batch after file_done signal: %v", err)
+						continue
+					} else {
+						batch = batch[:0]
+						timerCh = nil
+					}
 
-			// Vectorize it by sending it to an embedding model
-			embedding, err := GetEmbedding(ctx, textChunk.Content)
-			if err != nil {
-				log.Print(err)
-				continue
-			}
+					if textChunk.Metadata == nil {
+						log.Print("no metadata detected for this text chunk, aborting the file_done signal")
+						continue
+					}
 
-			// Store the vector in our vector database
-			err = insertRow(ctx, milvusClient, &textChunk, embedding)
-			if err != nil {
-				log.Print(err)
-				continue
+					// Write the message to the proper stream to let them know we are done
+					if textChunk.Metadata.Platform == pb.Platform_PLATFORM_LOCAL {
+						fileDoneMessage := &pb.FileDoneProcessing{
+							UserId:   textChunk.Metadata.UserId,
+							FilePath: textChunk.Metadata.FilePath,
+						}
+						byteMessage, err := proto.Marshal(fileDoneMessage)
+						if err != nil {
+							log.Print("failed to serialized file done message: ", err)
+							continue
+						}
+						message := kafka.Message{
+							Value: byteMessage,
+						}
+
+						if err := s.desktopWriter.WriteMessages(ctx, message); err != nil {
+							log.Print("error: ", err)
+							continue
+						}
+					} else if textChunk.Metadata.Platform == pb.Platform_PLATFORM_GOOGLE_DRIVE {
+						// TODO: send the signals to other platform topics
+					}
+				} else if textChunk.Content == "<crawl_done>" {
+					if textChunk.Metadata == nil {
+						log.Print("no metadata detected for this textchunk")
+						continue
+					}
+
+					// write the message to the proper stream
+					if textChunk.Metadata.Platform == pb.Platform_PLATFORM_LOCAL {
+						fileDoneMessage := &pb.FileDoneProcessing{
+							UserId:       textChunk.Metadata.UserId,
+							CrawlingDone: true,
+						}
+						byteMessage, err := proto.Marshal(fileDoneMessage)
+						if err != nil {
+							log.Print("failed to serialized file done message: ", err)
+							continue
+						}
+						message := kafka.Message{
+							Value: byteMessage,
+						}
+
+						if err := s.desktopWriter.WriteMessages(ctx, message); err != nil {
+							log.Print("error: ", err)
+							continue
+						}
+					} else if textChunk.Metadata.Platform == pb.Platform_PLATFORM_GOOGLE_DRIVE {
+						// TODO: send the signals to other platform topics
+					}
+				} else {
+					// Add the textchunk to the batch
+					batch = append(batch, &textChunk)
+
+					// If batch is full, process it
+					if len(batch) >= batchSize {
+						err := s.processBatch(ctx, batch)
+						if err != nil {
+							log.Printf("failed to process batch after overflow: %v", err)
+							continue
+						} else {
+							batch = batch[:0]
+							timerCh = nil
+						}
+					}
+				}
 			}
 		}
+	}
+}
+
+// func(client TLS config)
+//   - connects to the embedding service using the provided client tls config and saves the connection and function interface to the server struct
+//   - assumes: the connection will be closed in the parent function at some point
+func (s *vectorServer) connectToEmbeddingService(tlsConfig *tls.Config) {
+	// connect to the embedding service
+	embeddingAddy, ok := os.LookupEnv("EMBEDDING_ADDRESS")
+	if !ok {
+		log.Fatal("failed to retrieve desktop address for connection")
+	}
+	embeddingConn, err := grpc.NewClient(
+		embeddingAddy,
+		grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)),
+	)
+	if err != nil {
+		log.Fatalf("Failed to establish connection with embedding-service: %v", err)
+	}
+
+	s.embeddingConn = embeddingConn
+	s.embeddingClient = pb.NewEmbeddingServiceClient(embeddingConn)
+}
+
+// func()
+//   - creates a kafka writer interface for writing desktop signals like (file_done, crawl_done, etc.)
+//   - assumes: that a topic called 'desktop-signals' has already been created elsewhere (like in an init routine)
+//   - assumes: you will close the writer elsewhere in the parent once you are done using it
+func (s *vectorServer) createDesktopWriter() {
+	broker, ok := os.LookupEnv("KAFKA_BROKER_ADDRESS")
+	if !ok {
+		log.Fatal("failed to retrieve kafka broker address")
+	}
+
+	desktopWriter := &kafka.Writer{
+		Addr:         kafka.TCP(broker),
+		Topic:        "desktop-signals",   // this writer is specifically directed towards desktop signals (file_done, crawl_done, etc.)
+		Balancer:     &kafka.LeastBytes{}, // routes to the least congested partition
+		BatchSize:    10,
+		BatchTimeout: 1 * time.Second,
+		Compression:  kafka.Lz4,
+		Async:        true, // will not wait for the batch timeout to send messages
+		Completion: func(messages []kafka.Message, err error) {
+			if err != nil {
+				log.Printf("encountered error while writing message to desktop-signals: %v", err)
+			}
+		},
+	}
+
+	s.desktopWriter = desktopWriter
+}
+
+// func(context)
+//   - connects to the milvus instance using an api key from .env variables
+//   - assumes: the client will be closed in the parent function some point
+func (s *vectorServer) connectToMilvus(ctx context.Context) {
+	milvusClient, err := client.NewClient(ctx, client.Config{
+		Address: os.Getenv("ZILLIZ_ADDRESS"),
+		APIKey:  os.Getenv("ZILLIZ_API_KEY"),
+	})
+	if err != nil {
+		log.Fatalf("failed to connect to the milvus instance: %v", err)
+	}
+
+	s.milvusClient = milvusClient
+}
+
+// func()
+//   - sets up the gRPC server, connects it with the global struct, and TLS
+//   - assumes: you will call grpcServer.GracefulStop() in the parent function at some point
+func (s *vectorServer) createGRPCServer() *grpc.Server {
+	// set up TLS for the gRPC server and serve it
+	tlsConfig, err := config.LoadServerTLSFromEnv("VECTOR_CRT", "VECTOR_KEY")
+	if err != nil {
+		log.Fatalf("Error loading TLS config for vector service: %v", err)
+	}
+
+	opts := []grpc.ServerOption{
+		grpc.Creds(credentials.NewTLS(tlsConfig)),
+	}
+	grpcServer := grpc.NewServer(opts...)
+	pb.RegisterVectorServiceServer(grpcServer, s)
+
+	return grpcServer
+}
+
+// func(pointer to a fully set up grpc server)
+//   - starts the vector-service grpc server
+//   - this is a blocking call
+func (s *vectorServer) startGRPCServer(grpcServer *grpc.Server) {
+	grpcAddress, ok := os.LookupEnv("VECTOR_PORT")
+	if !ok {
+		log.Fatal("failed to find the vector service port in env variables")
+	}
+
+	listener, err := net.Listen("tcp", grpcAddress)
+	if err != nil {
+		log.Fatalf("Failed to listen: %v", err)
+	}
+	defer listener.Close()
+	log.Printf("Vector gRPC Service listening on %v\n", listener.Addr())
+
+	if err := grpcServer.Serve(listener); err != nil {
+		log.Fatalf("Failed to serve: %v", err)
 	}
 }
 
@@ -246,7 +319,9 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	log.Println("Starting the vector server...")
+	// graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	// Load the .env file
 	err := config.LoadSharedConfig()
@@ -254,42 +329,47 @@ func main() {
 		log.Fatal("Error loading .env file")
 	}
 
-	grpcAddress := os.Getenv("VECTOR_PORT")
-
-	tlsConfig, err := config.LoadServerTLSFromEnv("VECTOR_CRT", "VECTOR_KEY")
+	clientTlsConfig, err := config.LoadClientTLSFromEnv("VECTOR_CRT", "VECTOR_KEY", "CA_CRT")
 	if err != nil {
-		log.Fatal("Error loading TLS config for vector service")
+		log.Fatal("Error loading TLS client config for vector service")
 	}
 
-	// Initialize milvus client
-	milvusClient, err := client.NewClient(ctx, client.Config{
-		Address: os.Getenv("ZILLIZ_ADDRESS"),
-		APIKey:  os.Getenv("ZILLIZ_API_KEY"),
-	})
-	if err != nil {
-		log.Fatal(err)
+	// initialize the vector server struct with a hardcoded collection name
+	server := &vectorServer{
+		collectionName: "collection_1",
 	}
-	defer milvusClient.Close()
 
-	go startTextChunkProcess(ctx, milvusClient)
+	// connect to milvus db
+	server.connectToMilvus(ctx)
+	defer server.milvusClient.Close()
 
-	listener, err := net.Listen("tcp", grpcAddress)
-	if err != nil {
-		log.Fatalf("Failed to listen: %v", err)
+	// set up our collection if need be
+	if err := server.setupCollection(ctx, server.collectionName); err != nil {
+		log.Fatalf("Error when setting up collection in our milvus database: %v", err)
 	}
-	defer listener.Close()
 
-	log.Println("Creating the vector server")
+	// start grpc server
+	grpcServer := server.createGRPCServer()
+	go server.startGRPCServer(grpcServer)
+	defer grpcServer.GracefulStop()
 
-	opts := []grpc.ServerOption{
-		grpc.Creds(credentials.NewTLS(tlsConfig)),
-	}
-	grpcServer := grpc.NewServer(opts...)
-	pb.RegisterVectorServiceServer(grpcServer, &vectorServer{milvusClient: milvusClient})
-	log.Printf("Vector Service listening on %v\n", listener.Addr())
-	if err := grpcServer.Serve(listener); err != nil {
-		log.Fatalf("Failed to serve: %v", err)
-	} else {
-		log.Printf("Vector Service served on %v\n", listener.Addr())
-	}
+	// connect to the embedding gRPC service
+	server.connectToEmbeddingService(clientTlsConfig)
+	defer server.embeddingConn.Close()
+
+	// connect to apache kafka
+	server.createDesktopWriter()
+	defer server.desktopWriter.Close()
+
+	// TODO: create other writers to signal for google drive, microsoft office, notion, etc.
+
+	// start the kafka reader to process incoming chunks
+	go func() {
+		if err := server.startTextChunkProcess(ctx); err != nil {
+			log.Printf("encountered error in text chunk goroutine: %v", err)
+		}
+	}()
+
+	<-sigChan // TODO: implement worker groups
+	log.Print("gracefully shutting down...")
 }

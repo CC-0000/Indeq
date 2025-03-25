@@ -107,10 +107,11 @@ func (s *desktopServer) handleCrawlRequest(client mqtt.Client, msg mqtt.Message)
 	}
 
 	// also delete all vectors associated with the deleted files
-	if _, err = s.vectorService.DeleteFiles(ctx, &pb.VectorBulkFileDeleteRequest{
-		UserId:      userID,
-		Platform:    pb.Platform_PLATFORM_LOCAL,
-		FilesToKeep: toKeepPaths,
+	if _, err = s.vectorService.DeleteFiles(ctx, &pb.VectorFileDeleteRequest{
+		UserId:    userID,
+		Platform:  pb.Platform_PLATFORM_LOCAL,
+		Files:     toKeepPaths,
+		Exclusive: true,
 	}); err != nil {
 		log.Printf("failed to delete vectors associated with the files: %s", err)
 		return
