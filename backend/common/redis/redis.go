@@ -2,8 +2,9 @@ package redis
 
 import (
 	"context"
-	"fmt"
+	"fmt"	
 	"log"
+	"os"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -13,10 +14,10 @@ type RedisClient struct {
 	Client *redis.Client
 }
 
-func NewRedisClient(ctx context.Context, addr string) (*RedisClient, error) {
+func NewRedisClient(ctx context.Context) (*RedisClient, error) {
 	rdb := redis.NewClient(&redis.Options{
-		Addr: addr,
-		Password: "",
+		Addr: os.Getenv("REDIS_ADDRESS"),
+		Password: os.Getenv("REDIS_PASSWORD"),
 		DB: 0,
 	})
 
@@ -29,13 +30,13 @@ func NewRedisClient(ctx context.Context, addr string) (*RedisClient, error) {
 }
 
 func (c *RedisClient) StoreOAuthState(ctx context.Context, state string, userId string) error {
-	log.Println("Storing oauth state: ", state, userId)
+	log.Printf("Storing oauth state: %s for user %s", state, userId)
     key := fmt.Sprintf("oauth:state:%s", state)
     err := c.Client.Set(ctx, key, userId, 5*time.Minute).Err()
 	if err != nil {
 		return fmt.Errorf("failed to store oauth state: %w", err)
 	}
-    log.Printf("Stored oauth state in redis: %s -> %s", key, userId)   
+    log.Printf("Stored oauth state %s for user %s", key, userId) 
 	return nil
 }
 

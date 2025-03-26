@@ -654,7 +654,7 @@ func main() {
 		grpc.Creds(credentials.NewTLS(tlsConfig)),
 	}
 
-	redisClient, err := redis.NewRedisClient(context.Background(), os.Getenv("REDIS_ADDRESS"))
+	redisClient, err := redis.NewRedisClient(context.Background())
 	if err != nil {
 		log.Fatalf("Failed to connect to redis: %v", err)
 	}
