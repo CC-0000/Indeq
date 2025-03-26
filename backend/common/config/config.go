@@ -69,8 +69,7 @@ func LoadClientTLSFromEnv(certEnvName string, keyEnvName string, cacrtEnvName st
 
 	// Create TLS configuration
 	tlsConfig := &tls.Config{
-		RootCAs: certpool,
-		// ClientCAs:          certpool,
+		RootCAs:            certpool,
 		Certificates:       []tls.Certificate{clientCert},
 		MinVersion:         tls.VersionTLS13,
 		InsecureSkipVerify: false,
