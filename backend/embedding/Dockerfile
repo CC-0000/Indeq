@@ -17,7 +17,7 @@ RUN python -m grpc_tools.protoc -I./protos --python_out=. --grpc_python_out=. ./
 COPY embedding/server.py .
 
 # Expose the gRPC port
-EXPOSE 50055
+EXPOSE 50057
 
 # Run the server
 CMD ["python", "server.py"]

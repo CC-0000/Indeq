@@ -52,3 +52,12 @@ message HttpCSRResponse {
   string certificate_base64 = 1;
   string error = 3;
 }
+
+message HttpAddToWaitlistRequest {
+  string email = 1;
+}
+
+message HttpAddToWaitlistResponse {
+  bool success = 1;
+  string message = 2;
+}

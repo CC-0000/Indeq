@@ -69,6 +69,17 @@ Here you will find all the necessary information for developers to install and s
 
 ### Frontend
 
+### Root
+
+#### Prerequisities
+
+- node
+- npm
+
+#### Setup
+
+1. Run `npm i` in `Indeq/` directory to install husky and commitlint
+
 ### Production
 
 #### Misc Notes

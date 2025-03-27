@@ -23,9 +23,10 @@ import (
 )
 
 type ServiceClients struct {
-	queryClient  pb.QueryServiceClient
-	authClient   pb.AuthenticationServiceClient
-	rabbitMQConn *amqp.Connection
+	queryClient    pb.QueryServiceClient
+	authClient     pb.AuthenticationServiceClient
+	waitlistClient pb.WaitlistServiceClient
+	rabbitMQConn   *amqp.Connection
 }
 
 func helloHandler(w http.ResponseWriter, r *http.Request) {
@@ -187,6 +188,35 @@ func handlePostQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 
 		httpResponse := &pb.HttpQueryResponse{
 			ConversationId: newId.String(),
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(httpResponse)
+	}
+}
+
+func handleAddToWaitlist(clients *ServiceClients) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var addToWaitlistRequest pb.HttpAddToWaitlistRequest
+		log.Println("Received add to waitlist request")
+		if err := json.NewDecoder(r.Body).Decode(&addToWaitlistRequest); err != nil {
+			log.Printf("Error: %v", err)
+			http.Error(w, "Bad Request", http.StatusBadRequest)
+			return
+		}
+
+		// Call the waitlist service
+		res, err := clients.waitlistClient.AddToWaitlist(r.Context(), &pb.AddToWaitlistRequest{
+			Email: addToWaitlistRequest.Email,
+		})
+
+		if err != nil {
+			http.Error(w, "Failed to add to waitlist", http.StatusInternalServerError)
+			return
+		}
+
+		httpResponse := &pb.HttpAddToWaitlistResponse{
+			Success: res.Success,
+			Message: res.Message,
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(httpResponse)
@@ -384,10 +414,25 @@ func main() {
 		log.Fatal(err)
 	}
 
+	// Connect to the waitlist service
+	waitlistConn, err := grpc.NewClient(
+		os.Getenv("WAITLIST_ADDRESS"),
+		grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
+			RootCAs: certPool,
+		})),
+	)
+	if err != nil {
+		log.Fatalf("Failed to establish connection with waitlist-service: %v", err)
+	}
+	defer waitlistConn.Close()
+	waitlistServiceClient := pb.NewWaitlistServiceClient(waitlistConn)
+
+	// Save the service clients for future use
 	serviceClients := &ServiceClients{
-		queryClient:  queryServiceClient,
-		authClient:   authServiceClient,
-		rabbitMQConn: rabbitMQConn,
+		queryClient:    queryServiceClient,
+		authClient:     authServiceClient,
+		waitlistClient: waitlistServiceClient,
+		rabbitMQConn:   rabbitMQConn,
 	}
 	log.Print("Server has established connection with other services")
 
@@ -399,6 +444,7 @@ func main() {
 	mux.HandleFunc("POST /api/login", handleLoginGenerator(serviceClients))
 	mux.HandleFunc("POST /api/verify", handleVerifyGenerator(serviceClients))
 	mux.HandleFunc("POST /api/csr", handleSignCSRGenerator(serviceClients))
+	mux.HandleFunc("POST /api/waitlist", handleAddToWaitlist(serviceClients))
 
 	httpPort := os.Getenv("GATEWAY_ADDRESS")
 	server := &http.Server{
