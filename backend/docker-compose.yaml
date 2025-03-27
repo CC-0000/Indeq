@@ -4,6 +4,8 @@ services:
     build:
       context: .
       dockerfile: query/Dockerfile
+    env_file:
+      - ./common/config/.env
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -59,6 +61,8 @@ services:
     build:
       context: .
       dockerfile: gateway/Dockerfile
+    env_file:
+      - ./common/config/.env
     ports:
       - "8080:8080"
     depends_on:
@@ -66,6 +70,8 @@ services:
         condition: service_started
       rabbitmq:
         condition: service_healthy
+      redis:
+        condition: service_started
     networks:
       - indeq-net
   waitlist:
@@ -80,6 +86,37 @@ services:
         condition: service_healthy
     networks:
       - indeq-net
+  
+  integration:
+    image: integration-service
+    build:
+      context: .
+      dockerfile: integration/Dockerfile
+    env_file:
+      ./common/config/.env
+    depends_on:
+      appDB:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - indeq-net
+
+  redis:
+    image: redis:alpine
+    env_file:
+      - ./common/config/.env
+    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\""] 
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "$$REDIS_PASSWORD", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    networks:
+      - indeq-net
+
   appDB:
     image: postgres:latest
     env_file:
@@ -103,6 +140,7 @@ volumes:
   app_data:
   ollama_models:
   rabbitmq_data:
+  redis_data:
 
 networks:
   indeq-net:

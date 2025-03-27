@@ -4,6 +4,7 @@ use (
 	./authentication
 	./common
 	./gateway
+	./integration
 	./query
 	./waitlist
 )

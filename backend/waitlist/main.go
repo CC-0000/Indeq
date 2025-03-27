@@ -22,6 +22,7 @@ type WaitlistServer struct {
 }
 
 func (s *WaitlistServer) AddToWaitlist(ctx context.Context, req *pb.AddToWaitlistRequest) (*pb.AddToWaitlistResponse, error) {
+	log.Println("Adding to waitlist:", req.Email)
 	_, err := mail.ParseAddress(req.Email)
 	if err != nil {
 		return &pb.AddToWaitlistResponse{
