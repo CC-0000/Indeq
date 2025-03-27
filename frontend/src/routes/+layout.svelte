@@ -2,17 +2,20 @@
 	import '../app.css';
 	import { Toaster } from "$lib/components/ui/sonner";
     import { injectAnalytics } from '@vercel/analytics/sveltekit'
+    import { PUBLIC_APP_ENV } from '$env/static/public';
 
 	let { children } = $props();
 
     const siteUrl = 'https://indeq.app';
     const ogImage = `${siteUrl}/meta-image.png`;
     
-    // Vercel Analytics
-    injectAnalytics({
-        debug: false,
-        mode: 'production'
-    });
+    if (PUBLIC_APP_ENV === 'PRODUCTION') {
+        // Vercel Analytics
+        injectAnalytics({
+            debug: false,
+            mode: 'production'
+        });
+    }
 </script>
 
 <svelte:head>
