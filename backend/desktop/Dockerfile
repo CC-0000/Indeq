@@ -35,6 +35,5 @@ WORKDIR /app/
 COPY --from=builder /app/desktop-service .
 COPY --from=builder /app/common/config/.env . 
 
-EXPOSE 8080
 EXPOSE 50054
 CMD ["./desktop-service"]

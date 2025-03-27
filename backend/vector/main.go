@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus-sdk-go/v2/client"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/segmentio/kafka-go"
@@ -264,9 +265,21 @@ func (s *vectorServer) createDesktopWriter() {
 //   - connects to the milvus instance using an api key from .env variables
 //   - assumes: the client will be closed in the parent function some point
 func (s *vectorServer) connectToMilvus(ctx context.Context) {
+	// Configure keepalive parameters to prevent "too_many_pings" errors
+	kacp := keepalive.ClientParameters{
+		Time:                20 * time.Second, // Send pings every 20 seconds if there is no activity
+		Timeout:             10 * time.Second, // Wait 10 seconds for ping ack before considering the connection dead
+		PermitWithoutStream: false,            // Don't send pings without active streams
+	}
+	// Create custom dial options
+	dialOpts := []grpc.DialOption{
+		grpc.WithKeepaliveParams(kacp),
+	}
+
 	milvusClient, err := client.NewClient(ctx, client.Config{
-		Address: os.Getenv("ZILLIZ_ADDRESS"),
-		APIKey:  os.Getenv("ZILLIZ_API_KEY"),
+		Address:     os.Getenv("ZILLIZ_ADDRESS"),
+		APIKey:      os.Getenv("ZILLIZ_API_KEY"),
+		DialOptions: dialOpts,
 	})
 	if err != nil {
 		log.Fatalf("failed to connect to the milvus instance: %v", err)
