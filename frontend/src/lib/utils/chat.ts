@@ -1,14 +1,4 @@
-interface BotMessage {
-    text: string;
-    sender: string;
-    reasoning: {text: string; collapsed: boolean}[];
-    reasoningSectionCollapsed: boolean;
-}
-
-interface ChatState {
-    messages: BotMessage[];
-    isReasoning: boolean;
-}
+import type { BotMessage, ChatState } from "$lib/types/chat";
 
 // Function to process reasoning messages and update message state
 export function processReasoningMessage(data: string, botMessage: BotMessage, state: ChatState) {

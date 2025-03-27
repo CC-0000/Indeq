@@ -4,18 +4,14 @@
     import "katex/dist/katex.min.css";
     import { processReasoningMessage, processOutputMessage, toggleReasoning } from '$lib/utils/chat';
     import { renderLatex, renderContent } from '$lib/utils/katex';
+	  import type { BotMessage, ChatState } from "$lib/types/chat";
 
     let userQuery = '';
     let conversationId: string | null = null;
     const truncateLength = 80;
 
     let eventSource: EventSource | null = null;
-    let messages: { 
-        text: string; 
-        sender: string; 
-        reasoning: {text: string; collapsed: boolean}[];
-        reasoningSectionCollapsed: boolean;
-    }[] = [];
+    let messages: BotMessage[] = [];  
     let isFullscreen = false;
     let isReasoning = false;
     let conversationContainer: HTMLElement | null = null;
@@ -63,7 +59,7 @@
 
         const url = `/chat?conversationId=${encodeURIComponent(conversationId)}`;
         eventSource = new EventSource(url);
-        let botMessage = { 
+        let botMessage : BotMessage = { 
             text: "", 
             sender: "bot", 
             reasoning: [] as {text: string; collapsed: boolean}[],
@@ -74,7 +70,7 @@
             const payload = JSON.parse(evt.data);
             
             // state object to pass to the processing functions
-            const state = {
+            const state : ChatState = {
                 messages,
                 isReasoning
             };
