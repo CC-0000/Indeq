@@ -53,6 +53,24 @@ type OAuthProviderConfig struct {
 	RedirectURI string
 }
 
+type OAuthToken struct {
+    UserID               string
+    Provider             string
+    EncryptedRefreshToken string
+    ExpiresAt            time.Time
+    RequiresRefresh      bool
+}
+
+type RefreshedToken struct {
+    UserID          string
+    Provider        string
+    AccessToken     string
+    RefreshToken    string
+	OldRefreshToken string
+    ExpiresAt       time.Time
+    RequiresRefresh bool
+}
+
 // OAuth provider configurations
 var providers = map[string]OAuthProviderConfig{
 	"GOOGLE": {
@@ -259,91 +277,157 @@ func startTokenRefreshWorker(db *sql.DB) {
 	go func() {
 		for range ticker.C {
 			log.Println("Refreshing all expired tokens...")
-			refreshAllExpiredTokens(db)
+			err := refreshAllExpiredTokens(db)
+			if err != nil {
+				log.Printf("Error refreshing all expired tokens: %v", err)
+			}
 		}
 	}()
 }
 
-func refreshAllExpiredTokens(db *sql.DB) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10 * time.Second)
+func refreshAllExpiredTokens(db *sql.DB) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	var tokensToRefresh []OAuthToken
 	rows, err := db.QueryContext(ctx, `
 		SELECT user_id, provider, refresh_token, expires_at, requires_refresh
 		FROM oauth_tokens
 		WHERE expires_at < NOW() + INTERVAL '5 minutes'
 		AND requires_refresh = TRUE
 	`)
-	
 	if err != nil {
-		log.Printf("Error querying expired tokens: %v", err)
-		return
+		return fmt.Errorf("failed to query expired tokens: %v", err)
 	}
 	defer rows.Close()
 
 	for rows.Next() {
-		var userID string
-		var provider string
-		var encRefreshToken string
-		var expiresAt time.Time
-		var requiresRefresh bool
-		if err := rows.Scan(&userID, &provider, &encRefreshToken, &expiresAt, &requiresRefresh); err != nil {
-			log.Printf("Error scanning token row: %v", err)
+		var token OAuthToken
+		if err := rows.Scan(
+			&token.UserID,
+			&token.Provider,
+			&token.EncryptedRefreshToken,
+			&token.ExpiresAt,
+			&token.RequiresRefresh,
+		); err != nil {
+			return fmt.Errorf("failed to scan token row: %v", err)
+		}
+		tokensToRefresh = append(tokensToRefresh, token)
+	}
+	rows.Close()
+
+	if len(tokensToRefresh) == 0 {
+		log.Println("No expired tokens to refresh")
+		return nil
+	}
+
+	var refreshedTokens []RefreshedToken
+	for _, token := range tokensToRefresh {
+		if token.EncryptedRefreshToken == "" || !token.RequiresRefresh {
+			log.Printf("No refresh token found for user %s and provider %s", token.UserID, token.Provider)
 			continue
 		}
 
-		if encRefreshToken == "" || !requiresRefresh {
-			log.Printf("No refresh token found for user %s and provider %s", userID, provider)
-			continue
-		}
-
-		decryptedRefreshToken, err := Decrypt(encRefreshToken)
+		// decrypt refresh token
+		decryptedRefreshToken, err := Decrypt(token.EncryptedRefreshToken)
 		if err != nil {
-			log.Printf("Error decrypting refresh token for user %s: %v", userID, err)
+			log.Printf("Error decrypting refresh token for user %s: %v", token.UserID, err)
 			continue
 		}
 
-		tokenData, err := RefreshOAuthToken(provider, decryptedRefreshToken)
+		// refresh token
+		tokenData, err := RefreshOAuthToken(token.Provider, decryptedRefreshToken)
 		if err != nil {
-			log.Printf("Error refreshing token for user %s: %v", userID, err)
+			log.Printf("Error refreshing token for user %s: %v", token.UserID, err)
 			continue
 		}
 
 		if tokenData.RefreshToken == "" {
-			log.Printf("No new refresh token returned for user %s; reusing old one", userID)
+			log.Printf("No new refresh token returned for user %s; reusing old one", token.UserID)
 			tokenData.RefreshToken = decryptedRefreshToken
 		}
 
 		// encrypt new tokens before saving
 		encryptedAccessToken, err := Encrypt(tokenData.AccessToken)
 		if err != nil {
-			log.Printf("Error encrypting access token for user %s: %v", userID, err)
+			log.Printf("Error encrypting access token for user %s: %v", token.UserID, err)
 			continue
 		}
 
 		encryptedRefreshToken, err := Encrypt(tokenData.RefreshToken)
 		if err != nil {
-			log.Printf("Error encrypting refresh token for user %s: %v", userID, err)
-			continue
-		}
-		
-		_, err = db.ExecContext(ctx, `
-			UPDATE oauth_tokens
-			SET access_token = $1, refresh_token = $2, expires_at = $3, updated_at = NOW(), requires_refresh = $4
-			WHERE user_id = $5 AND provider = $6
-		`, encryptedAccessToken, encryptedRefreshToken, tokenData.ExpiresAt, tokenData.RequiresRefresh, userID, provider)
-
-		if err != nil {
-			log.Printf("Error updating token for user %s: %v", userID, err)
+			log.Printf("Error encrypting refresh token for user %s: %v", token.UserID, err)
 			continue
 		}
 
-		if tokenData.RefreshToken != decryptedRefreshToken {
-			log.Printf("Successfully refreshed access token and refresh token for user %s", userID)
+		refreshedTokens = append(refreshedTokens, RefreshedToken{
+			UserID: token.UserID,
+			Provider: token.Provider,
+			AccessToken: encryptedAccessToken,
+			RefreshToken: encryptedRefreshToken,
+			OldRefreshToken: token.EncryptedRefreshToken,
+			ExpiresAt: tokenData.ExpiresAt,
+			RequiresRefresh: tokenData.RequiresRefresh,
+		})
+	}
+	
+	// perform all updates in one transaction
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %v", err)
+	}
+	
+	// commit or rollback in a deferred function
+	defer func() {
+		if p := recover(); p != nil {
+			// if we have panicked, rollback
+			_ = tx.Rollback()
+			panic(p)
+		} else if err != nil {
+			// if the transaction failed, rollback
+			_ = tx.Rollback()
 		} else {
-			log.Printf("Successfully refreshed the access token for user %s", userID)
+			// if we succeeded, commit
+			commitErr := tx.Commit()
+			if commitErr != nil {
+				log.Printf("Failed to commit transaction: %v", commitErr)
+			}
+		}
+	}()
+
+	stmt, err := tx.PrepareContext(ctx, `
+		UPDATE oauth_tokens
+		SET access_token = $1, refresh_token = $2, expires_at = $3, updated_at = NOW(), requires_refresh = $4
+		WHERE user_id = $5 AND provider = $6
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare update statement: %v", err)
+	}
+	defer stmt.Close()
+
+	for _, token := range refreshedTokens {
+		_, err := stmt.ExecContext(
+			ctx,
+			token.AccessToken,
+			token.RefreshToken,
+			token.ExpiresAt,
+			token.RequiresRefresh,
+			token.UserID,
+			token.Provider,
+		)
+		if err != nil {
+			log.Printf("Error updating token for user %s: %v", token.UserID, err)
+			return fmt.Errorf("error updating token for user %s: %v", token.UserID, err) 
+		}
+
+		if token.RefreshToken != token.OldRefreshToken {
+			log.Printf("Successfully refreshed access token and refresh token for user %s", token.UserID)
+		} else {
+			log.Printf("Successfully refreshed the access token for user %s", token.UserID)
 		}
 	}
+
+	return nil
 }
 
 func enumToString(provider pb.Provider) (string, error) {
