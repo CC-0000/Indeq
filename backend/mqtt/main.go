@@ -37,10 +37,14 @@ func main() {
 		log.Fatalf("failed to add certificate hook to mqtt server: %v", err)
 	}
 
-	// Create TLS listener on port 8883
+	// Create TLS listener on the env port
+	mqttPort, ok := os.LookupEnv("MQTT_PORT")
+	if !ok {
+		log.Fatal("failed to retrieve the mqtt port value from .env")
+	}
 	tlsTCP := listeners.NewTCP(listeners.Config{
 		ID:        "ssl1",
-		Address:   ":8883",
+		Address:   mqttPort,
 		TLSConfig: tlsConfig,
 	})
 

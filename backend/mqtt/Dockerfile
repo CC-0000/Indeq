@@ -35,6 +35,5 @@ WORKDIR /app/
 COPY --from=builder /app/mqtt-service .
 COPY --from=builder /app/common/config/.env . 
 
-EXPOSE 1883
 EXPOSE 8883
 CMD ["./mqtt-service"]
