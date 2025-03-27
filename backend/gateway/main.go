@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	pb "github.com/cc-0000/indeq/common/api"
@@ -41,6 +42,13 @@ func handleGetQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 		ctx, cancel := context.WithCancel(r.Context())
 		defer cancel()
 
+		// get the ttl
+		queue_ttl, err := strconv.ParseUint(os.Getenv("QUERY_QUEUE_TTL"), 10, 32)
+		if err != nil {
+			log.Fatal("failed to find the query queue ttl in env variables")
+		}
+		queueTTL := int(queue_ttl)
+
 		// NOTE: expects authentication middleware to have already verified the token!!!
 		// Grab the token --> userId
 		auth_header := r.Header.Get("Authorization")
@@ -55,10 +63,15 @@ func handleGetQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 		conversationId := fmt.Sprintf("%s-%s", verifyRes.UserId, incomingId)
 
 		// Handle SSE connection
+		allowedOrigins, ok := os.LookupEnv("ALLOWED_CLIENT_IP")
+		if !ok {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
-		w.Header().Set("Access-Control-Allow-Origin", "*") // this should be updated in the future to only allow frontend connections
+		w.Header().Set("Access-Control-Allow-Origin", allowedOrigins) // this should be updated in the future to only allow frontend connections
 
 		flusher, ok := w.(http.Flusher)
 		if !ok {
@@ -80,7 +93,7 @@ func handleGetQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 			false,          // exclusive
 			false,          // no-wait
 			amqp.Table{ // arguments
-				"x-expires": 300000, // 5 minutes in milliseconds
+				"x-expires": queueTTL,
 			},
 		)
 		if err != nil {
@@ -113,20 +126,15 @@ func handleGetQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 					return
 				}
 				// parse the message into json
-				thisMsg := string(msg.Body)
-				jsonData, _ := json.Marshal(struct {
-					Type string `json:"type"`
-					Data string `json:"data"`
-				}{
-					Type: "message",
-					Data: thisMsg,
-				})
+				var msgJson map[string]any
+				json.Unmarshal(msg.Body, &msgJson)
+
 				// write it out to the response
-				fmt.Fprintf(w, "data: %s\n\n", jsonData)
+				fmt.Fprintf(w, "data: %s\n\n", msg.Body)
 				flusher.Flush()
 
 				// if the message is blank there are no more messages
-				if thisMsg == "" {
+				if msgJson["type"] == "end" {
 					return
 				}
 			}
@@ -168,6 +176,7 @@ func handlePostQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 			detachedCtx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			_, err := clients.queryClient.MakeQuery(detachedCtx, &pb.QueryRequest{
+				UserId:         verifyRes.UserId,
 				ConversationId: conversationId,
 				Query:          queryRequest.Query,
 			})
@@ -202,6 +211,7 @@ func handleRegisterGenerator(clients *ServiceClients) http.HandlerFunc {
 		})
 
 		if err != nil {
+			log.Print(err)
 			http.Error(w, "Failed to register user", http.StatusInternalServerError)
 			return
 		}
@@ -235,8 +245,9 @@ func handleLoginGenerator(clients *ServiceClients) http.HandlerFunc {
 		}
 
 		httpResponse := &pb.HttpLoginResponse{
-			Token: res.Token,
-			Error: res.Error,
+			Token:  res.Token,
+			UserId: res.UserId,
+			Error:  res.Error,
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(httpResponse)
@@ -276,6 +287,40 @@ func handleVerifyGenerator(clients *ServiceClients) http.HandlerFunc {
 	}
 }
 
+func handleSignCSRGenerator(clients *ServiceClients) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log.Println("received sign csr request")
+		var csrRequest pb.HttpCSRRequest
+
+		if err := json.NewDecoder(r.Body).Decode(&csrRequest); err != nil {
+			log.Printf("[HTTP 400] failed to decode the incoming csr request: %v", err)
+			http.Error(w, "Bad Request", http.StatusBadRequest)
+			return
+		}
+
+		// try to make a csr request
+		csrRes, err := clients.authClient.SignCSR(r.Context(), &pb.SignCSRRequest{
+			CsrBase64: csrRequest.CsrBase64,
+			LoginRequest: &pb.LoginRequest{
+				Email:    csrRequest.Email,
+				Password: csrRequest.Password,
+			},
+		})
+
+		if err != nil {
+			log.Printf("[HTTP 500] failed to make the csr signing request: %v", err)
+			http.Error(w, "Failed to sign csr", http.StatusInternalServerError)
+			return
+		}
+
+		httpResponse := &pb.HttpCSRResponse{
+			CertificateBase64: csrRes.CertificateBase64,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(httpResponse)
+	}
+}
+
 func main() {
 	// Load .env variables
 	err := config.LoadSharedConfig()
@@ -309,6 +354,10 @@ func main() {
 	defer rabbitMQConn.Close()
 
 	// Connect to the query service
+	clientConfig, err := config.LoadClientTLSFromEnv("GATEWAY_CRT", "GATEWAY_KEY", "CA_CRT")
+	if err != nil {
+		log.Fatal(err)
+	}
 	queryConn, err := grpc.NewClient(
 		os.Getenv("QUERY_ADDRESS"),
 		grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
@@ -324,15 +373,16 @@ func main() {
 	// Connect to the authentication service
 	authConn, err := grpc.NewClient(
 		os.Getenv("AUTH_ADDRESS"),
-		grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
-			RootCAs: certPool,
-		})),
+		grpc.WithTransportCredentials(credentials.NewTLS(clientConfig)),
 	)
 	if err != nil {
 		log.Fatalf("Failed to establish connection with auth-service: %v", err)
 	}
 	defer authConn.Close()
 	authServiceClient := pb.NewAuthenticationServiceClient(authConn)
+	if _, err = authServiceClient.Login(context.Background(), &pb.LoginRequest{}); err != nil {
+		log.Fatal(err)
+	}
 
 	serviceClients := &ServiceClients{
 		queryClient:  queryServiceClient,
@@ -348,6 +398,7 @@ func main() {
 	mux.HandleFunc("POST /api/register", handleRegisterGenerator(serviceClients))
 	mux.HandleFunc("POST /api/login", handleLoginGenerator(serviceClients))
 	mux.HandleFunc("POST /api/verify", handleVerifyGenerator(serviceClients))
+	mux.HandleFunc("POST /api/csr", handleSignCSRGenerator(serviceClients))
 
 	httpPort := os.Getenv("GATEWAY_ADDRESS")
 	server := &http.Server{
