@@ -1,6 +1,8 @@
 # Generated Protocol Buffer files
 *.pb.go
 *.pb.gw.go
+*_pb2.py
+*_pb2_grpc.py
 
 # Go specific
 /bin/
@@ -41,3 +43,6 @@
 .cache/
 
 package-lock.json
+
+# certificates
+certs*
