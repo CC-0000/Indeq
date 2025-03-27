@@ -47,6 +47,9 @@ Here you will find all the necessary information for developers to install and s
 
 ##### Generating Root.key and Root.crt
 
+1. `openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out ca.key`
+2. `openssl req -x509 -new -nodes -key ca.key -sha256 -days 3650 -out ca.crt -subj "/UID=Root_CA/CN=www.indeq.app/O=Indeq LLC"`
+
 ##### Generating Server.key and Server.crt
 
 1. `openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out server.key`
