@@ -12,11 +12,11 @@ export const load: PageServerLoad = async ({ cookies, fetch }) => {
   const integrations = await fetch(`${GO_BACKEND_URL}/api/integrations`, {
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${session}`
+      Authorization: `Bearer ${session}`
     }
   });
 
-  let data: {providers?: string[] };
+  let data: { providers?: string[] };
   try {
     data = await integrations.json();
   } catch (err) {
@@ -27,5 +27,5 @@ export const load: PageServerLoad = async ({ cookies, fetch }) => {
 
   return {
     integrations: providers
-  }
+  };
 };
