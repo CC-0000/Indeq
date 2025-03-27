@@ -57,6 +57,16 @@ services:
     networks:
       - indeq-net
 
+  embedding:
+    image: embedding-service
+    build:
+      context: .
+      dockerfile: embedding/Dockerfile
+    volumes:
+      - embedding_data:/app/model_cache
+    networks:
+      - indeq-net
+
   mqtt:
     image: mqtt-service
     container_name: mqtt-service
@@ -77,6 +87,19 @@ services:
     depends_on:
       passwordDB:
         condition: service_healthy
+      vector:
+        condition: service_started
+    networks:
+      - indeq-net
+
+  retrieval:
+    image: retrieval-service
+    build:
+      context: .
+      dockerfile: retrieval/Dockerfile
+    depends_on:
+      desktop:
+        condition: service_started
       vector:
         condition: service_started
     networks:
@@ -160,6 +183,7 @@ services:
 volumes:
   postgres_data:
   ollama_models:
+  embedding_data:
 
 networks:
   indeq-net:
