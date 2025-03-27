@@ -9,10 +9,9 @@ service QueryService {
 }
 
 message QueryRequest {
-    string conversation_id = 1;
-    string query = 2;
+    string user_id = 1;
+    string conversation_id = 2;
+    string query = 3;
 }
 
-message QueryResponse {
-    bool success = 1;
-}
+message QueryResponse {}
