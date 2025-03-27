@@ -33,7 +33,6 @@
 /build/
 
 # Environment variables
-.env
 .env.local
 
 # Log files
