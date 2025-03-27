@@ -677,7 +677,7 @@ func main() {
     }
 
 	// Load the TLS configuration values
-	tlsConfig, err := config.LoadTLSFromEnv("INTEGRATION_CRT", "INTEGRATION_KEY")
+	tlsConfig, err := config.LoadServerTLSFromEnv("INTEGRATION_CRT", "INTEGRATION_KEY")
 	if err != nil {
 		log.Fatal("Error loading TLS config for integration service")
 	}

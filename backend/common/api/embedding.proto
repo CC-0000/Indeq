@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+option go_package = "github.com/cc-0000/indeq/common/api";
+
+package embedding;
+
+service EmbeddingService {
+  rpc GenerateEmbeddings (EmbeddingRequest) returns (EmbeddingResponse);
+  rpc HealthCheck (HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+message EmbeddingRequest {
+  repeated string texts = 1;
+}
+
+message EmbeddingResponse {
+  repeated bytes embeddings = 1;
+}
+
+message HealthCheckRequest {}
+
+message HealthCheckResponse {
+  string status = 1;
+}
