@@ -1,15 +1,13 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net"
-	"net/http"
+
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -23,6 +21,10 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+
+	"github.com/google/generative-ai-go/genai"
+	"google.golang.org/api/iterator"
+	"google.golang.org/api/option"
 )
 
 type queryServer struct {
@@ -53,6 +55,27 @@ type QueueSourceMessage struct {
 	FilePath      string `json:"file_path"`
 }
 
+// func(context, rabbitmq channel, queue to send message to, byte encoded message of some json)
+//   - sends the byte message to the given queue name
+//   - assumes: the rabbitmq channel is open and the byte encoded message is from json
+func (s *queryServer) sendToQueue(ctx context.Context, channel *amqp.Channel, queueName string, byteMessage []byte) error {
+	err := channel.PublishWithContext(
+		ctx,
+		"",        // exchange
+		queueName, // routing key
+		false,     // mandatory
+		false,     // immediate
+		amqp.Publishing{
+			ContentType: "application/json",
+			Body:        byteMessage,
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("failed to publish message: %w", err)
+	}
+	return nil
+}
+
 // rpc(context, query request)
 //   - takes in a query for a given user
 //   - fetches the top k chunks relevant to the query and passes that context to the llm
@@ -68,8 +91,13 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 	if err != nil {
 		return &pb.QueryResponse{}, fmt.Errorf("failed to retrieve the ttl env variable: %w", err)
 	}
+	geminiApikey, ok := os.LookupEnv("GEMINI_API_KEY")
+	if !ok {
+		return &pb.QueryResponse{}, fmt.Errorf("failed to retrieve the gemini api key: %w", err)
+	}
 
 	// TODO: implement function calling for better filtering (dates, titles, etc.)
+	// TODO: implement query conversion for better searching
 	// fetch context associated with the query
 	topKChunksResponse, err := s.retrievalService.RetrieveTopKChunks(ctx, &pb.RetrieveTopKChunksRequest{
 		UserId: req.UserId,
@@ -120,31 +148,33 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 	// log.Print("the number of characters in the full prompt is: ", len(fullprompt))
 	// log.Print(fullprompt)
 
-	// TODO: send the request to an API endpoint like google for faster responses vs. self-hosting
-	// send req to llm
-	llmRequestBody := OllamaRequest{
-		Model:  os.Getenv("LLM_MODEL"),
-		Prompt: fullprompt,
-		Stream: true,
-		Options: map[string]any{
-			"num_ctx":    131072,
-			"num_thread": 4,
-		},
-	}
-	llmRequestJSON, err := json.Marshal(llmRequestBody)
-	if err != nil {
-		return &pb.QueryResponse{}, fmt.Errorf("failed to marshal request: %w", err)
-	}
-	llmReq, _ := http.NewRequestWithContext(ctx, "POST", os.Getenv("OLLAMA_URL"), bytes.NewReader(llmRequestJSON))
-	llmReq.Header.Set("Content-Type", "application/json")
+	// TODO: add the option to use more than 1 model
 
-	client := &http.Client{}
-	llmRes, err := client.Do(llmReq)
+	// create a gemini api client
+	client, err := genai.NewClient(ctx, option.WithAPIKey(geminiApikey))
 	if err != nil {
-		return &pb.QueryResponse{}, fmt.Errorf("failed to make query to llm: %w", err)
+		log.Fatalf("Error creating client: %v", err)
 	}
-	defer llmRes.Body.Close()
-	scanner := bufio.NewScanner(llmRes.Body)
+	defer client.Close()
+
+	model := client.GenerativeModel("gemini-2.0-flash-lite")
+	model.SetTemperature(1)
+	model.SetTopK(1)
+	model.SetTopP(0.95)
+	model.SetMaxOutputTokens(8000)
+	model.ResponseMIMEType = "text/plain"
+	session := model.StartChat()
+	session.History = []*genai.Content{} // TODO: implement chat history
+
+	// count the number of tokens in the prompt
+	resp, err := model.CountTokens(ctx, genai.Text(fullprompt))
+	if err != nil {
+		log.Fatalf("Error counting tokens for the prompt: %v", err)
+	}
+	log.Printf("Number of tokens for the prompt: %d\n", resp.TotalTokens)
+
+	// send the message to the llm
+	iter := session.SendMessageStream(ctx, genai.Text(fullprompt))
 
 	// Create a rabbitmq channel to stream the response
 	channel, err := s.rabbitMQConn.Channel()
@@ -203,87 +233,76 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 			return &pb.QueryResponse{}, fmt.Errorf("failed to marshal source message: %w", err)
 		}
 
-		err = channel.PublishWithContext(
-			ctx,
-			"",         // exchange
-			queue.Name, // routing key
-			false,      // mandatory
-			false,      // immediate
-			amqp.Publishing{
-				ContentType: "application/json",
-				Body:        byteMessage,
-			},
-		)
-		if err != nil {
+		if err = s.sendToQueue(ctx, channel, queue.Name, byteMessage); err != nil {
 			return &pb.QueryResponse{}, fmt.Errorf("failed to publish message: %w", err)
 		}
 		excerptNumber++
 	}
 
-	// Keeps on reading until there are no more tokens
-	for scanner.Scan() {
-		select {
-		case <-ctx.Done():
-			return &pb.QueryResponse{}, fmt.Errorf("early abort due to context cancellation")
-		default:
-			// check if the queue still exists
-			_, err := channel.QueueDeclarePassive(
-				req.ConversationId, // queue name
-				false,              // durable
-				true,               // delete when unused
-				false,              // exclusive
-				false,              // no-wait
-				amqp.Table{ // arguments
-					"x-expires": s.queueTTL, // 5 minutes in milliseconds
-				},
-			)
-			if err != nil {
-				break // stop processing
-			}
+	// send the tokens
+	for {
+		resp, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return &pb.QueryResponse{}, fmt.Errorf("error streaming response from gemini: %w", err)
+		}
 
-			// parse the token
-			var result map[string]any
-			json.Unmarshal(scanner.Bytes(), &result)
-			if _, exists := result["response"]; !exists {
-				log.Printf("Response doesn't contain 'response' field: %v", result)
-				continue
-			}
-			token, ok := result["response"].(string)
-			if !ok {
-				log.Printf("Error: response field is not a string")
-				continue
-			}
+		// Print each chunk as it arrives
+		for _, candidate := range resp.Candidates {
+			for _, part := range candidate.Content.Parts {
+				select {
+				case <-ctx.Done():
+					return &pb.QueryResponse{}, fmt.Errorf("early abort due to context cancellation")
+				default:
+					// check if the queue still exists
+					_, err := channel.QueueDeclarePassive(
+						req.ConversationId, // queue name
+						false,              // durable
+						true,               // delete when unused
+						false,              // exclusive
+						false,              // no-wait
+						amqp.Table{ // arguments
+							"x-expires": s.queueTTL, // 5 minutes in milliseconds
+						},
+					)
+					if err != nil {
+						break // stop processing
+					}
 
-			// create our token type
-			queueTokenMessage := QueueTokenMessage{
-				Type:  "token",
-				Token: token,
-			}
-			if token == "" {
-				queueTokenMessage.Type = "end"
-			}
-			byteMessage, err := json.Marshal(queueTokenMessage)
-			if err != nil {
-				log.Printf("Error marshalling token message: %v", err)
-				continue
-			}
+					// create our token type
+					queueTokenMessage := QueueTokenMessage{
+						Type:  "token",
+						Token: fmt.Sprintf("%v", part),
+					}
+					byteMessage, err := json.Marshal(queueTokenMessage)
+					if err != nil {
+						log.Printf("Error marshalling token message: %v", err)
+						continue
+					}
 
-			// send the token to rabbitmq
-			err = channel.PublishWithContext(
-				ctx,
-				"",         // exchange
-				queue.Name, // routing key
-				false,      // mandatory
-				false,      // immediate
-				amqp.Publishing{
-					ContentType: "application/json",
-					Body:        byteMessage,
-				})
-			if err != nil {
-				log.Printf("Error publishing message: %v", err)
-				continue
+					err = s.sendToQueue(ctx, channel, queue.Name, byteMessage)
+					if err != nil {
+						log.Printf("Error publishing message: %v", err)
+						continue
+					}
+				}
 			}
 		}
+	}
+
+	// send the end token
+	endMessage := &QueueTokenMessage{
+		Type:  "end",
+		Token: "",
+	}
+	byteMessage, err := json.Marshal(endMessage)
+	if err != nil {
+		return &pb.QueryResponse{}, fmt.Errorf("error marshalling token message: %w", err)
+	}
+	if err = s.sendToQueue(ctx, channel, queue.Name, byteMessage); err != nil {
+		return &pb.QueryResponse{}, fmt.Errorf("error publishing message: %w", err)
 	}
 
 	return &pb.QueryResponse{}, nil
