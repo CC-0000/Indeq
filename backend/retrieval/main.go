@@ -3,10 +3,13 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"log"
 	"net"
 	"os"
 	"os/signal"
+	"sort"
+	"strconv"
 	"syscall"
 
 	pb "github.com/cc-0000/indeq/common/api"
@@ -17,20 +20,28 @@ import (
 
 type retrievalServer struct {
 	pb.UnimplementedRetrievalServiceServer
-	desktopConn   *grpc.ClientConn
-	desktopClient pb.DesktopServiceClient
-	vectorConn    *grpc.ClientConn
-	vectorClient  pb.VectorServiceClient
+	desktopConn     *grpc.ClientConn
+	desktopClient   pb.DesktopServiceClient
+	vectorConn      *grpc.ClientConn
+	vectorClient    pb.VectorServiceClient
+	embeddingConn   *grpc.ClientConn
+	embeddingClient pb.EmbeddingServiceClient
 }
 
 // rpc(context, retrieve top k chunks request)
 //   - retrieves the top K related chunks of text to the prompt for the given user
 //   - times out after ttl miliseconds
 func (s *retrievalServer) RetrieveTopKChunks(ctx context.Context, req *pb.RetrieveTopKChunksRequest) (*pb.RetrieveTopKChunksResponse, error) {
+	numberOfSources := req.K
+	kVal, err := strconv.Atoi(os.Getenv("RETRIEVAL_K_VAL"))
+	if err != nil {
+		return &pb.RetrieveTopKChunksResponse{TopKChunks: []*pb.TextChunkMessage{}}, fmt.Errorf("failed to retrieve the k value from the env variables: %w", err)
+	}
+
 	topKMetadatas, err := s.vectorClient.GetTopKChunks(ctx, &pb.GetTopKChunksRequest{
 		UserId: req.UserId,
 		Prompt: req.Prompt,
-		K:      req.K,
+		K:      int32(kVal),
 	})
 	if err != nil {
 		return &pb.RetrieveTopKChunksResponse{TopKChunks: []*pb.TextChunkMessage{}}, err
@@ -67,8 +78,48 @@ func (s *retrievalServer) RetrieveTopKChunks(ctx context.Context, req *pb.Retrie
 		topKChunks = append(topKChunks, desktopChunkResponse.Chunks...)
 	}
 
+	// rerank the results by first getting the scores
+	scores, err := s.embeddingClient.RerankPassages(ctx, &pb.RerankingRequest{
+		Query: req.Prompt,
+		Passages: func() []string {
+			var passages []string
+			for _, chunk := range topKChunks {
+				passages = append(passages, chunk.Content)
+			}
+			return passages
+		}(),
+	})
+	if err != nil {
+		return &pb.RetrieveTopKChunksResponse{
+			TopKChunks: []*pb.TextChunkMessage{},
+		}, err
+	}
+
+	type passageScore struct {
+		score float32
+		chunk *pb.TextChunkMessage
+	}
+	var passageScores []passageScore
+	for i, chunk := range topKChunks {
+		passageScores = append(passageScores, passageScore{
+			chunk: chunk,
+			score: scores.Scores[i],
+		})
+	}
+
+	// order the chunks by their scores
+	sort.Slice(passageScores, func(i, j int) bool {
+		return passageScores[i].score > passageScores[j].score
+	})
+
+	// collect only the first numberOfSources chunks
+	var topNumberOfSourcesChunks []*pb.TextChunkMessage
+	for i := range min(numberOfSources, int32(len(passageScores))) {
+		topNumberOfSourcesChunks = append(topNumberOfSourcesChunks, passageScores[i].chunk)
+	}
+
 	return &pb.RetrieveTopKChunksResponse{
-		TopKChunks: topKChunks,
+		TopKChunks: topNumberOfSourcesChunks,
 	}, nil
 }
 
@@ -112,6 +163,27 @@ func (s *retrievalServer) connectToVectorService(tlsConfig *tls.Config) {
 
 	s.vectorConn = vectorConn
 	s.vectorClient = pb.NewVectorServiceClient(vectorConn)
+}
+
+// func(client TLS config)
+//   - connects to the embedding service using the provided client tls config and saves the connection and function interface to the server struct
+//   - assumes: the connection will be closed in the parent function at some point
+func (s *retrievalServer) connectToEmbeddingService(tlsConfig *tls.Config) {
+	// connect to the embedding service
+	embeddingAddy, ok := os.LookupEnv("EMBEDDING_ADDRESS")
+	if !ok {
+		log.Fatal("failed to retrieve desktop address for connection")
+	}
+	embeddingConn, err := grpc.NewClient(
+		embeddingAddy,
+		grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)),
+	)
+	if err != nil {
+		log.Fatalf("Failed to establish connection with embedding-service: %v", err)
+	}
+
+	s.embeddingConn = embeddingConn
+	s.embeddingClient = pb.NewEmbeddingServiceClient(embeddingConn)
 }
 
 // func()
@@ -186,6 +258,10 @@ func main() {
 	// Connect to the vector service
 	server.connectToVectorService(clientTlsConfig)
 	defer server.vectorConn.Close()
+
+	// Connect to the embedding service
+	server.connectToEmbeddingService(clientTlsConfig)
+	defer server.embeddingConn.Close()
 
 	<-sigChan // TODO: implement worker groups
 	log.Print("gracefully shutting down...")
