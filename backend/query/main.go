@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 
 	"os"
 	"os/signal"
@@ -76,6 +78,47 @@ func (s *queryServer) sendToQueue(ctx context.Context, channel *amqp.Channel, qu
 	return nil
 }
 
+// func(context, query to expand)
+func (s *queryServer) expandQuery(ctx context.Context, query string) (string, error) {
+	if os.Getenv("QUERY_EXPANSION") == "false" {
+		return query, nil
+	}
+
+	fullprompt := "based on this query, what kind of things should we be searching for in the user's documents (output the answer and nothing else):\n" + query
+
+	llmRequestBody := OllamaRequest{
+		Model:   os.Getenv("LLM_MODEL"),
+		Prompt:  fullprompt,
+		Stream:  false,
+		Options: map[string]any{},
+	}
+
+	llmRequestJSON, err := json.Marshal(llmRequestBody)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal request: %w", err)
+	}
+	llmReq, _ := http.NewRequestWithContext(ctx, "POST", os.Getenv("OLLAMA_URL"), bytes.NewReader(llmRequestJSON))
+	llmReq.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	llmRes, err := client.Do(llmReq)
+	if err != nil {
+		return "", fmt.Errorf("failed to make query to llm: %w", err)
+	}
+	defer llmRes.Body.Close()
+
+	var responseBody map[string]interface{}
+	if err := json.NewDecoder(llmRes.Body).Decode(&responseBody); err != nil {
+		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
+	fullResponse, ok := responseBody["response"].(string)
+	if !ok {
+		return "", fmt.Errorf("response field missing or not a string")
+	}
+
+	return fullResponse, nil
+}
+
 // rpc(context, query request)
 //   - takes in a query for a given user
 //   - fetches the top k chunks relevant to the query and passes that context to the llm
@@ -98,10 +141,17 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 
 	// TODO: implement function calling for better filtering (dates, titles, etc.)
 	// TODO: implement query conversion for better searching
+
+	expandedQuery, err := s.expandQuery(ctx, req.Query)
+	if err != nil {
+		return &pb.QueryResponse{}, fmt.Errorf("failed to expand query: %w", err)
+	}
+	log.Print("got the expanded query")
+
 	// fetch context associated with the query
 	topKChunksResponse, err := s.retrievalService.RetrieveTopKChunks(ctx, &pb.RetrieveTopKChunksRequest{
 		UserId: req.UserId,
-		Prompt: req.Query,
+		Prompt: expandedQuery,
 		K:      int32(kVal),
 		Ttl:    uint32(ttlVal),
 	})
