@@ -9,6 +9,7 @@ service AuthenticationService {
     rpc Register(RegisterRequest) returns (RegisterResponse);
     rpc Verify(VerifyRequest) returns (VerifyResponse);
     rpc SignCSR(SignCSRRequest) returns (SignCSRResponse);
+    rpc VerifyRegistrationOTP(VerifyRegistrationOTPRequest) returns (VerifyRegistrationOTPResponse);
 }
 
 message LoginRequest {
@@ -52,3 +53,12 @@ message SignCSRResponse {
     string certificate_base64 = 1;
 }
 
+message VerifyRegistrationOTPRequest {
+    string token = 1; 
+    string otp_code = 2;
+}
+
+message VerifyRegistrationOTPResponse {
+bool success = 1;
+string message = 2;
+}

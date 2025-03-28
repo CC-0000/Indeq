@@ -30,6 +30,7 @@ import (
 	"golang.org/x/crypto/argon2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"github.com/redis/go-redis/v9"
 )
 
 type params struct {
@@ -50,6 +51,27 @@ type authServer struct {
 	MinPasswordLength int
 	MaxPasswordLength int
 	MaxEmailLength    int
+	redisClient *redis.RedisClient
+}
+
+type RegistrationPayload struct {
+	Email string `json:"email"`
+	HashedPassword string `json:"hashed_password"`
+	Name string `json:"name"`
+	OTP string `json:"otp"`
+}
+
+func generateOTP() (string, error) {
+	digits := "0123456789"
+	buf := make([]byte, 6)
+	_, err := rand.Read(buf)
+	if err != nil {
+		return "", err
+	}
+	for i := range buf {
+		buf[i] = digits[int(buf[i]) % 10]
+	}
+	return string(buf), nil
 }
 
 // func()

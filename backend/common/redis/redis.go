@@ -14,11 +14,11 @@ type RedisClient struct {
 	Client *redis.Client
 }
 
-func NewRedisClient(ctx context.Context) (*RedisClient, error) {
+func NewRedisClient(ctx context.Context, db int) (*RedisClient, error) {
 	rdb := redis.NewClient(&redis.Options{
 		Addr: os.Getenv("REDIS_ADDRESS"),
 		Password: os.Getenv("REDIS_PASSWORD"),
-		DB: 0,
+		DB: db,
 	})
 
 	_, err := rdb.Ping(ctx).Result()
