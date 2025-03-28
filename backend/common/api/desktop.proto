@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+option go_package = "github.com/cc-0000/indeq/common/api";
+
+package api;
+
+import "api/kafka.proto";
+
+service DesktopService {
+    rpc GetChunksFromUser(GetChunksFromUserRequest) returns (GetChunksFromUserResponse);
+    rpc SetupUserStats(SetupUserStatsRequest) returns (SetupUserStatsResponse);
+}
+
+message GetChunksFromUserRequest {
+    string user_id = 1;
+    repeated Metadata metadatas = 2;
+    uint32 ttl = 3;    // milliseconds
+}
+
+message GetChunksFromUserResponse {
+    int64 numChunks = 1;
+    repeated TextChunkMessage chunks = 2;
+}
+
+message SetupUserStatsRequest {
+    string user_id = 1;
+}
+
+message SetupUserStatsResponse {
+    bool success = 1;
+}
+
+message NewCrawl {
+    repeated string filePaths = 1;
+    repeated string fileHashes = 2;
+}
+
+message FileDoneMessage {
+    string file_path = 1;
+}
+
+message DesktopChunkRequest {
+    int64 request_id = 1;
+    repeated Metadata requestedChunks = 2;
+}
+  
+message DesktopChunkResponse {
+    int64 request_id = 1;
+    repeated TextChunkMessage textChunks = 2;
+}

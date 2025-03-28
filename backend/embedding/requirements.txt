@@ -1,0 +1,6 @@
+sentence-transformers
+numpy
+grpcio
+grpcio-tools
+protobuf
+python-dotenv

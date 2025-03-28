@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	pb "github.com/cc-0000/indeq/common/api"
@@ -22,11 +23,12 @@ import (
 )
 
 type ServiceClients struct {
-	queryClient    pb.QueryServiceClient
-	authClient     pb.AuthenticationServiceClient
-	waitlistClient pb.WaitlistServiceClient
-	crawlingClient pb.CrawlingServiceClient
-	rabbitMQConn   *amqp.Connection
+	queryClient       pb.QueryServiceClient
+	authClient        pb.AuthenticationServiceClient
+	integrationClient pb.IntegrationServiceClient
+	waitlistClient    pb.WaitlistServiceClient
+	rabbitMQConn      *amqp.Connection
+	crawlingClient    pb.CrawlingServiceClient
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -75,6 +77,7 @@ func authMiddleware(next http.HandlerFunc, clients *ServiceClients) http.Handler
 }
 
 func helloHandler(w http.ResponseWriter, r *http.Request) {
+	log.Print("hello request received")
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(&pb.HttpHelloResponse{Message: "Hello, World!"})
 }
@@ -86,6 +89,13 @@ func handleGetQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 		// Set up context with cancellation
 		ctx, cancel := context.WithCancel(r.Context())
 		defer cancel()
+
+		// get the ttl
+		queue_ttl, err := strconv.ParseUint(os.Getenv("QUERY_QUEUE_TTL"), 10, 32)
+		if err != nil {
+			log.Fatal("failed to find the query queue ttl in env variables")
+		}
+		queueTTL := int(queue_ttl)
 
 		// NOTE: expects authentication middleware to have already verified the token!!!
 		// Grab the token --> userId
@@ -101,10 +111,15 @@ func handleGetQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 		conversationId := fmt.Sprintf("%s-%s", verifyRes.UserId, incomingId)
 
 		// Handle SSE connection
+		allowedOrigins, ok := os.LookupEnv("ALLOWED_CLIENT_IP")
+		if !ok {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
-		w.Header().Set("Access-Control-Allow-Origin", "*") // this should be updated in the future to only allow frontend connections
+		w.Header().Set("Access-Control-Allow-Origin", allowedOrigins) // this should be updated in the future to only allow frontend connections
 
 		flusher, ok := w.(http.Flusher)
 		if !ok {
@@ -126,7 +141,7 @@ func handleGetQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 			false,          // exclusive
 			false,          // no-wait
 			amqp.Table{ // arguments
-				"x-expires": 300000, // 5 minutes in milliseconds
+				"x-expires": queueTTL,
 			},
 		)
 		if err != nil {
@@ -159,20 +174,15 @@ func handleGetQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 					return
 				}
 				// parse the message into json
-				thisMsg := string(msg.Body)
-				jsonData, _ := json.Marshal(struct {
-					Type string `json:"type"`
-					Data string `json:"data"`
-				}{
-					Type: "message",
-					Data: thisMsg,
-				})
+				var msgJson map[string]any
+				json.Unmarshal(msg.Body, &msgJson)
+
 				// write it out to the response
-				fmt.Fprintf(w, "data: %s\n\n", jsonData)
+				fmt.Fprintf(w, "data: %s\n\n", msg.Body)
 				flusher.Flush()
 
 				// if the message is blank there are no more messages
-				if thisMsg == "" {
+				if msgJson["type"] == "end" {
 					return
 				}
 			}
@@ -214,6 +224,7 @@ func handlePostQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 			detachedCtx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			_, err := clients.queryClient.MakeQuery(detachedCtx, &pb.QueryRequest{
+				UserId:         verifyRes.UserId,
 				ConversationId: conversationId,
 				Query:          queryRequest.Query,
 			})
@@ -227,6 +238,250 @@ func handlePostQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(httpResponse)
+	}
+}
+
+func stringToEnumProvider(provider string) (pb.Provider, error) {
+	switch strings.ToLower(provider) {
+	case "google":
+		return pb.Provider_GOOGLE, nil
+	case "microsoft":
+		return pb.Provider_MICROSOFT, nil
+	case "notion":
+		return pb.Provider_NOTION, nil
+	default:
+		return pb.Provider_PROVIDER_UNSPECIFIED, fmt.Errorf("invalid provider: %s", provider)
+	}
+}
+
+func handleOAuthURLGenerator(clients *ServiceClients) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var getOAuthURLRequest pb.HttpGetOAuthURLRequest
+		log.Println("Received request to get OAuth URL")
+		ctx := r.Context()
+
+		if err := json.NewDecoder(r.Body).Decode(&getOAuthURLRequest); err != nil {
+			http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+			return
+		}
+
+		if getOAuthURLRequest.Provider == "" {
+			http.Error(w, "Missing provider", http.StatusBadRequest)
+			return
+		}
+		// NOTE: expects authentication middleware to have already verified the token!!!
+		// Grab the token --> userId
+		auth_header := r.Header.Get("Authorization")
+		auth_token := strings.TrimPrefix(auth_header, "Bearer ")
+		verifyRes, err := clients.authClient.Verify(ctx, &pb.VerifyRequest{
+			Token: auth_token,
+		})
+
+		if err != nil || !verifyRes.Valid {
+			log.Println("Invalid token")
+			http.Error(w, "Invalid token", http.StatusUnauthorized)
+			return
+		}
+
+		provider, err := stringToEnumProvider(getOAuthURLRequest.Provider)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		oAuthURLRes, err := clients.integrationClient.GetOAuthURL(ctx, &pb.GetOAuthURLRequest{
+			Provider: provider,
+			UserId:   verifyRes.UserId,
+		})
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to get OAuth URL: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		respBody := &pb.HttpGetOAuthURLResponse{
+			Url: oAuthURLRes.Url,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		json.NewEncoder(w).Encode(respBody)
+	}
+}
+
+func handleGetIntegrationsGenerator(clients *ServiceClients) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log.Println("Received request to get users integrations")
+		// Set up context
+		ctx := r.Context()
+
+		// NOTE: expects authentication middleware to have already verified the token!!!
+		// Grab the token --> userId
+		auth_header := r.Header.Get("Authorization")
+		auth_token := strings.TrimPrefix(auth_header, "Bearer ")
+		verifyRes, err := clients.authClient.Verify(ctx, &pb.VerifyRequest{
+			Token: auth_token,
+		})
+
+		if err != nil || !verifyRes.Valid {
+			log.Println("Invalid token")
+			http.Error(w, "Invalid token", http.StatusUnauthorized)
+			return
+		}
+
+		res, err := clients.integrationClient.GetIntegrations(ctx, &pb.GetIntegrationsRequest{
+			UserId: verifyRes.UserId,
+		})
+
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to get integrations: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		response := &pb.HttpGetIntegrationsResponse{
+			Providers: make([]string, len(res.Providers)),
+		}
+		for i, provider := range res.Providers {
+			response.Providers[i] = provider.String()
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}
+}
+
+func handleConnectIntegrationGenerator(clients *ServiceClients) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log.Println("Received request to connect integration")
+		var connectIntegrationRequest pb.HttpConnectIntegrationRequest
+		// Set up context
+		ctx := r.Context()
+
+		if err := json.NewDecoder(r.Body).Decode(&connectIntegrationRequest); err != nil {
+			http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+			return
+		}
+
+		if connectIntegrationRequest.Provider == "" || connectIntegrationRequest.AuthCode == "" {
+			log.Println("Missing provider or auth code")
+			http.Error(w, "Missing provider or auth code", http.StatusBadRequest)
+			return
+		}
+
+		// NOTE: expects authentication middleware to have already verified the token!!!
+		// Grab the token --> userId
+		auth_header := r.Header.Get("Authorization")
+		auth_token := strings.TrimPrefix(auth_header, "Bearer ")
+		verifyRes, err := clients.authClient.Verify(ctx, &pb.VerifyRequest{
+			Token: auth_token,
+		})
+
+		if err != nil || !verifyRes.Valid {
+			http.Error(w, "Invalid token", http.StatusUnauthorized)
+			return
+		}
+
+		provider, err := stringToEnumProvider(connectIntegrationRequest.Provider)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		// check state from redis
+		if connectIntegrationRequest.State == "" {
+			log.Println("Missing state")
+			http.Error(w, "Missing state", http.StatusBadRequest)
+			return
+		}
+
+		validateRes, err := clients.integrationClient.ValidateOAuthState(ctx, &pb.ValidateOAuthStateRequest{
+			State: connectIntegrationRequest.State,
+		})
+
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to validate oauth state: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		if !validateRes.Success {
+			http.Error(w, validateRes.ErrorDetails, http.StatusBadRequest)
+			return
+		}
+
+		if validateRes.UserId != verifyRes.UserId {
+			http.Error(w, "User ID mismatch in OAuth state", http.StatusForbidden)
+			return
+		}
+
+		connectRes, err := clients.integrationClient.ConnectIntegration(ctx, &pb.ConnectIntegrationRequest{
+			UserId:   validateRes.UserId,
+			Provider: provider,
+			AuthCode: connectIntegrationRequest.AuthCode,
+		})
+
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to connect integration: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		respBody := &pb.HttpConnectIntegrationResponse{
+			Success:      connectRes.Success,
+			Message:      connectRes.Message,
+			ErrorDetails: connectRes.ErrorDetails,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(respBody)
+	}
+}
+
+func handleDisconnectIntegrationGenerator(clients *ServiceClients) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log.Println("Received request to disconnect integration")
+		var disconnectIntegrationRequest pb.HttpDisconnectIntegrationRequest
+		// Set up context
+		ctx := r.Context()
+
+		if err := json.NewDecoder(r.Body).Decode(&disconnectIntegrationRequest); err != nil {
+			http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+			return
+		}
+		if disconnectIntegrationRequest.Provider == "" {
+			http.Error(w, "Missing provider", http.StatusBadRequest)
+			return
+		}
+
+		// NOTE: expects authentication middleware to have already verified the token!!!
+		// Grab the token --> userId
+		auth_header := r.Header.Get("Authorization")
+		auth_token := strings.TrimPrefix(auth_header, "Bearer ")
+		verifyRes, err := clients.authClient.Verify(ctx, &pb.VerifyRequest{
+			Token: auth_token,
+		})
+
+		if err != nil || !verifyRes.Valid {
+			http.Error(w, "Invalid token", http.StatusUnauthorized)
+			return
+		}
+
+		provider, err := stringToEnumProvider(disconnectIntegrationRequest.Provider)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Invalid provider: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		disconnectRes, err := clients.integrationClient.DisconnectIntegration(ctx, &pb.DisconnectIntegrationRequest{
+			UserId:   verifyRes.UserId,
+			Provider: provider,
+		})
+
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to disconnect integration: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		respBody := &pb.HttpDisconnectIntegrationResponse{
+			Success: disconnectRes.Success,
+			Message: disconnectRes.Message,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(respBody)
 	}
 }
 
@@ -275,6 +530,7 @@ func handleRegisterGenerator(clients *ServiceClients) http.HandlerFunc {
 		})
 
 		if err != nil {
+			log.Print(err)
 			http.Error(w, "Failed to register user", http.StatusInternalServerError)
 			return
 		}
@@ -308,8 +564,9 @@ func handleLoginGenerator(clients *ServiceClients) http.HandlerFunc {
 		}
 
 		httpResponse := &pb.HttpLoginResponse{
-			Token: res.Token,
-			Error: res.Error,
+			Token:  res.Token,
+			UserId: res.UserId,
+			Error:  res.Error,
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(httpResponse)
@@ -400,7 +657,7 @@ func main() {
 	}
 
 	// Load TLS Config
-	tlsConfig, err := config.LoadTLSFromEnv("GATEWAY_CRT", "GATEWAY_KEY")
+	tlsConfig, err := config.LoadServerTLSFromEnv("GATEWAY_CRT", "GATEWAY_KEY")
 	if err != nil {
 		log.Fatal("Error loading TLS config for gateway service")
 	}
@@ -413,6 +670,10 @@ func main() {
 	defer rabbitMQConn.Close()
 
 	// Connect to the query service
+	clientConfig, err := config.LoadClientTLSFromEnv("GATEWAY_CRT", "GATEWAY_KEY", "CA_CRT")
+	if err != nil {
+		log.Fatal(err)
+	}
 	queryConn, err := grpc.NewClient(
 		os.Getenv("QUERY_ADDRESS"),
 		grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
@@ -428,15 +689,29 @@ func main() {
 	// Connect to the authentication service
 	authConn, err := grpc.NewClient(
 		os.Getenv("AUTH_ADDRESS"),
-		grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
-			RootCAs: certPool,
-		})),
+		grpc.WithTransportCredentials(credentials.NewTLS(clientConfig)),
 	)
 	if err != nil {
 		log.Fatalf("Failed to establish connection with auth-service: %v", err)
 	}
 	defer authConn.Close()
 	authServiceClient := pb.NewAuthenticationServiceClient(authConn)
+	if _, err = authServiceClient.Login(context.Background(), &pb.LoginRequest{}); err != nil {
+		log.Fatal(err)
+	}
+
+	// Connect to the integration service
+	integrationConn, err := grpc.NewClient(
+		os.Getenv("INTEGRATION_ADDRESS"),
+		grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
+			RootCAs: certPool,
+		})),
+	)
+	if err != nil {
+		log.Fatalf("Failed to establish connection with integration-service: %v", err)
+	}
+	defer integrationConn.Close()
+	integrationServiceClient := pb.NewIntegrationServiceClient(integrationConn)
 
 	//Connect to the crawling service
 	crawlingConn, err := grpc.NewClient(
@@ -466,11 +741,12 @@ func main() {
 
 	// Save the service clients for future use
 	serviceClients := &ServiceClients{
-		queryClient:    queryServiceClient,
-		authClient:     authServiceClient,
-		waitlistClient: waitlistServiceClient,
-		crawlingClient: crawlingServiceClient,
-		rabbitMQConn:   rabbitMQConn,
+		queryClient:       queryServiceClient,
+		authClient:        authServiceClient,
+		waitlistClient:    waitlistServiceClient,
+		crawlingClient:    crawlingServiceClient,
+		rabbitMQConn:      rabbitMQConn,
+		integrationClient: integrationServiceClient,
 	}
 	log.Print("Server has established connection with other services")
 
@@ -481,6 +757,11 @@ func main() {
 	mux.HandleFunc("POST /api/register", handleRegisterGenerator(serviceClients))
 	mux.HandleFunc("POST /api/login", handleLoginGenerator(serviceClients))
 	mux.HandleFunc("POST /api/verify", handleVerifyGenerator(serviceClients))
+	mux.HandleFunc("POST /api/csr", handleSignCSRGenerator(serviceClients))
+	mux.HandleFunc("POST /api/connect", authMiddleware(handleConnectIntegrationGenerator(serviceClients), serviceClients))
+	mux.HandleFunc("POST /api/disconnect", authMiddleware(handleDisconnectIntegrationGenerator(serviceClients), serviceClients))
+	mux.HandleFunc("GET /api/integrations", authMiddleware(handleGetIntegrationsGenerator(serviceClients), serviceClients))
+	mux.HandleFunc("POST /api/oauth", handleOAuthURLGenerator(serviceClients))
 	mux.HandleFunc("POST /api/waitlist", handleAddToWaitlist(serviceClients))
 	mux.HandleFunc("POST /api/manualcrawl", authMiddleware(handleManualCrawlGenerator(serviceClients), serviceClients))
 

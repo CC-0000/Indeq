@@ -34,12 +34,61 @@ message HttpLoginRequest {
 
 message HttpLoginResponse {
   string token = 1;
-  string error = 2;
+  string user_id = 2;
+  string error = 3;
 }
 
 message HttpVerifyResponse {
   bool valid = 1;
 }
+
+message HttpCSRRequest {
+  string email = 1;
+  string password = 2;
+  string csr_base64 = 3;
+}
+
+message HttpCSRResponse {
+  string certificate_base64 = 1;
+  string error = 2;
+}
+
+message HttpGetIntegrationsRequest {
+}
+
+message HttpGetIntegrationsResponse {
+  repeated string providers = 1;
+}
+
+message HttpConnectIntegrationRequest {
+  string Provider = 1;
+  string AuthCode = 2;
+  string State = 3;
+}
+
+message HttpConnectIntegrationResponse {
+  bool success = 1;
+  string message = 2;
+  string error_details = 3;
+}
+
+message HttpDisconnectIntegrationRequest {
+  string provider = 1;
+}
+
+message HttpDisconnectIntegrationResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message HttpGetOAuthURLRequest {
+  string provider = 1;
+}
+
+message HttpGetOAuthURLResponse {
+  string url = 1;
+}
+
 
 message HttpAddToWaitlistRequest {
   string email = 1;
