@@ -20,9 +20,9 @@ type SlidesProcessor struct {
 
 // SlideWordInfo stores word position information efficiently
 type SlideWordInfo struct {
-	SlideIndex  int    // Slide index
-	SlideOffset int    // Offset within slide
-	Word        string // The actual word
+	SlideIndex  int
+	SlideOffset int
+	Word        string
 }
 
 // NewSlidesProcessor initializes a new SlidesProcessor with a Google Slides service

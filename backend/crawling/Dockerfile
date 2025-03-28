@@ -40,5 +40,5 @@ WORKDIR /app/
 COPY --from=builder /app/crawling-service .
 COPY --from=builder /app/common/config/.env . 
 
-EXPOSE 50055
+EXPOSE 50059
 CMD ["./crawling-service"]

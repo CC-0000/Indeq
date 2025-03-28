@@ -12,10 +12,23 @@ import (
 	"time"
 
 	pb "github.com/cc-0000/indeq/common/api"
+	"github.com/cc-0000/indeq/common/config"
 	_ "github.com/lib/pq"
+	"github.com/segmentio/kafka-go"
 	"golang.org/x/oauth2"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
+
+type crawlingServer struct {
+	pb.UnimplementedCrawlingServiceServer
+	vectorConn *grpc.ClientConn
+	//vectorService      pb.VectorServiceClient
+	integrationConn *grpc.ClientConn
+	//integrationService pb.IntegrationServiceClient
+	db          *sql.DB
+	kafkaWriter *kafka.Writer
+}
 
 type Metadata struct {
 	DateCreated      time.Time // Universal timestamp for creation
@@ -55,14 +68,9 @@ type TokenInfo struct {
 	ErrorDesc string `json:"error_description"`
 }
 
-type crawlingServer struct {
-	pb.UnimplementedCrawlingServiceServer
-	db *sql.DB
-}
-
-// TODO: Implement GetAccessToken from integration service
+// GetAccessToken retrieves an access token for a specific provider from integration service
 func GetAccessToken(provider string) (string, string) {
-	accessToken := ""
+	accessToken := "ya29.a0AeXRPp5d_Jwn5wpbsd_FgGbocdPNG9YWV1DcRLBxjCC8ftqrBkLgDOxmwbfwNB46GRwvWZAK-cpRwQGDxCspdpcEUj7DE5TMTAiLSUREvGMBK8MH_TrQsFEKhgKYyMZC_ULZhIhIS-DzPruKRNNsMytLs8wSosiZX1A8tabzaCgYKAQsSARISFQHGX2MiWGQJIYG_NGgWJPrY3uUk8w0175"
 	if provider == "GOOGLE" {
 		tokenInfo, err := validateGoogleAccessToken(accessToken)
 		if err != nil {
@@ -74,6 +82,7 @@ func GetAccessToken(provider string) (string, string) {
 	return "", ""
 }
 
+// validateGoogleAccessToken validates a Google access token
 func validateGoogleAccessToken(accessToken string) (*TokenInfo, error) {
 	url := fmt.Sprintf("https://oauth2.googleapis.com/tokeninfo?access_token=%s", accessToken)
 	resp, err := http.Get(url)
@@ -106,13 +115,14 @@ func (s *crawlingServer) NewCrawler(ctx context.Context, userID string, accessTo
 	}
 }
 
+// UpdateCrawler goes through specific provider and return the new retrieval token and processed files
 func UpdateCrawler(ctx context.Context, accessToken string, retrievalToken string, provider string, service string, userID string) (string, ListofFiles, error) {
 	switch provider {
 	case "GOOGLE":
 		client := createGoogleOAuthClient(ctx, accessToken)
 		newRetrievalToken, processedFiles, err := UpdateCrawlGoogle(ctx, client, service, userID, retrievalToken)
 		if err != nil {
-			return "", ListofFiles{}, fmt.Errorf("error updating Google Drive crawl: %w", err)
+			return "", ListofFiles{}, fmt.Errorf("error updating Google crawl: %w", err)
 		}
 		return newRetrievalToken, processedFiles, nil
 	default:
@@ -120,17 +130,26 @@ func UpdateCrawler(ctx context.Context, accessToken string, retrievalToken strin
 	}
 }
 
-func RetrieveCrawler(ctx context.Context, accessToken string, retrievalToken string, metadata Metadata) error {
-	switch metadata.Provider {
-	case "GOOGLE":
-		client := createGoogleOAuthClient(ctx, accessToken)
-		_, err := RetrieveGoogleCrawler(ctx, client, metadata)
-		return err
-	default:
-		return nil
+// RetrieveCrawler retrieves a specific chunk from a Google Doc based on its ChunkID
+func RetrieveCrawler(ctx context.Context, accessToken string, metadataList []Metadata) (File, error) {
+	textChunks := make([]TextChunkMessage, 0)
+	for _, metadata := range metadataList {
+		switch metadata.Provider {
+		case "GOOGLE":
+			client := createGoogleOAuthClient(ctx, accessToken)
+			textChunk, err := RetrieveGoogleCrawler(ctx, client, metadata)
+			textChunks = append(textChunks, textChunk)
+			if err != nil {
+				return File{}, fmt.Errorf("error retrieving Google Doc chunk: %w", err)
+			}
+		default:
+			return File{}, fmt.Errorf("unsupported provider: %s", metadata.Provider)
+		}
 	}
+	return File{File: textChunks}, nil
 }
 
+// ManualCrawler updates the crawler when user presses update to make sure data is up-to-date
 func (s *crawlingServer) ManualCrawler(ctx context.Context, req *pb.ManualCrawlerRequest) (*pb.ManualCrawlerResponse, error) {
 	var found bool
 	rows, err := s.db.QueryContext(ctx, `
@@ -154,6 +173,7 @@ func (s *crawlingServer) ManualCrawler(ctx context.Context, req *pb.ManualCrawle
 			return nil, fmt.Errorf("error scanning retrieval token: %w", err)
 		}
 		found = true
+
 		accessToken, _ := GetAccessToken(provider)
 		if accessToken == "" {
 			log.Printf("Invalid access token for user %s", req.UserId)
@@ -168,11 +188,22 @@ func (s *crawlingServer) ManualCrawler(ctx context.Context, req *pb.ManualCrawle
 	}
 
 	if !found {
-		return &pb.ManualCrawlerResponse{Success: false}, nil
+		accessToken, _ := GetAccessToken("GOOGLE")
+		Listoffiles, err := s.NewCrawler(ctx, req.UserId, accessToken, "GOOGLE", []string{"https://www.googleapis.com/auth/drive.readonly", "https://www.googleapis.com/auth/gmail.readonly"})
+		if err != nil {
+			log.Printf("Error getting files for user %s: %v", req.UserId, err)
+			return &pb.ManualCrawlerResponse{Success: false}, nil
+		}
+		for _, file := range Listoffiles.Files {
+			log.Printf("Processed %d files for user %s", len(file.File), req.UserId)
+			log.Printf("File %s", file.File[0].Metadata.Title)
+		}
+		return &pb.ManualCrawlerResponse{Success: true}, nil
 	}
 	return &pb.ManualCrawlerResponse{Success: true}, nil
 }
 
+// UpdateDBCrawler updates the crawler with new access tokens to make sure data is up-to-date
 func UpdateDBCrawler(db *sql.DB) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -204,15 +235,12 @@ func UpdateDBCrawler(db *sql.DB) {
 			continue
 		}
 		accessToken, _ := GetAccessToken(provider)
-		if accessToken == "" {
-			log.Printf("Invalid access token for user %s", userID)
-			continue
-		}
-		_, err = updateCrawlerWithToken(ctx, db, userID, provider, service, retrievalToken, accessToken)
+		processedFiles, err := updateCrawlerWithToken(ctx, db, userID, provider, service, retrievalToken, accessToken)
 		if err != nil {
 			log.Printf("[UPDATE] Error updating crawler: %v", err)
 			continue
 		}
+		log.Printf("Processed %d files for user %s", len(processedFiles.Files), userID)
 	}
 }
 
@@ -221,7 +249,6 @@ func startPeriodicCrawlerWorker(db *sql.DB) {
 	ticker := time.NewTicker(time.Second * 30)
 	go func() {
 		for range ticker.C {
-			log.Println("Calling periodic crawler...")
 			UpdateDBCrawler(db)
 		}
 	}()
@@ -240,11 +267,9 @@ func updateCrawlerWithToken(ctx context.Context, db *sql.DB, userID, provider, s
 		log.Printf("Error updating crawler: %v", err)
 		return ListofFiles{}, err
 	}
-
 	if err := storeRetrievalToken(ctx, db, userID, provider, service, newRetrievalToken); err != nil {
 		return ListofFiles{}, err
 	}
-
 	return processedFiles, nil
 }
 
@@ -264,23 +289,12 @@ func storeRetrievalToken(ctx context.Context, db *sql.DB, userID, provider, serv
 	return err
 }
 
-func main() {
-	log.Println("Starting the crawling service...")
-
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		log.Fatalf("DATABASE_URL environment variable is required")
-	}
-
-	db, err := sql.Open("postgres", dbURL)
-	if err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
-	}
-	defer db.Close()
-
+// setupDatabase creates and configures the database tables
+func setupDatabase(db *sql.DB) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_, err = db.ExecContext(ctx, `
+
+	_, err := db.ExecContext(ctx, `
         CREATE TABLE IF NOT EXISTS retrievalTokens (
             id SERIAL PRIMARY KEY,
             user_id UUID NOT NULL,
@@ -293,23 +307,51 @@ func main() {
 			UNIQUE (user_id, service)
         );
     `)
-
 	if err != nil {
-		log.Fatalf("Failed to create retrievalTokens table: %v", err)
+		return fmt.Errorf("failed to create retrievalTokens table: %v", err)
 	}
-
 	_, err = db.ExecContext(ctx, `
 		CREATE INDEX IF NOT EXISTS user_service_idx ON retrievalTokens (user_id, service);
 	`)
 	if err != nil {
-		log.Fatalf("Failed to create user_service index: %v", err)
+		return fmt.Errorf("failed to create user_service index: %v", err)
 	}
 
 	fmt.Println("Database setup completed: retrieval_tokens table is ready.")
+	return nil
+}
+
+func main() {
+	log.Println("Starting the crawling service...")
+
+	// Load the .env file
+	err := config.LoadSharedConfig()
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
+
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		log.Fatalf("DATABASE_URL environment variable is required")
+	}
+
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		log.Fatalf("Failed to connect to database: %v", err)
+	}
+	defer db.Close()
+
+	if err := setupDatabase(db); err != nil {
+		log.Fatalf("Database setup failed: %v", err)
+	}
 
 	grpcAddress := os.Getenv("CRAWLING_PORT")
 	if grpcAddress == "" {
 		log.Fatalf("CRAWLING_PORT environment variable is required")
+	}
+	tlsConfig, err := config.LoadTLSFromEnv("CRAWLING_CRT", "CRAWLING_KEY")
+	if err != nil {
+		log.Fatalf("Error loading TLS config for crawling service: %v", err)
 	}
 	listener, err := net.Listen("tcp", grpcAddress)
 	if err != nil {
@@ -321,7 +363,9 @@ func main() {
 
 	startPeriodicCrawlerWorker(db)
 
-	opts := []grpc.ServerOption{}
+	opts := []grpc.ServerOption{
+		grpc.Creds(credentials.NewTLS(tlsConfig)),
+	}
 	grpcServer := grpc.NewServer(opts...)
 	pb.RegisterCrawlingServiceServer(grpcServer, &crawlingServer{db: db})
 	log.Printf("Crawling Service listening on %v\n", listener.Addr())

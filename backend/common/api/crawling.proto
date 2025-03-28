@@ -38,25 +38,32 @@ message ManualCrawlerResponse {
     string error = 2;        // Error message if success is false
 }
 
+
+// Response from Vector Service after receiving a chunk
+message SendChunkToVectorResponse {
+    bool success = 1;           // e.g., true if chunk was processed
+    File file = 2;              // e.g., "File{File: []TextChunkMessage}"
+    string error = 3;           // e.g., "Processing failed" if success is false
+}
+
+// File message for sending text chunks to Vector Service
+message File {
+    repeated TextChunkMessage File = 1; // e.g., "File{File: []TextChunkMessage}"
+}
+
 // Message for sending text chunks to Vector Service
 message TextChunkMessage {
     Metadata metadata = 1;      // Metadata about the file and chunk
     string content = 2;         // Actual content, e.g., "This is the first part..."
 }
 
-// Response from Vector Service after receiving a chunk
-message SendChunkToVectorResponse {
-    bool success = 1;           // e.g., true if chunk was processed
-    string error = 3;           // e.g., "Processing failed" if success is false
-}
-
 // Enum for supported platforms
 enum Platform {
-    PLATFORM_LOCAL = 0;
-    PLATFORM_GOOGLE_DRIVE = 1;
-    PLATFORM_GOOGLE_DOCS = 2;
-    PLATFORM_MICROSOFT = 3;
-    PLATFORM_NOTION = 4;
+    LOCAL = 0;
+    GOOGLE_DRIVE = 1;
+    GOOGLE_DOCS = 2;
+    MICROSOFT = 3;
+    NOTION = 4;
 }
 
 // Metadata for a file or resource

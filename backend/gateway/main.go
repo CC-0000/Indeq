@@ -19,7 +19,6 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 type ServiceClients struct {
@@ -442,7 +441,9 @@ func main() {
 	//Connect to the crawling service
 	crawlingConn, err := grpc.NewClient(
 		os.Getenv("CRAWLING_ADDRESS"),
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
+			RootCAs: certPool,
+		})),
 	)
 	if err != nil {
 		log.Fatalf("Failed to establish connection with crawling-service: %v", err)

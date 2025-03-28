@@ -145,7 +145,6 @@ func (dp *DocProcessor) ChunkDocument(doc *docs.Document, baseMetadata Metadata)
 		}
 	}
 
-	// Process the pre-built word list to create chunks
 	totalWords := len(wordInfoList)
 	for startIndex := 0; startIndex < totalWords; startIndex += int(dp.baseChunkSize) - int(dp.baseOverlapSize) {
 
@@ -267,7 +266,6 @@ func (dp *DocProcessor) ExtractDocsChunk(doc *docs.Document, startPara, startOff
 
 // ProcessGoogleDoc is used to process a Google Doc
 func ProcessGoogleDoc(ctx context.Context, client *http.Client, file File) (File, error) {
-	fmt.Printf("ProcessGoogleDoc called for ResourceID: %s\n", file.File[0].Metadata.ResourceID)
 	processor, err := NewDocProcessor(ctx, client, rateLimiter)
 	if err != nil {
 		return file, err
