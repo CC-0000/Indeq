@@ -349,7 +349,7 @@ func main() {
 	if grpcAddress == "" {
 		log.Fatalf("CRAWLING_PORT environment variable is required")
 	}
-	tlsConfig, err := config.LoadTLSFromEnv("CRAWLING_CRT", "CRAWLING_KEY")
+	tlsConfig, err := config.LoadServerTLSFromEnv("CRAWLING_CRT", "CRAWLING_KEY")
 	if err != nil {
 		log.Fatalf("Error loading TLS config for crawling service: %v", err)
 	}

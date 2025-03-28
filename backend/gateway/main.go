@@ -31,51 +31,6 @@ type ServiceClients struct {
 	crawlingClient    pb.CrawlingServiceClient
 }
 
-func corsMiddleware(next http.Handler) http.Handler {
-	// establishes site-wide CORS policies
-	allowedIp, ok := os.LookupEnv("ALLOWED_CLIENT_IP")
-	if !ok {
-		log.Fatal("Failed to retrieve ALLOWED_CLIENT_IP")
-	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", allowedIp)
-
-		// Handle preflight requests
-		if r.Method == "OPTIONS" {
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-			w.Header().Set("Access-Control-Max-Age", "3600") // tell the browser to cache the pre-flight request for 3600 seconds aka an hour
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-
-		next.ServeHTTP(w, r)
-	})
-}
-
-func authMiddleware(next http.HandlerFunc, clients *ServiceClients) http.HandlerFunc {
-	// simply modifies a handler func to pass these checks first
-	return func(w http.ResponseWriter, r *http.Request) {
-		auth_header := r.Header.Get("Authorization")
-		if auth_header == "" {
-			http.Error(w, "No authorization token provided", http.StatusUnauthorized)
-			return
-		}
-		auth_token := strings.TrimPrefix(auth_header, "Bearer ")
-
-		res, err := clients.authClient.Verify(r.Context(), &pb.VerifyRequest{
-			Token: auth_token,
-		})
-
-		if err != nil || !res.Valid {
-			http.Error(w, "Invalid token", http.StatusUnauthorized)
-			return
-		}
-
-		next.ServeHTTP(w, r) // if they pass the checks serve the next handler
-	}
-}
-
 func helloHandler(w http.ResponseWriter, r *http.Request) {
 	log.Print("hello request received")
 	w.Header().Set("Content-Type", "application/json")
@@ -603,6 +558,40 @@ func handleVerifyGenerator(clients *ServiceClients) http.HandlerFunc {
 		if err != nil {
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		}
+	}
+}
+
+func handleSignCSRGenerator(clients *ServiceClients) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log.Println("received sign csr request")
+		var csrRequest pb.HttpCSRRequest
+
+		if err := json.NewDecoder(r.Body).Decode(&csrRequest); err != nil {
+			log.Printf("[HTTP 400] failed to decode the incoming csr request: %v", err)
+			http.Error(w, "Bad Request", http.StatusBadRequest)
+			return
+		}
+
+		// try to make a csr request
+		csrRes, err := clients.authClient.SignCSR(r.Context(), &pb.SignCSRRequest{
+			CsrBase64: csrRequest.CsrBase64,
+			LoginRequest: &pb.LoginRequest{
+				Email:    csrRequest.Email,
+				Password: csrRequest.Password,
+			},
+		})
+
+		if err != nil {
+			log.Printf("[HTTP 500] failed to make the csr signing request: %v", err)
+			http.Error(w, "Failed to sign csr", http.StatusInternalServerError)
+			return
+		}
+
+		httpResponse := &pb.HttpCSRResponse{
+			CertificateBase64: csrRes.CertificateBase64,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(httpResponse)
 	}
 }
 

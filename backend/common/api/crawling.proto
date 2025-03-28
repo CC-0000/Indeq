@@ -6,10 +6,12 @@ import "google/protobuf/timestamp.proto";
 
 package api;
 
+import "api/kafka.proto";
+
 // CrawlingService definition
 service CrawlingService {
     rpc GetInitalCrawler (GetInitalCrawlerRequest) returns (GetInitalCrawlerResponse);
-    rpc SendChunkToVector (TextChunkMessage) returns (SendChunkToVectorResponse);
+    rpc SendChunkToVectorRequest(TextChunkMessage) returns (SendChunkToVectorResponse);
     rpc ManualCrawler (ManualCrawlerRequest) returns (ManualCrawlerResponse);
 }
 
@@ -38,46 +40,12 @@ message ManualCrawlerResponse {
     string error = 2;        // Error message if success is false
 }
 
-
-// Response from Vector Service after receiving a chunk
+message SendChunkToVectorRequest {
+    int64 request_id = 1;
+    repeated Metadata requestedChunks = 2;
+}
+  
 message SendChunkToVectorResponse {
-    bool success = 1;           // e.g., true if chunk was processed
-    File file = 2;              // e.g., "File{File: []TextChunkMessage}"
-    string error = 3;           // e.g., "Processing failed" if success is false
-}
-
-// File message for sending text chunks to Vector Service
-message File {
-    repeated TextChunkMessage File = 1; // e.g., "File{File: []TextChunkMessage}"
-}
-
-// Message for sending text chunks to Vector Service
-message TextChunkMessage {
-    Metadata metadata = 1;      // Metadata about the file and chunk
-    string content = 2;         // Actual content, e.g., "This is the first part..."
-}
-
-// Enum for supported platforms
-enum Platform {
-    LOCAL = 0;
-    GOOGLE_DRIVE = 1;
-    GOOGLE_DOCS = 2;
-    MICROSOFT = 3;
-    NOTION = 4;
-}
-
-// Metadata for a file or resource
-message Metadata {
-    google.protobuf.Timestamp date_created = 1;      // e.g., "2017-02-17T00:12:00Z"
-    google.protobuf.Timestamp date_last_modified = 2;// e.g., "2017-02-19T01:04:00Z"
-    string user_id = 3;         // e.g., "af948791-409b-43f3-807a-9dcf6589b056"
-    string file_id = 4;         // e.g., "4i23uh5i-2342-g452-g5gg-o9385h6dahl1"
-    string resource_type = 5;   // e.g., "text/plain"
-    string file_path = 6;       // e.g., "/docs/myfolder/file.txt"
-    string file_url = 7;        // e.g., "https://drive.google.com/file/xyz"
-    string chunk_id = 8;        // e.g., "chunk-001"
-    uint64 chunk_size = 9;      // Size in bytes, e.g., 1024
-    uint64 chunk_number = 10;   // Sequence number, e.g., 1
-    string title = 11;          // e.g., "My Journal"
-    Platform platform = 12;     // e.g., PLATFORM_GOOGLE_DRIVE
+    int64 request_id = 1;
+    repeated TextChunkMessage textChunks = 2;
 }

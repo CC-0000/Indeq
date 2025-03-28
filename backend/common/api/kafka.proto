@@ -23,6 +23,13 @@ message Metadata {
     uint32 end = 6;       // Col 10 <-- start of the block INCLUSIVE
     string title = 7;          // "My journal"
     Platform platform = 8;     // google, notion, etc.
+    string file_id = 9;         // e.g., "4i23uh5i-2342-g452-g5gg-o9385h6dahl1"
+    string resource_type = 10;   // e.g., "text/plain"
+    string file_url = 11;        // e.g., "https://drive.google.com/file/xyz"
+    string chunk_id = 12;        // e.g., ""
+    uint64 chunk_size = 13;      // Size in bytes, e.g., 1024
+    uint64 chunk_number = 14;   // Sequence number, e.g., 1
+
 }
 
 message TextChunkMessage {
