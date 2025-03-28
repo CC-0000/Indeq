@@ -2,31 +2,24 @@ syntax = "proto3";
 
 option go_package = "github.com/cc-0000/indeq/common/api";
 
-import "google/protobuf/timestamp.proto";
-
 package api;
-
-import "api/kafka.proto";
 
 // CrawlingService definition
 service CrawlingService {
-    rpc GetInitalCrawler (GetInitalCrawlerRequest) returns (GetInitalCrawlerResponse);
-    rpc SendChunkToVectorRequest(TextChunkMessage) returns (SendChunkToVectorResponse);
+    rpc GetInitalCrawler (StartInitalCrawlerRequest) returns (StartInitalCrawlerResponse);
     rpc ManualCrawler (ManualCrawlerRequest) returns (ManualCrawlerResponse);
 }
 
-// Request message for getting access token from Integration Service
-message GetInitalCrawlerRequest {
-    string user_id = 1;      // Unique user identifier, e.g., "4i23uh5o9385h6dahl1"
-    string access_token = 2; // Access token, e.g., "4i23uh5i-2342-g452-g5gg-o9385h6dahl1"
-    string provider = 3;     // Provider name, e.g., "GOOGLE"
-    repeated string scopes = 4; // Scopes required for the provider
+message StartInitalCrawlerRequest {
+    string user_id = 1;
+    string provider = 2;
+    string access_token = 3;
 }
 
-// Response message from Integration Service with access token
-message GetInitalCrawlerResponse {
-    bool success = 1;        // Indicates if the request succeeded, e.g., true
-    string error = 2;        // Error message if success is false
+message StartInitalCrawlerResponse {
+    bool success = 1;
+    string message = 2;
+    string error_details = 3;
 }
 
 // Request message for updating crawler
@@ -38,14 +31,4 @@ message ManualCrawlerRequest {
 message ManualCrawlerResponse {
     bool success = 1;        // Indicates if the update succeeded
     string error = 2;        // Error message if success is false
-}
-
-message SendChunkToVectorRequest {
-    int64 request_id = 1;
-    repeated Metadata requestedChunks = 2;
-}
-  
-message SendChunkToVectorResponse {
-    int64 request_id = 1;
-    repeated TextChunkMessage textChunks = 2;
 }

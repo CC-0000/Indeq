@@ -14,7 +14,6 @@ import (
 	pb "github.com/cc-0000/indeq/common/api"
 	"github.com/cc-0000/indeq/common/config"
 	_ "github.com/lib/pq"
-	"github.com/segmentio/kafka-go"
 	"golang.org/x/oauth2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -22,12 +21,9 @@ import (
 
 type crawlingServer struct {
 	pb.UnimplementedCrawlingServiceServer
-	vectorConn *grpc.ClientConn
-	//vectorService      pb.VectorServiceClient
-	integrationConn *grpc.ClientConn
-	//integrationService pb.IntegrationServiceClient
-	db          *sql.DB
-	kafkaWriter *kafka.Writer
+	integrationConn    *grpc.ClientConn
+	integrationService pb.IntegrationServiceClient
+	db                 *sql.DB
 }
 
 type Metadata struct {
@@ -68,18 +64,17 @@ type TokenInfo struct {
 	ErrorDesc string `json:"error_description"`
 }
 
-// GetAccessToken retrieves an access token for a specific provider from integration service
-func GetAccessToken(provider string) (string, string) {
-	accessToken := "ya29.a0AeXRPp5d_Jwn5wpbsd_FgGbocdPNG9YWV1DcRLBxjCC8ftqrBkLgDOxmwbfwNB46GRwvWZAK-cpRwQGDxCspdpcEUj7DE5TMTAiLSUREvGMBK8MH_TrQsFEKhgKYyMZC_ULZhIhIS-DzPruKRNNsMytLs8wSosiZX1A8tabzaCgYKAQsSARISFQHGX2MiWGQJIYG_NGgWJPrY3uUk8w0175"
+// ValidateAccessToken validates an access token for a specific provider
+func ValidateAccessToken(accessToken, provider string) (string, string, error) {
 	if provider == "GOOGLE" {
 		tokenInfo, err := validateGoogleAccessToken(accessToken)
 		if err != nil {
 			fmt.Printf("Error validating Google access token: %v\n", err)
-			return "", ""
+			return "", "", err
 		}
-		return accessToken, tokenInfo.Scope
+		return accessToken, tokenInfo.Scope, nil
 	}
-	return "", ""
+	return "", "", fmt.Errorf("unsupported provider: %s", provider)
 }
 
 // validateGoogleAccessToken validates a Google access token
@@ -101,6 +96,37 @@ func validateGoogleAccessToken(accessToken string) (*TokenInfo, error) {
 	}
 
 	return &tokenInfo, nil
+}
+
+func (s *crawlingServer) StartInitalCrawler(ctx context.Context, req *pb.StartInitalCrawlerRequest) (*pb.StartInitalCrawlerResponse, error) {
+	providerStr := req.Provider
+	_, scope, err := ValidateAccessToken(req.AccessToken, providerStr)
+	if err != nil {
+		return &pb.StartInitalCrawlerResponse{
+			Success:      false,
+			Message:      fmt.Sprintf("Failed to validate access token: %v", err),
+			ErrorDetails: err.Error(),
+		}, nil
+	}
+	files, err := s.NewCrawler(ctx, req.UserId, req.AccessToken, providerStr, []string{scope})
+	if err != nil {
+		return &pb.StartInitalCrawlerResponse{
+			Success:      false,
+			Message:      fmt.Sprintf("Failed to start initial crawler: %v", err),
+			ErrorDetails: err.Error(),
+		}, nil
+	}
+
+	log.Printf("Initial crawler started successfully for user %s", req.UserId)
+	for i, file := range files.Files {
+		log.Printf("File %d: %s", i, file.File[0].Metadata.ResourceID)
+	}
+
+	return &pb.StartInitalCrawlerResponse{
+		Success:      true,
+		Message:      "Initial crawler started successfully",
+		ErrorDetails: "",
+	}, nil
 }
 
 // Things that will be crawled Google, Microsoft, Notion
@@ -174,31 +200,20 @@ func (s *crawlingServer) ManualCrawler(ctx context.Context, req *pb.ManualCrawle
 		}
 		found = true
 
-		accessToken, _ := GetAccessToken(provider)
-		if accessToken == "" {
-			log.Printf("Invalid access token for user %s", req.UserId)
-			continue
-		}
-		processedFile, err := updateCrawlerWithToken(ctx, s.db, req.UserId, provider, service, retrievalToken, accessToken)
-		if err != nil {
-			log.Printf("Error updating crawler: %v", err)
-			continue
-		}
-		log.Printf("Processed %d files for user %s", len(processedFile.Files), req.UserId)
+		// if accessToken == "" {
+		// 	log.Printf("Invalid access token for user %s", req.UserId)
+		// 	continue
+		// }
+		//processedFile, err := updateCrawlerWithToken(ctx, s.db, req.UserId, provider, service, retrievalToken, accessToken)
+		// if err != nil {
+		// 	log.Printf("Error updating crawler: %v", err)
+		// 	continue
+		// }
+		// log.Printf("Processed %d files for user %s", len(processedFile.Files), req.UserId)
 	}
 
 	if !found {
-		accessToken, _ := GetAccessToken("GOOGLE")
-		Listoffiles, err := s.NewCrawler(ctx, req.UserId, accessToken, "GOOGLE", []string{"https://www.googleapis.com/auth/drive.readonly", "https://www.googleapis.com/auth/gmail.readonly"})
-		if err != nil {
-			log.Printf("Error getting files for user %s: %v", req.UserId, err)
-			return &pb.ManualCrawlerResponse{Success: false}, nil
-		}
-		for _, file := range Listoffiles.Files {
-			log.Printf("Processed %d files for user %s", len(file.File), req.UserId)
-			log.Printf("File %s", file.File[0].Metadata.Title)
-		}
-		return &pb.ManualCrawlerResponse{Success: true}, nil
+		return &pb.ManualCrawlerResponse{Success: false}, nil
 	}
 	return &pb.ManualCrawlerResponse{Success: true}, nil
 }
@@ -234,13 +249,13 @@ func UpdateDBCrawler(db *sql.DB) {
 			log.Printf("Error scanning retrieval token: %v", err)
 			continue
 		}
-		accessToken, _ := GetAccessToken(provider)
-		processedFiles, err := updateCrawlerWithToken(ctx, db, userID, provider, service, retrievalToken, accessToken)
-		if err != nil {
-			log.Printf("[UPDATE] Error updating crawler: %v", err)
-			continue
-		}
-		log.Printf("Processed %d files for user %s", len(processedFiles.Files), userID)
+		// accessToken, _ := GetAccessToken(provider)
+		// processedFiles, err := updateCrawlerWithToken(ctx, db, userID, provider, service, retrievalToken, accessToken)
+		// if err != nil {
+		// 	log.Printf("[UPDATE] Error updating crawler: %v", err)
+		// 	continue
+		// }
+		// log.Printf("Processed %d files for user %s", len(processedFiles.Files), userID)
 	}
 }
 
@@ -249,7 +264,8 @@ func startPeriodicCrawlerWorker(db *sql.DB) {
 	ticker := time.NewTicker(time.Second * 30)
 	go func() {
 		for range ticker.C {
-			UpdateDBCrawler(db)
+			log.Println("Running periodic crawler worker...")
+			//UpdateDBCrawler(db)
 		}
 	}()
 }

@@ -30,7 +30,7 @@ services:
       - indeq-net
 
   kafka:
-    image: apache/kafka:latest
+    image: apache/kafka:3.9.0
     container_name: kafka
     env_file:
       - ./common/config/.env
