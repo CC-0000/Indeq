@@ -1,4 +1,4 @@
-import type { BotMessage, ChatState } from "$lib/types/chat";
+import type { BotMessage, ChatState, Source } from "$lib/types/chat";
 
 export function processSource(payload: any, botMessage: BotMessage) {
     const sourceId = payload.excerpt_number;

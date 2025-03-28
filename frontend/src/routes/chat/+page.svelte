@@ -112,11 +112,11 @@
                 };
                 
                 if (isReasoning) {
-                    processReasoningMessage(payload.data, botMessage, state);
+                    processReasoningMessage(payload.token, botMessage, state);
                     messages = state.messages;
                     isReasoning = state.isReasoning;
                 } else {
-                    processOutputMessage(payload.data, botMessage, state);
+                    processOutputMessage(payload.token, botMessage, state);
                     messages = state.messages;
                 }
           }
