@@ -157,7 +157,9 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 	})
 	if err != nil {
 		// TODO: don't error out and instead let the llm know that you were unable to find information
-		return &pb.QueryResponse{}, fmt.Errorf("failed to get top k chunks: %w", err)
+		topKChunksResponse = &pb.RetrieveTopKChunksResponse{
+			TopKChunks: []*pb.TextChunkMessage{},
+		}
 	}
 
 	// Group chunks by file path
