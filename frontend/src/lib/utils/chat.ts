@@ -1,13 +1,19 @@
-interface BotMessage {
-  text: string;
-  sender: string;
-  reasoning: { text: string; collapsed: boolean }[];
-  reasoningSectionCollapsed: boolean;
-}
+import type { BotMessage, ChatState, Source } from "$lib/types/chat";
 
-interface ChatState {
-  messages: BotMessage[];
-  isReasoning: boolean;
+export function processSource(payload: any, botMessage: BotMessage) {
+    const sourceId = payload.excerpt_number;
+    const sourceExtension = payload.extension;
+    const sourceFilePath = payload.file_path;
+    const sourceTitle = payload.title;
+
+    const source : Source = {
+        id: sourceId,
+        extension: sourceExtension,
+        filePath: sourceFilePath,
+        title: sourceTitle,
+    }
+
+    botMessage.sources.push(source);
 }
 
 // Function to process reasoning messages and update message state

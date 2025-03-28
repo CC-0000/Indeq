@@ -1,21 +1,17 @@
 <script lang="ts">
-  import { SearchIcon, ChevronDownIcon, CheckIcon } from 'svelte-feather-icons';
-  import { onDestroy } from 'svelte';
-  import 'katex/dist/katex.min.css';
-  import { processReasoningMessage, processOutputMessage, toggleReasoning } from '$lib/utils/chat';
-  import { renderLatex, renderContent } from '$lib/utils/katex';
+    import { SearchIcon, ChevronDownIcon, CheckIcon, FileIcon, FileTextIcon, HardDriveIcon } from "svelte-feather-icons";
+    import { onDestroy } from 'svelte';
+    import "katex/dist/katex.min.css";
+    import { processReasoningMessage, processOutputMessage, toggleReasoning, processSource } from '$lib/utils/chat';
+    import { renderLatex, renderContent } from '$lib/utils/katex';
+	  import type { BotMessage, ChatState, Source } from "$lib/types/chat";
 
   let userQuery = '';
   let conversationId: string | null = null;
   const truncateLength = 80;
 
   let eventSource: EventSource | null = null;
-  let messages: {
-    text: string;
-    sender: string;
-    reasoning: { text: string; collapsed: boolean }[];
-    reasoningSectionCollapsed: boolean;
-  }[] = [];
+  let messages: BotMessage[] = [];
   let isFullscreen = false;
   let isReasoning = false;
   let conversationContainer: HTMLElement | null = null;
@@ -39,22 +35,16 @@
         return;
       }
 
-      messages = [
-        ...messages,
-        { text: userQuery, sender: 'user', reasoning: [], reasoningSectionCollapsed: false }
-      ];
+        messages = [...messages, { text: userQuery, sender: "user", reasoning: [], reasoningSectionCollapsed: false, sources: [] }];
 
       const data = await res.json();
       conversationId = data.conversation_id;
 
-      messages = [
-        ...messages,
-        { text: '', sender: 'bot', reasoning: [], reasoningSectionCollapsed: false }
-      ];
-      streamResponse();
-    } catch (err) {
-      console.error('sendMessage error:', err);
-    }
+        messages = [...messages, { text: "", sender: "bot", reasoning: [], reasoningSectionCollapsed: false, sources: [] }];
+        streamResponse();
+        } catch (err) {
+        console.error('sendMessage error:', err);
+        }
 
     // Reset the user query
     userQuery = '';
@@ -69,36 +59,68 @@
     // Close any existing connection
     eventSource?.close();
 
-    isFullscreen = true;
-    isReasoning = true;
+        isFullscreen = true;
+        isReasoning = false;
 
-    const url = `/chat?conversationId=${encodeURIComponent(conversationId)}`;
-    eventSource = new EventSource(url);
-    let botMessage = {
-      text: '',
-      sender: 'bot',
-      reasoning: [] as { text: string; collapsed: boolean }[],
-      reasoningSectionCollapsed: false
-    };
+        const url = `/chat?conversationId=${encodeURIComponent(conversationId)}`;
+        eventSource = new EventSource(url);
+        let botMessage : BotMessage = { 
+            text: "", 
+            sender: "bot", 
+            reasoning: [] as {text: string; collapsed: boolean}[],
+            reasoningSectionCollapsed: false,
+            sources: [] as Source[],
+            sourcesScrollAtEnd: false,
+            isScrollable: false 
+        };
 
-    eventSource.addEventListener('message', (evt) => {
-      const payload = JSON.parse(evt.data);
+        eventSource.addEventListener('message', (evt) => {
+          const payload = JSON.parse(evt.data);
+          const type = payload.type;
 
-      // state object to pass to the processing functions
-      const state = {
-        messages,
-        isReasoning
-      };
-
-      if (isReasoning) {
-        processReasoningMessage(payload.data, botMessage, state);
-        messages = state.messages;
-        isReasoning = state.isReasoning;
-      } else {
-        processOutputMessage(payload.data, botMessage, state);
-        messages = state.messages;
-      }
-    });
+          switch (type) {
+            case "think_start":
+                isReasoning = true;
+                return;
+            case "think_end":
+                isReasoning = false;
+                return;
+            case "source":
+                processSource(payload, botMessage);
+                setTimeout(() => {
+                    const scrollContainer = document.querySelector(`.scroll-container:last-child`) as HTMLElement;
+                    if (scrollContainer) {
+                        const isScrollable = scrollContainer.scrollWidth > scrollContainer.clientWidth;
+                        messages = messages.map((msg, idx) => 
+                            idx === messages.length - 1
+                                ? {...msg, isScrollable}
+                                : msg
+                        );
+                    }
+                }, 0);
+                return;
+            case "end":
+                if (eventSource) {
+                    eventSource.close();
+                }
+                return;
+            case "token":
+                // state object to pass to the processing functions
+                const state : ChatState = {
+                    messages,
+                    isReasoning
+                };
+                
+                if (isReasoning) {
+                    processReasoningMessage(payload.token, botMessage, state);
+                    messages = state.messages;
+                    isReasoning = state.isReasoning;
+                } else {
+                    processOutputMessage(payload.token, botMessage, state);
+                    messages = state.messages;
+                }
+          }
+        });
 
     eventSource.addEventListener('error', (err) => {
       console.error('SSE error:', err);
@@ -106,9 +128,72 @@
     });
   }
 
-  onDestroy(() => {
-    eventSource?.close();
-  });
+    onDestroy(() => {
+        eventSource?.close();
+    });
+
+    function handleScroll(e: Event, messageIndex: number) {
+        const container = e.target as HTMLElement;
+        const atEnd = container.scrollLeft + container.clientWidth >= container.scrollWidth - 10;
+        const isScrollable = container.scrollWidth > container.clientWidth;
+        messages = messages.map((msg, idx) => 
+            idx === messageIndex 
+                ? {...msg, sourcesScrollAtEnd: atEnd, isScrollable}
+                : msg
+        );
+    }
+
+    function checkScrollable(container: HTMLElement, messageIndex: number) {
+        const isScrollable = container.scrollWidth > container.clientWidth;
+        messages = messages.map((msg, idx) => 
+            idx === messageIndex 
+                ? {...msg, isScrollable}
+                : msg
+        );
+    }
+
+    function scrollToPosition(element: HTMLElement, messageIndex: number) {
+        const message = messages[messageIndex];
+        if (message.sourcesScrollAtEnd) {
+            element.scrollTo({ left: 0, behavior: 'smooth' });
+            // Wait for scroll animation to complete before updating state
+            element.addEventListener('scrollend', () => {
+                messages = messages.map((msg, idx) => 
+                    idx === messageIndex 
+                        ? {...msg, sourcesScrollAtEnd: false}
+                        : msg
+                );
+            }, { once: true });
+        } else {
+            element.scrollTo({ left: element.scrollWidth, behavior: 'smooth' }); // Add smooth scrolling
+            // Wait for scroll animation to complete before updating state
+            element.addEventListener('scrollend', () => {
+                messages = messages.map((msg, idx) => 
+                    idx === messageIndex 
+                        ? {...msg, sourcesScrollAtEnd: true}
+                        : msg
+                );
+            }, { once: true });
+        }
+    }
+
+    // Add the action to check scrollability on mount
+    function initScrollCheck(node: HTMLElement, messageIndex: number) {
+        checkScrollable(node, messageIndex);
+        
+        const resizeObserver = new ResizeObserver(() => {
+            checkScrollable(node, messageIndex);
+        });
+        
+        resizeObserver.observe(node);
+        
+        return {
+            destroy() {
+                resizeObserver.disconnect();
+            }
+        };
+    }
+
 </script>
 
 <svelte:head>
@@ -201,6 +286,62 @@
               {#if message.sender === 'user'}
                 <div class="font-bold prose-xl">{message.text}</div>
               {:else}
+                {#if message.sources.length > 0}
+                  <div class="mb-6">
+                      <div class="flex justify-between items-center mb-2">
+                          <h3 class="text-sm font-semibold text-gray-600">Sources</h3>
+                          {#if message.isScrollable}
+                          <button 
+                              class="text-xs text-gray-400 hover:text-gray-600 transition-colors cursor-pointer"
+                              on:click={(e) => {
+                                  const target = e.target as HTMLElement;
+                                  const scrollContainer = target.closest('.mb-6')?.querySelector('.scroll-container');
+                                  if (scrollContainer) {
+                                      scrollToPosition(scrollContainer as HTMLElement, messageIndex);
+                                  }
+                              }}
+                          >
+                              {message.sourcesScrollAtEnd ? '← Scroll to start' : 'Scroll to end →'}
+                          </button>
+                          {/if}
+                      </div>
+
+                      <!-- Scroll container -->
+                      <div class="relative">
+                          <div 
+                              class="flex overflow-x-auto pb-4 gap-3 scrollbar-thin scroll-container"
+                              on:scroll={(e) => handleScroll(e, messageIndex)}
+                              use:initScrollCheck={messageIndex}
+                          >
+                              {#each message.sources as source, i}
+                                  <div class="flex-none w-[325px]">
+                                      <div class="bg-gray-50 rounded-md p-3 hover:bg-gray-100 transition-colors group-[{i}]">
+                                          <div class="flex items-center gap-2 text-gray-400 mb-1">
+                                              <HardDriveIcon size="14" />
+                                              |
+                                              {#if source.extension === 'pdf'}
+                                                  <FileTextIcon size="14" />
+                                              {:else if source.extension === 'docx'}
+                                                  <FileIcon size="14" />
+                                              {:else}
+                                                  <FileIcon size="14" />
+                                              {/if}
+                                              <span class="text-[10px] uppercase tracking-wider font-medium">
+                                                  {source.extension}
+                                              </span>
+                                          </div>
+                                          <div>
+                                              <h4 class="text-sm text-gray-900 truncate">{source.title}</h4>
+                                              <p class="text-xs text-gray-500 truncate">{source.filePath}</p>
+                                          </div>
+                                      </div>
+                                  </div>
+                              {/each}
+                          </div>
+                      </div>
+                  </div>
+                  
+                {/if}
                 {#if message.reasoning.length > 0}
                   <div class="max-w-3xl mx-auto">
                     <div class="flex justify-between items-center">
@@ -320,8 +461,53 @@
     max-height: 1.5em;
   }
 
-  .reasoning-content.expanded {
-    white-space: normal;
-    max-height: 500px;
-  }
+    .reasoning-content.expanded {
+      white-space: normal;
+      max-height: 500px;
+    }
+
+    .scrollbar-thin {
+        scrollbar-width: thin;
+        -ms-overflow-style: none;
+        scroll-behavior: smooth;
+    }
+
+    .scrollbar-thin::-webkit-scrollbar {
+        height: 6px;
+    }
+
+    .scrollbar-thin::-webkit-scrollbar-track {
+        background: #f1f1f1;
+        border-radius: 3px;
+        margin: 0;
+    }
+
+    .scrollbar-thin::-webkit-scrollbar-thumb {
+        background: #888;
+        border-radius: 3px;
+    }
+
+    .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+        background: #666;
+    }
+
+    .group {
+        position: relative;
+    }
+
+    /* Prevent tooltip from being cut off */
+    .scroll-container {
+        margin-top: 0;
+        padding-top: 0;
+    }
+
+    /* Remove previous tooltip styles and add these */
+    .pointer-events-none {
+        pointer-events: none;
+    }
+    
+    .pointer-events-auto {
+        pointer-events: auto;
+    }
+
 </style>
