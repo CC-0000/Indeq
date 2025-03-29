@@ -6,8 +6,9 @@ package api;
 
 // CrawlingService definition
 service CrawlingService {
-    rpc GetInitalCrawler (StartInitalCrawlerRequest) returns (StartInitalCrawlerResponse);
+    rpc StartInitialCrawler (StartInitalCrawlerRequest) returns (StartInitalCrawlerResponse);
     rpc ManualCrawler (ManualCrawlerRequest) returns (ManualCrawlerResponse);
+    rpc DeleteCrawlerData (DeleteCrawlerDataRequest) returns (DeleteCrawlerDataResponse);
 }
 
 message StartInitalCrawlerRequest {
@@ -31,4 +32,16 @@ message ManualCrawlerRequest {
 message ManualCrawlerResponse {
     bool success = 1;        // Indicates if the update succeeded
     string error = 2;        // Error message if success is false
+}
+
+// Request message for deleting crawler data
+message DeleteCrawlerDataRequest {
+  string user_id = 1;
+  string provider = 2;
+}
+
+// Response message for deleting crawler data
+message DeleteCrawlerDataResponse {
+  bool success = 1;
+  string message = 2;
 }

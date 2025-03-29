@@ -602,15 +602,18 @@ func (s *integrationServer) ConnectIntegration(ctx context.Context, req *pb.Conn
 		}, nil
 	}
 
-	crawlerReq := &pb.StartInitalCrawlerRequest{
-		UserId:      req.UserId,
-		Provider:    providerStr,
-		AccessToken: tokenRes.AccessToken,
-	}
-	_, err = s.crawlingService.GetInitalCrawler(ctx, crawlerReq)
-	if err != nil {
-		log.Printf("Failed to start initial crawler: %v", err)
-	}
+	go func() {
+		bgCtx := context.Background()
+		crawlerReq := &pb.StartInitalCrawlerRequest{
+			UserId:      req.UserId,
+			Provider:    providerStr,
+			AccessToken: tokenRes.AccessToken,
+		}
+		_, err = s.crawlingService.StartInitialCrawler(bgCtx, crawlerReq)
+		if err != nil {
+			log.Printf("Failed to start initial crawler: %v", err)
+		}
+	}()
 
 	return &pb.ConnectIntegrationResponse{
 		Success: true,
@@ -657,6 +660,14 @@ func (s *integrationServer) DisconnectIntegration(ctx context.Context, req *pb.D
 		}, nil
 	}
 
+	_, err = s.crawlingService.DeleteCrawlerData(ctx, &pb.DeleteCrawlerDataRequest{
+		UserId:   req.UserId,
+		Provider: providerStr,
+	})
+	if err != nil {
+		log.Printf("Failed to delete crawler data: %v", err)
+	}
+
 	return &pb.DisconnectIntegrationResponse{
 		Success: true,
 		Message: "Integration disconnected successfully",
@@ -675,6 +686,55 @@ func (s *integrationServer) ValidateOAuthState(ctx context.Context, req *pb.Vali
 	return &pb.ValidateOAuthStateResponse{
 		Success: true,
 		UserId:  userId,
+	}, nil
+}
+
+func (s *integrationServer) GetAccessToken(ctx context.Context, req *pb.GetAccessTokenRequest) (*pb.GetAccessTokenResponse, error) {
+	providerStr, err := enumToString(req.Provider)
+	if err != nil {
+		return &pb.GetAccessTokenResponse{
+			Success:      false,
+			Message:      fmt.Sprintf("Failed to convert provider to string: %v", err),
+			ErrorDetails: err.Error(),
+		}, nil
+	}
+
+	// Query the database to get the encrypted access token
+	var encryptedAccessToken string
+	err = s.db.QueryRowContext(ctx, `
+		SELECT access_token
+		FROM oauth_tokens
+		WHERE user_id = $1 AND provider = $2
+	`, req.UserId, providerStr).Scan(&encryptedAccessToken)
+
+	if err == sql.ErrNoRows {
+		return &pb.GetAccessTokenResponse{
+			Success:      false,
+			Message:      "No access token found for the given user and provider",
+			ErrorDetails: "Not found",
+		}, nil
+	} else if err != nil {
+		return &pb.GetAccessTokenResponse{
+			Success:      false,
+			Message:      fmt.Sprintf("Database error retrieving token: %v", err),
+			ErrorDetails: err.Error(),
+		}, nil
+	}
+
+	// Decrypt the access token
+	decryptedAccessToken, err := Decrypt(encryptedAccessToken)
+	if err != nil {
+		return &pb.GetAccessTokenResponse{
+			Success:      false,
+			Message:      fmt.Sprintf("Failed to decrypt access token: %v", err),
+			ErrorDetails: err.Error(),
+		}, nil
+	}
+
+	return &pb.GetAccessTokenResponse{
+		Success:     true,
+		AccessToken: decryptedAccessToken,
+		Message:     "Access token retrieved successfully",
 	}, nil
 }
 
