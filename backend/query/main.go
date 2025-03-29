@@ -84,7 +84,14 @@ func (s *queryServer) expandQuery(ctx context.Context, query string) (string, er
 		return query, nil
 	}
 
-	fullprompt := "based on this query, what kind of things should we be searching for in the user's documents (output the answer and nothing else):\n" + query
+	fullprompt := "IMPORTANT: Do NOT answer the query directly. Your task is ONLY to expand and rephrase the query into search terms.\n\n" +
+		"Instructions:\n" +
+		"1. Analyze the user query below\n" +
+		"2. Generate 3-5 alternative phrasings, related concepts, and key terms that would be useful for searching documents\n" +
+		"3. Format your response ONLY as a list of search terms and phrases\n" +
+		"4. Do NOT provide explanations or direct answers to the query\n\n" +
+		"User Query: {" + query + "}\n\n" +
+		"Search Terms:"
 
 	llmRequestBody := OllamaRequest{
 		Model:   os.Getenv("LLM_MODEL"),
@@ -146,14 +153,15 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 	if err != nil {
 		return &pb.QueryResponse{}, fmt.Errorf("failed to expand query: %w", err)
 	}
-	log.Print("got the expanded query")
+	log.Print("got the expanded query: ", expandedQuery)
 
 	// fetch context associated with the query
 	topKChunksResponse, err := s.retrievalService.RetrieveTopKChunks(ctx, &pb.RetrieveTopKChunksRequest{
-		UserId: req.UserId,
-		Prompt: expandedQuery,
-		K:      int32(kVal),
-		Ttl:    uint32(ttlVal),
+		UserId:         req.UserId,
+		Prompt:         req.Query,
+		ExpandedPrompt: expandedQuery,
+		K:              int32(kVal),
+		Ttl:            uint32(ttlVal),
 	})
 	if err != nil {
 		// TODO: don't error out and instead let the llm know that you were unable to find information

@@ -40,7 +40,7 @@ func (s *retrievalServer) RetrieveTopKChunks(ctx context.Context, req *pb.Retrie
 
 	topKMetadatas, err := s.vectorClient.GetTopKChunks(ctx, &pb.GetTopKChunksRequest{
 		UserId: req.UserId,
-		Prompt: req.Prompt,
+		Prompt: req.ExpandedPrompt,
 		K:      int32(kVal),
 	})
 	if err != nil {
