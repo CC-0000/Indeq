@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	pb "github.com/cc-0000/indeq/common/api"
@@ -23,6 +24,8 @@ type crawlingServer struct {
 	pb.UnimplementedCrawlingServiceServer
 	integrationConn    *grpc.ClientConn
 	integrationService pb.IntegrationServiceClient
+	vectorConn         *grpc.ClientConn
+	vectorService      pb.VectorServiceClient
 	db                 *sql.DB
 }
 
@@ -65,16 +68,17 @@ type TokenInfo struct {
 }
 
 // ValidateAccessToken validates an access token for a specific provider
-func ValidateAccessToken(accessToken, provider string) (string, string, error) {
+func ValidateAccessToken(accessToken, provider string) ([]string, error) {
 	if provider == "GOOGLE" {
 		tokenInfo, err := validateGoogleAccessToken(accessToken)
 		if err != nil {
 			fmt.Printf("Error validating Google access token: %v\n", err)
-			return "", "", err
+			return nil, err
 		}
-		return accessToken, tokenInfo.Scope, nil
+		scopes := strings.Split(tokenInfo.Scope, " ")
+		return scopes, nil
 	}
-	return "", "", fmt.Errorf("unsupported provider: %s", provider)
+	return nil, fmt.Errorf("unsupported provider: %s", provider)
 }
 
 // validateGoogleAccessToken validates a Google access token
@@ -98,9 +102,58 @@ func validateGoogleAccessToken(accessToken string) (*TokenInfo, error) {
 	return &tokenInfo, nil
 }
 
-func (s *crawlingServer) StartInitalCrawler(ctx context.Context, req *pb.StartInitalCrawlerRequest) (*pb.StartInitalCrawlerResponse, error) {
+func retrieveAccessToken(ctx context.Context, integrationService pb.IntegrationServiceClient, userID, provider string) (string, error) {
+	response, err := integrationService.GetAccessToken(ctx, &pb.GetAccessTokenRequest{
+		UserId:   userID,
+		Provider: convertProviderToEnum(provider),
+	})
+
+	if err != nil {
+		return "", fmt.Errorf("error calling GetAccessToken: %v", err)
+	}
+
+	if !response.Success {
+		return "", fmt.Errorf("failed to retrieve access token: %s", response.Message)
+	}
+
+	return response.AccessToken, nil
+}
+
+// Add a method to retrieve access token
+func (s *crawlingServer) retrieveAccessTokenManual(ctx context.Context, userID string, provider string) (string, error) {
+	response, err := s.integrationService.GetAccessToken(ctx, &pb.GetAccessTokenRequest{
+		UserId:   userID,
+		Provider: convertProviderToEnum(provider),
+	})
+
+	if err != nil {
+		return "", fmt.Errorf("error calling GetAccessToken: %v", err)
+	}
+
+	if !response.Success {
+		return "", fmt.Errorf("failed to retrieve access token: %s", response.Message)
+	}
+
+	return response.AccessToken, nil
+}
+
+// Helper function to convert provider string to enum
+func convertProviderToEnum(provider string) pb.Provider {
+	switch provider {
+	case "GOOGLE":
+		return pb.Provider_GOOGLE
+	case "MICROSOFT":
+		return pb.Provider_MICROSOFT
+	case "NOTION":
+		return pb.Provider_NOTION
+	default:
+		return pb.Provider_GOOGLE // Default or handle error as needed
+	}
+}
+
+func (s *crawlingServer) StartInitialCrawler(ctx context.Context, req *pb.StartInitalCrawlerRequest) (*pb.StartInitalCrawlerResponse, error) {
 	providerStr := req.Provider
-	_, scope, err := ValidateAccessToken(req.AccessToken, providerStr)
+	scope, err := ValidateAccessToken(req.AccessToken, providerStr)
 	if err != nil {
 		return &pb.StartInitalCrawlerResponse{
 			Success:      false,
@@ -108,18 +161,13 @@ func (s *crawlingServer) StartInitalCrawler(ctx context.Context, req *pb.StartIn
 			ErrorDetails: err.Error(),
 		}, nil
 	}
-	files, err := s.NewCrawler(ctx, req.UserId, req.AccessToken, providerStr, []string{scope})
+	_, err = s.NewCrawler(ctx, req.UserId, req.AccessToken, providerStr, scope)
 	if err != nil {
 		return &pb.StartInitalCrawlerResponse{
 			Success:      false,
 			Message:      fmt.Sprintf("Failed to start initial crawler: %v", err),
 			ErrorDetails: err.Error(),
 		}, nil
-	}
-
-	log.Printf("Initial crawler started successfully for user %s", req.UserId)
-	for i, file := range files.Files {
-		log.Printf("File %d: %s", i, file.File[0].Metadata.ResourceID)
 	}
 
 	return &pb.StartInitalCrawlerResponse{
@@ -200,16 +248,19 @@ func (s *crawlingServer) ManualCrawler(ctx context.Context, req *pb.ManualCrawle
 		}
 		found = true
 
-		// if accessToken == "" {
-		// 	log.Printf("Invalid access token for user %s", req.UserId)
-		// 	continue
-		// }
-		//processedFile, err := updateCrawlerWithToken(ctx, s.db, req.UserId, provider, service, retrievalToken, accessToken)
-		// if err != nil {
-		// 	log.Printf("Error updating crawler: %v", err)
-		// 	continue
-		// }
-		// log.Printf("Processed %d files for user %s", len(processedFile.Files), req.UserId)
+		// Retrieve access token using the integration service
+		accessToken, err := s.retrieveAccessTokenManual(ctx, req.UserId, provider)
+		if err != nil {
+			log.Printf("Error retrieving access token: %v", err)
+			continue
+		}
+
+		processedFile, err := updateCrawlerWithToken(ctx, s.db, req.UserId, provider, service, retrievalToken, accessToken)
+		if err != nil {
+			log.Printf("Error updating crawler: %v", err)
+			continue
+		}
+		log.Printf("Processed %d files for user %s", len(processedFile.Files), req.UserId)
 	}
 
 	if !found {
@@ -218,8 +269,19 @@ func (s *crawlingServer) ManualCrawler(ctx context.Context, req *pb.ManualCrawle
 	return &pb.ManualCrawlerResponse{Success: true}, nil
 }
 
+// startPeriodicCrawlerWorker starts a periodic crawler worker
+func startPeriodicCrawlerWorker(db *sql.DB, integrationService pb.IntegrationServiceClient) {
+	ticker := time.NewTicker(time.Second * 30)
+	go func() {
+		for range ticker.C {
+			log.Println("Running periodic crawler worker...")
+			UpdateDBCrawler(db, integrationService)
+		}
+	}()
+}
+
 // UpdateDBCrawler updates the crawler with new access tokens to make sure data is up-to-date
-func UpdateDBCrawler(db *sql.DB) {
+func UpdateDBCrawler(db *sql.DB, integrationService pb.IntegrationServiceClient) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
@@ -249,25 +311,20 @@ func UpdateDBCrawler(db *sql.DB) {
 			log.Printf("Error scanning retrieval token: %v", err)
 			continue
 		}
-		// accessToken, _ := GetAccessToken(provider)
-		// processedFiles, err := updateCrawlerWithToken(ctx, db, userID, provider, service, retrievalToken, accessToken)
-		// if err != nil {
-		// 	log.Printf("[UPDATE] Error updating crawler: %v", err)
-		// 	continue
-		// }
-		// log.Printf("Processed %d files for user %s", len(processedFiles.Files), userID)
-	}
-}
 
-// startPeriodicCrawlerWorker starts a periodic crawler worker
-func startPeriodicCrawlerWorker(db *sql.DB) {
-	ticker := time.NewTicker(time.Second * 30)
-	go func() {
-		for range ticker.C {
-			log.Println("Running periodic crawler worker...")
-			//UpdateDBCrawler(db)
+		// Retrieve access token using the integration service
+		accessToken, err := retrieveAccessToken(ctx, integrationService, userID, provider)
+		if err != nil {
+			log.Printf("Error retrieving access token: %v", err)
+			continue
 		}
-	}()
+		processedFiles, err := updateCrawlerWithToken(ctx, db, userID, provider, service, retrievalToken, accessToken)
+		if err != nil {
+			log.Printf("[UPDATE] Error updating crawler: %v", err)
+			continue
+		}
+		log.Printf("Processed %d files for user %s", len(processedFiles.Files), userID)
+	}
 }
 
 // createOAuthClient creates an OAuth client from an access token
@@ -337,6 +394,41 @@ func setupDatabase(db *sql.DB) error {
 	return nil
 }
 
+func (s *crawlingServer) DeleteCrawlerData(ctx context.Context, req *pb.DeleteCrawlerDataRequest) (*pb.DeleteCrawlerDataResponse, error) {
+	// Delete rows from retrievalTokens table for the given user_id and provider
+	result, err := s.db.ExecContext(ctx, `
+		DELETE FROM retrievalTokens
+		WHERE user_id = $1 AND provider = $2
+	`, req.UserId, req.Provider)
+
+	if err != nil {
+		return &pb.DeleteCrawlerDataResponse{
+			Success: false,
+			Message: fmt.Sprintf("Database error deleting crawler data: %v", err),
+		}, nil
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return &pb.DeleteCrawlerDataResponse{
+			Success: false,
+			Message: fmt.Sprintf("Failed to get rows affected: %v", err),
+		}, nil
+	}
+
+	if rowsAffected == 0 {
+		return &pb.DeleteCrawlerDataResponse{
+			Success: true,
+			Message: "No crawler data found to delete",
+		}, nil
+	}
+
+	return &pb.DeleteCrawlerDataResponse{
+		Success: true,
+		Message: "Crawler data deleted successfully",
+	}, nil
+}
+
 func main() {
 	log.Println("Starting the crawling service...")
 
@@ -350,6 +442,44 @@ func main() {
 	if dbURL == "" {
 		log.Fatalf("DATABASE_URL environment variable is required")
 	}
+
+	// Load the TLS configuration values for integration service
+	integrationTLSConfig, err := config.LoadClientTLSFromEnv("INTEGRATION_CRT", "INTEGRATION_KEY", "CA_CRT")
+	if err != nil {
+		log.Fatal("Error loading TLS client config for integration service")
+	}
+	integrationAddress := os.Getenv("INTEGRATION_ADDRESS")
+	if integrationAddress == "" {
+		log.Fatalf("INTEGRATION_ADDRESS environment variable is required")
+	}
+	integrationConn, err := grpc.NewClient(
+		integrationAddress,
+		grpc.WithTransportCredentials(credentials.NewTLS(integrationTLSConfig)),
+	)
+	if err != nil {
+		log.Fatalf("Failed to connect to integration service: %v", err)
+	}
+	defer integrationConn.Close()
+
+	integrationService := pb.NewIntegrationServiceClient(integrationConn)
+
+	vectorTLSConfig, err := config.LoadClientTLSFromEnv("VECTOR_CRT", "VECTOR_KEY", "CA_CRT")
+	if err != nil {
+		log.Fatal("Error loading TLS client config for vector service")
+	}
+	vectorAddress := os.Getenv("VECTOR_ADDRESS")
+	if vectorAddress == "" {
+		log.Fatalf("VECTOR_ADDRESS environment variable is required")
+	}
+	vectorConn, err := grpc.NewClient(
+		vectorAddress,
+		grpc.WithTransportCredentials(credentials.NewTLS(vectorTLSConfig)),
+	)
+	if err != nil {
+		log.Fatalf("Failed to connect to vector service: %v", err)
+	}
+	defer vectorConn.Close()
+	vectorService := pb.NewVectorServiceClient(vectorConn)
 
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
@@ -377,13 +507,19 @@ func main() {
 
 	log.Println("Creating the crawling server")
 
-	startPeriodicCrawlerWorker(db)
+	startPeriodicCrawlerWorker(db, integrationService)
 
 	opts := []grpc.ServerOption{
 		grpc.Creds(credentials.NewTLS(tlsConfig)),
 	}
 	grpcServer := grpc.NewServer(opts...)
-	pb.RegisterCrawlingServiceServer(grpcServer, &crawlingServer{db: db})
+	pb.RegisterCrawlingServiceServer(grpcServer, &crawlingServer{
+		db:                 db,
+		integrationConn:    integrationConn,
+		integrationService: integrationService,
+		vectorConn:         vectorConn,
+		vectorService:      vectorService,
+	})
 	log.Printf("Crawling Service listening on %v\n", listener.Addr())
 	if err := grpcServer.Serve(listener); err != nil {
 		log.Fatalf("Failed to serve: %v", err)
