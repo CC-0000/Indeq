@@ -64,19 +64,14 @@ func (s *retrievalServer) RetrieveTopKChunks(ctx context.Context, req *pb.Retrie
 	var desktopChunkResponse *pb.GetChunksFromUserResponse
 	// Only try to get desktop chunks if we have results and connection is ready
 	if len(topKDesktopResults) > 0 {
-		if s.desktopConn == nil || s.desktopConn.GetState().String() != "READY" {
+		desktopChunkResponse, err = s.desktopClient.GetChunksFromUser(ctx, &pb.GetChunksFromUserRequest{
+			UserId:    req.UserId,
+			Metadatas: topKDesktopResults,
+			Ttl:       req.Ttl,
+		})
+		if err != nil {
+			// Continue with empty desktop results instead of failing completely
 			desktopChunkResponse = &pb.GetChunksFromUserResponse{Chunks: []*pb.TextChunkMessage{}}
-		} else {
-			var err error
-			desktopChunkResponse, err = s.desktopClient.GetChunksFromUser(ctx, &pb.GetChunksFromUserRequest{
-				UserId:    req.UserId,
-				Metadatas: topKDesktopResults,
-				Ttl:       req.Ttl,
-			})
-			if err != nil {
-				// Continue with empty desktop results instead of failing completely
-				desktopChunkResponse = &pb.GetChunksFromUserResponse{Chunks: []*pb.TextChunkMessage{}}
-			}
 		}
 	} else {
 		desktopChunkResponse = &pb.GetChunksFromUserResponse{Chunks: []*pb.TextChunkMessage{}}
@@ -85,7 +80,6 @@ func (s *retrievalServer) RetrieveTopKChunks(ctx context.Context, req *pb.Retrie
 	// Get Google chunks
 	var googleChunkResponse *pb.GetChunksFromGoogleResponse
 	if len(topKGoogleResults) > 0 {
-		var err error
 		googleChunkResponse, err = s.crawlingClient.GetChunksFromGoogle(ctx, &pb.GetChunksFromGoogleRequest{
 			UserId:    req.UserId,
 			Metadatas: topKGoogleResults,
