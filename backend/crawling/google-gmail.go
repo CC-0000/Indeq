@@ -38,10 +38,14 @@ func (s *crawlingServer) UpdateCrawlGmail(ctx context.Context, client *http.Clie
 		return newToken, result, err
 	}
 	result, newRetrievalToken, err := s.CrawlGmailHistory(ctx, client, userID, tokenUint64)
-	if err != nil && strings.Contains(err.Error(), "Error 404") {
-		result, newRetrievalToken, err = s.GetGoogleGmailList(ctx, client, userID)
+	if err != nil {
+		if strings.Contains(err.Error(), "Error 404") ||
+			strings.Contains(err.Error(), "failedPrecondition") {
+			return retrievalToken, ListofFiles{}, nil
+		}
+		return "", ListofFiles{}, err
 	}
-	return newRetrievalToken, result, err
+	return newRetrievalToken, result, nil
 }
 
 func (s *crawlingServer) CrawlGmailHistory(ctx context.Context, client *http.Client, userID string, lastHistoryID uint64) (ListofFiles, string, error) {
@@ -82,7 +86,7 @@ func (s *crawlingServer) CrawlGmailHistory(ctx context.Context, client *http.Cli
 					}
 					file, err := processMessage(fullMsg, userID)
 					if err == nil {
-						if len(file.File) > 0 && s.isFileProcessed(userID, file.File[0].Metadata.FilePath) {
+						if len(file.File) > 0 && s.isFileProcessed(userID, file.File[0].Metadata.ResourceID) {
 							continue
 						}
 
@@ -146,7 +150,7 @@ func (s *crawlingServer) GetGoogleGmailList(ctx context.Context, client *http.Cl
 					continue
 				}
 
-				if len(file.File) > 0 && s.isFileProcessed(userID, file.File[0].Metadata.FilePath) {
+				if len(file.File) > 0 && s.isFileProcessed(userID, file.File[0].Metadata.ResourceID) {
 					resultChan <- CrawlResult{Files: []File{file}}
 					continue
 				}
