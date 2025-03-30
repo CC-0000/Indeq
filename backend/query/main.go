@@ -1,14 +1,12 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net"
-	"net/http"
 
 	"os"
 	"os/signal"
@@ -31,17 +29,13 @@ import (
 
 type queryServer struct {
 	pb.UnimplementedQueryServiceServer
-	rabbitMQConn     *amqp.Connection
-	retrievalConn    *grpc.ClientConn
-	retrievalService pb.RetrievalServiceClient
-	queueTTL         int
-}
-
-type OllamaRequest struct {
-	Model   string         `json:"model"`
-	Prompt  string         `json:"prompt"`
-	Stream  bool           `json:"stream"`
-	Options map[string]any `json:"options"`
+	rabbitMQConn           *amqp.Connection
+	retrievalConn          *grpc.ClientConn
+	retrievalService       pb.RetrievalServiceClient
+	queueTTL               int
+	geminiClient           *genai.Client
+	geminiFlash2ModelHeavy *genai.GenerativeModel
+	geminiFlash2ModelLight *genai.GenerativeModel
 }
 
 type QueueTokenMessage struct {
@@ -79,6 +73,8 @@ func (s *queryServer) sendToQueue(ctx context.Context, channel *amqp.Channel, qu
 }
 
 // func(context, query to expand)
+//   - takes in a query and returns the expanded query that ideally contains better keywords for search
+//   - can be set to return the original query if the env variable QUERY_EXPANSION is set to false
 func (s *queryServer) expandQuery(ctx context.Context, query string) (string, error) {
 	if os.Getenv("QUERY_EXPANSION") == "false" {
 		return query, nil
@@ -93,37 +89,21 @@ func (s *queryServer) expandQuery(ctx context.Context, query string) (string, er
 		"User Query: {" + query + "}\n\n" +
 		"Search Terms:"
 
-	llmRequestBody := OllamaRequest{
-		Model:   os.Getenv("LLM_MODEL"),
-		Prompt:  fullprompt,
-		Stream:  false,
-		Options: map[string]any{},
-	}
+	session := s.geminiFlash2ModelHeavy.StartChat()
+	session.History = []*genai.Content{}
 
-	llmRequestJSON, err := json.Marshal(llmRequestBody)
+	resp, err := session.SendMessage(ctx, genai.Text(fullprompt))
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal request: %w", err)
+		return query, fmt.Errorf("failed to send message to google gemini: %w", err)
 	}
-	llmReq, _ := http.NewRequestWithContext(ctx, "POST", os.Getenv("OLLAMA_URL"), bytes.NewReader(llmRequestJSON))
-	llmReq.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{}
-	llmRes, err := client.Do(llmReq)
-	if err != nil {
-		return "", fmt.Errorf("failed to make query to llm: %w", err)
-	}
-	defer llmRes.Body.Close()
-
-	var responseBody map[string]interface{}
-	if err := json.NewDecoder(llmRes.Body).Decode(&responseBody); err != nil {
-		return "", fmt.Errorf("failed to decode response: %w", err)
-	}
-	fullResponse, ok := responseBody["response"].(string)
-	if !ok {
-		return "", fmt.Errorf("response field missing or not a string")
+	var messageText string
+	if len(resp.Candidates) > 0 && len(resp.Candidates[0].Content.Parts) > 0 {
+		if textPart, ok := resp.Candidates[0].Content.Parts[0].(genai.Text); ok {
+			messageText = string(textPart)
+		}
 	}
 
-	return fullResponse, nil
+	return messageText, nil
 }
 
 // rpc(context, query request)
@@ -140,10 +120,6 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 	ttlVal, err := strconv.ParseUint(os.Getenv("QUERY_TTL"), 10, 32)
 	if err != nil {
 		return &pb.QueryResponse{}, fmt.Errorf("failed to retrieve the ttl env variable: %w", err)
-	}
-	geminiApikey, ok := os.LookupEnv("GEMINI_API_KEY")
-	if !ok {
-		return &pb.QueryResponse{}, fmt.Errorf("failed to retrieve the gemini api key: %w", err)
 	}
 
 	// TODO: implement function calling for better filtering (dates, titles, etc.)
@@ -210,24 +186,12 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 
 	// TODO: add the option to use more than 1 model
 
-	// create a gemini api client
-	client, err := genai.NewClient(ctx, option.WithAPIKey(geminiApikey))
-	if err != nil {
-		log.Fatalf("Error creating client: %v", err)
-	}
-	defer client.Close()
-
-	model := client.GenerativeModel("gemini-2.0-flash-lite")
-	model.SetTemperature(1)
-	model.SetTopK(1)
-	model.SetTopP(0.95)
-	model.SetMaxOutputTokens(8000)
-	model.ResponseMIMEType = "text/plain"
-	session := model.StartChat()
+	// start a gemini session
+	session := s.geminiFlash2ModelHeavy.StartChat()
 	session.History = []*genai.Content{} // TODO: implement chat history
 
 	// count the number of tokens in the prompt
-	resp, err := model.CountTokens(ctx, genai.Text(fullprompt))
+	resp, err := s.geminiFlash2ModelHeavy.CountTokens(ctx, genai.Text(fullprompt))
 	if err != nil {
 		log.Fatalf("Error counting tokens for the prompt: %v", err)
 	}
@@ -447,6 +411,41 @@ func (s *queryServer) connectToRabbitMQ() {
 	s.queueTTL = int(queue_ttl)
 }
 
+// func(context)
+//   - connects to google gemini
+//   - assumes: the client will be closed in the parent function at some point
+func (s *queryServer) connectToGoogleGemini() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	geminiApikey, ok := os.LookupEnv("GEMINI_API_KEY")
+	if !ok {
+		log.Fatalf("failed to retrieve the gemini api key")
+	}
+
+	client, err := genai.NewClient(ctx, option.WithAPIKey(geminiApikey))
+	if err != nil {
+		log.Fatalf("Error creating client: %v", err)
+	}
+	s.geminiClient = client
+
+	heavyModel := client.GenerativeModel("gemini-2.0-flash-lite")
+	heavyModel.SetTemperature(1)
+	heavyModel.SetTopK(1)
+	heavyModel.SetTopP(0.95)
+	heavyModel.SetMaxOutputTokens(8000)
+	heavyModel.ResponseMIMEType = "text/plain"
+	s.geminiFlash2ModelHeavy = heavyModel
+
+	lightModel := client.GenerativeModel("gemini-2.0-flash-lite")
+	lightModel.SetTemperature(1)
+	lightModel.SetTopK(1)
+	lightModel.SetTopP(0.95)
+	lightModel.SetMaxOutputTokens(100)
+	lightModel.ResponseMIMEType = "text/plain"
+	s.geminiFlash2ModelLight = lightModel
+}
+
 func main() {
 	// graceful shutdown
 	sigChan := make(chan os.Signal, 1)
@@ -479,6 +478,10 @@ func main() {
 	// Connect to retrieval service
 	server.connectToRetrievalService(clientTlsConfig)
 	defer server.retrievalConn.Close()
+
+	// Connect to google gemini
+	server.connectToGoogleGemini()
+	defer server.geminiClient.Close()
 
 	// listen for shutdown signal
 	<-sigChan // TODO: implement worker groups
