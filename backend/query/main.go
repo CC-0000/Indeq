@@ -29,17 +29,13 @@ import (
 
 type queryServer struct {
 	pb.UnimplementedQueryServiceServer
-	rabbitMQConn     *amqp.Connection
-	retrievalConn    *grpc.ClientConn
-	retrievalService pb.RetrievalServiceClient
-	queueTTL         int
-}
-
-type OllamaRequest struct {
-	Model   string         `json:"model"`
-	Prompt  string         `json:"prompt"`
-	Stream  bool           `json:"stream"`
-	Options map[string]any `json:"options"`
+	rabbitMQConn           *amqp.Connection
+	retrievalConn          *grpc.ClientConn
+	retrievalService       pb.RetrievalServiceClient
+	queueTTL               int
+	geminiClient           *genai.Client
+	geminiFlash2ModelHeavy *genai.GenerativeModel
+	geminiFlash2ModelLight *genai.GenerativeModel
 }
 
 type QueueTokenMessage struct {
@@ -76,6 +72,40 @@ func (s *queryServer) sendToQueue(ctx context.Context, channel *amqp.Channel, qu
 	return nil
 }
 
+// func(context, query to expand)
+//   - takes in a query and returns the expanded query that ideally contains better keywords for search
+//   - can be set to return the original query if the env variable QUERY_EXPANSION is set to false
+func (s *queryServer) expandQuery(ctx context.Context, query string) (string, error) {
+	if os.Getenv("QUERY_EXPANSION") == "false" {
+		return query, nil
+	}
+
+	fullprompt := "IMPORTANT: Do NOT answer the query directly. Your task is ONLY to expand and rephrase the query into search terms.\n\n" +
+		"Instructions:\n" +
+		"1. Analyze the user query below\n" +
+		"2. Generate 3-5 alternative phrasings, related concepts, and key terms that would be useful for searching documents\n" +
+		"3. Format your response ONLY as a list of search terms and phrases\n" +
+		"4. Do NOT provide explanations or direct answers to the query\n\n" +
+		"User Query: {" + query + "}\n\n" +
+		"Search Terms:"
+
+	session := s.geminiFlash2ModelHeavy.StartChat()
+	session.History = []*genai.Content{}
+
+	resp, err := session.SendMessage(ctx, genai.Text(fullprompt))
+	if err != nil {
+		return query, fmt.Errorf("failed to send message to google gemini: %w", err)
+	}
+	var messageText string
+	if len(resp.Candidates) > 0 && len(resp.Candidates[0].Content.Parts) > 0 {
+		if textPart, ok := resp.Candidates[0].Content.Parts[0].(genai.Text); ok {
+			messageText = string(textPart)
+		}
+	}
+
+	return messageText, nil
+}
+
 // rpc(context, query request)
 //   - takes in a query for a given user
 //   - fetches the top k chunks relevant to the query and passes that context to the llm
@@ -91,19 +121,23 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 	if err != nil {
 		return &pb.QueryResponse{}, fmt.Errorf("failed to retrieve the ttl env variable: %w", err)
 	}
-	geminiApikey, ok := os.LookupEnv("GEMINI_API_KEY")
-	if !ok {
-		return &pb.QueryResponse{}, fmt.Errorf("failed to retrieve the gemini api key: %w", err)
-	}
 
 	// TODO: implement function calling for better filtering (dates, titles, etc.)
 	// TODO: implement query conversion for better searching
+
+	expandedQuery, err := s.expandQuery(ctx, req.Query)
+	if err != nil {
+		return &pb.QueryResponse{}, fmt.Errorf("failed to expand query: %w", err)
+	}
+	log.Print("got the expanded query: ", expandedQuery)
+
 	// fetch context associated with the query
 	topKChunksResponse, err := s.retrievalService.RetrieveTopKChunks(ctx, &pb.RetrieveTopKChunksRequest{
-		UserId: req.UserId,
-		Prompt: req.Query,
-		K:      int32(kVal),
-		Ttl:    uint32(ttlVal),
+		UserId:         req.UserId,
+		Prompt:         req.Query,
+		ExpandedPrompt: expandedQuery,
+		K:              int32(kVal),
+		Ttl:            uint32(ttlVal),
 	})
 	if err != nil {
 		// TODO: don't error out and instead let the llm know that you were unable to find information
@@ -152,24 +186,12 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 
 	// TODO: add the option to use more than 1 model
 
-	// create a gemini api client
-	client, err := genai.NewClient(ctx, option.WithAPIKey(geminiApikey))
-	if err != nil {
-		log.Fatalf("Error creating client: %v", err)
-	}
-	defer client.Close()
-
-	model := client.GenerativeModel("gemini-2.0-flash-lite")
-	model.SetTemperature(1)
-	model.SetTopK(1)
-	model.SetTopP(0.95)
-	model.SetMaxOutputTokens(8000)
-	model.ResponseMIMEType = "text/plain"
-	session := model.StartChat()
+	// start a gemini session
+	session := s.geminiFlash2ModelHeavy.StartChat()
 	session.History = []*genai.Content{} // TODO: implement chat history
 
 	// count the number of tokens in the prompt
-	resp, err := model.CountTokens(ctx, genai.Text(fullprompt))
+	resp, err := s.geminiFlash2ModelHeavy.CountTokens(ctx, genai.Text(fullprompt))
 	if err != nil {
 		log.Fatalf("Error counting tokens for the prompt: %v", err)
 	}
@@ -389,6 +411,41 @@ func (s *queryServer) connectToRabbitMQ() {
 	s.queueTTL = int(queue_ttl)
 }
 
+// func(context)
+//   - connects to google gemini
+//   - assumes: the client will be closed in the parent function at some point
+func (s *queryServer) connectToGoogleGemini() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	geminiApikey, ok := os.LookupEnv("GEMINI_API_KEY")
+	if !ok {
+		log.Fatalf("failed to retrieve the gemini api key")
+	}
+
+	client, err := genai.NewClient(ctx, option.WithAPIKey(geminiApikey))
+	if err != nil {
+		log.Fatalf("Error creating client: %v", err)
+	}
+	s.geminiClient = client
+
+	heavyModel := client.GenerativeModel("gemini-2.0-flash-lite")
+	heavyModel.SetTemperature(1)
+	heavyModel.SetTopK(1)
+	heavyModel.SetTopP(0.95)
+	heavyModel.SetMaxOutputTokens(8000)
+	heavyModel.ResponseMIMEType = "text/plain"
+	s.geminiFlash2ModelHeavy = heavyModel
+
+	lightModel := client.GenerativeModel("gemini-2.0-flash-lite")
+	lightModel.SetTemperature(1)
+	lightModel.SetTopK(1)
+	lightModel.SetTopP(0.95)
+	lightModel.SetMaxOutputTokens(100)
+	lightModel.ResponseMIMEType = "text/plain"
+	s.geminiFlash2ModelLight = lightModel
+}
+
 func main() {
 	// graceful shutdown
 	sigChan := make(chan os.Signal, 1)
@@ -421,6 +478,10 @@ func main() {
 	// Connect to retrieval service
 	server.connectToRetrievalService(clientTlsConfig)
 	defer server.retrievalConn.Close()
+
+	// Connect to google gemini
+	server.connectToGoogleGemini()
+	defer server.geminiClient.Close()
 
 	// listen for shutdown signal
 	<-sigChan // TODO: implement worker groups
