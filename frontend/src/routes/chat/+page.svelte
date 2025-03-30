@@ -151,6 +151,15 @@
         const container = e.target as HTMLElement;
         const atEnd = container.scrollLeft + container.clientWidth >= container.scrollWidth - 10;
         const isScrollable = container.scrollWidth > container.clientWidth;
+        
+        // Hide tooltips - more thoroughly by targeting both aria attribute and style properties
+        const tooltips = document.querySelectorAll('.tooltip');
+        tooltips.forEach(tooltip => {
+            tooltip.setAttribute('aria-hidden', 'true');
+            (tooltip as HTMLElement).style.opacity = '0';
+            (tooltip as HTMLElement).style.visibility = 'hidden';
+        });
+        
         messages = messages.map((msg, idx) => 
             idx === messageIndex 
                 ? {...msg, sourcesScrollAtEnd: atEnd, isScrollable}
@@ -207,6 +216,51 @@
                 resizeObserver.disconnect();
             }
         };
+    }
+
+    // Function to position tooltips
+    function positionTooltip(event: MouseEvent | FocusEvent) {
+        const container = event.currentTarget as HTMLElement;
+        const tooltipId = container.getAttribute('data-tooltip-id');
+        if (!tooltipId) return;
+        const tooltip = document.getElementById(tooltipId);
+        if (!tooltip) return;
+        
+        const rect = container.getBoundingClientRect();
+        const viewportHeight = window.innerHeight;
+        
+        // Check if tooltip would go off the bottom of the viewport
+        const tooltipHeight = 80; // Approximate height - you may want to calculate this dynamically
+        const spaceBelow = viewportHeight - rect.bottom;
+        
+        if (spaceBelow < tooltipHeight + 10) {
+            // If not enough space below, show tooltip above
+            tooltip.style.left = `${rect.left}px`;
+            tooltip.style.top = `${rect.top - tooltipHeight - 8}px`;
+            tooltip.style.transformOrigin = 'bottom center';
+        } else {
+            // Show tooltip below as usual
+            tooltip.style.left = `${rect.left}px`;
+            tooltip.style.top = `${rect.bottom + 8}px`;
+            tooltip.style.transformOrigin = 'top center';
+        }
+        
+        tooltip.setAttribute('aria-hidden', 'false');
+        (tooltip as HTMLElement).style.opacity = '1';
+        (tooltip as HTMLElement).style.visibility = 'visible';
+    }
+    
+    // Function to hide tooltip
+    function hideTooltip(event: MouseEvent | FocusEvent) {
+        const container = event.currentTarget as HTMLElement;
+        const tooltipId = container.getAttribute('data-tooltip-id');
+        if (!tooltipId) return;
+        
+        const tooltip = document.getElementById(tooltipId);
+        if (!tooltip) return;
+        tooltip.setAttribute('aria-hidden', 'true');
+        (tooltip as HTMLElement).style.opacity = '0';
+        (tooltip as HTMLElement).style.visibility = 'hidden';
     }
 
 </script>
@@ -350,13 +404,21 @@
                       <!-- Scroll container -->
                       <div class="relative">
                           <div 
-                              class="flex overflow-x-auto pb-4 gap-3 scrollbar-thin scroll-container"
+                              class="flex overflow-x-auto overflow-y-hidden pb-4 gap-3 scrollbar-thin scroll-container"
                               on:scroll={(e) => handleScroll(e, messageIndex)}
                               use:initScrollCheck={messageIndex}
                           >
-                              {#each message.sources as source}
+                              {#each message.sources as source, sourceIndex}
                                   <div class="flex-none w-[325px]">
-                                      <div class="bg-gray-50 rounded-md p-3 hover:bg-gray-100 transition-colors shadow-sm border border-gray-100">
+                                      <div 
+                                          class="bg-gray-50 rounded-md p-3 hover:bg-gray-100 transition-colors duration-200 shadow-sm border border-gray-100 relative tooltip-container"
+                                          on:mouseenter={positionTooltip}
+                                          on:mouseleave={hideTooltip}
+                                          data-tooltip-id={`tooltip-${messageIndex}-${sourceIndex}`}
+                                          role="button"
+                                          tabindex="0"
+                                          aria-describedby={`tooltip-${messageIndex}-${sourceIndex}`}
+                                      >
                                           <div class="flex items-center gap-1 text-gray-400 mb-1">
                                               <HardDriveIcon size="14" />
                                               <span class="text-gray-300 mx-1">|</span>
@@ -372,6 +434,16 @@
                                           <div>
                                               <div class="text-sm font-medium text-gray-900 truncate mb-1">{source.title}</div>
                                               <div class="text-xs text-gray-500 truncate font-light">{source.filePath}</div>
+                                          </div>
+                                          
+                                          <!-- Source tooltip that appears on hover -->
+                                          <div class="tooltip fixed opacity-0 pointer-events-none bg-white text-gray-800 p-3 rounded shadow-md text-sm z-20 max-w-full whitespace-normal border border-gray-100" 
+                                               id={`tooltip-${messageIndex}-${sourceIndex}`}
+                                               role="tooltip"
+                                               aria-hidden="true">
+
+                                              <div class="font-semibold mb-1 break-words">{source.title}</div>
+                                              <div class="text-xs text-gray-600 break-words">{source.filePath}</div>
                                           </div>
                                       </div>
                                   </div>
@@ -631,6 +703,29 @@
   
   .pointer-events-auto {
       pointer-events: auto;
+  }
+
+  /* Add tooltip styles */
+  .tooltip-container {
+      position: relative;
+  }
+  
+  .tooltip {
+      width: 325px;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+      transition: opacity 0.2s, visibility 0.2s, transform 0.2s;
+      transition-delay: 300ms;
+      visibility: hidden;
+      position: fixed;
+      z-index: 50;
+      transform: scaleY(0.98);
+      transform-origin: top center;
+  }
+  
+  .tooltip-container:hover .tooltip {
+      opacity: 1;
+      visibility: visible;
+      transform: scaleY(1);
   }
 
   /* Textarea scrollbar styling */
