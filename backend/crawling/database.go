@@ -118,8 +118,18 @@ func StoreGoogleGmailToken(ctx context.Context, db *sql.DB, userID, retrievalTok
 
 // UpsertRetrievalToken inserts or updates a retrieval token
 func UpsertRetrievalToken(ctx context.Context, db *sql.DB, token RetrievalToken) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
+
 	now := time.Now()
-	_, err := db.ExecContext(ctx, insertRetrievalTokenQuery,
+	if _, err = tx.ExecContext(ctx, insertRetrievalTokenQuery,
 		token.UserID,
 		token.Platform,
 		token.Service,
@@ -127,10 +137,14 @@ func UpsertRetrievalToken(ctx context.Context, db *sql.DB, token RetrievalToken)
 		now,
 		now,
 		token.RequiresUpdate,
-	)
-	if err != nil {
+	); err != nil {
 		return fmt.Errorf("failed to upsert retrieval token: %w", err)
 	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
 	return nil
 }
 

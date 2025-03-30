@@ -39,19 +39,19 @@ type RateLimiterService struct {
 func NewRateLimiterService() *RateLimiterService {
 	// User-specific rate limits
 	userConfigs := map[string]RateLimitConfig{
-		"GOOGLE_DOCS":   {100, 500},  // Increased from 50 to 100 req/s per user
-		"GOOGLE_SLIDES": {20, 400},   // Increased from 10 to 20 req/s per user
-		"GOOGLE_GMAIL":  {500, 1000}, // Increased from 250 to 500 req/s per user
-		"GOOGLE_DRIVE":  {200, 5000}, // Increased from 100 to 200 req/s per user
-		"NOTION":        {10, 100},   // Kept the same due to Notion's strict limits
+		"GOOGLE_DOCS":   {50, 100},  // Increased from 50 to 100 req/s per user
+		"GOOGLE_SLIDES": {10, 20},   // Increased from 10 to 20 req/s per user
+		"GOOGLE_GMAIL":  {250, 500}, // Increased from 250 to 500 req/s per user
+		"GOOGLE_DRIVE":  {100, 200}, // Increased from 100 to 200 req/s per user
+		"NOTION":        {10, 100},  // Kept the same due to Notion's strict limits
 	}
 
 	// Project-wide rate limits
 	projectConfigs := map[string]RateLimitConfig{
-		"GOOGLE_DOCS":   {100, 2000},    // Increased from 50 to 100 req/s
-		"GOOGLE_SLIDES": {100, 2000},    // Increased from 50 to 100 req/s
-		"GOOGLE_DRIVE":  {400, 10000},   // Increased from 200 to 400 req/s
-		"GOOGLE_GMAIL":  {25000, 50000}, // Increased from 20000 to 25000 req/s
+		"GOOGLE_DOCS":   {50, 100},      // Increased from 50 to 100 req/s
+		"GOOGLE_SLIDES": {50, 100},      // Increased from 50 to 100 req/s
+		"GOOGLE_DRIVE":  {200, 400},     // Increased from 200 to 400 req/s
+		"GOOGLE_GMAIL":  {20000, 25000}, // Increased from 20000 to 25000 req/s
 		"NOTION":        {100, 1000},    // Kept the same
 	}
 

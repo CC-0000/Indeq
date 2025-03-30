@@ -179,6 +179,7 @@ func (s *vectorServer) startTextChunkProcess(ctx context.Context) error {
 							continue
 						}
 					}
+					// TODO: send the signals to other platform topics
 				} else if textChunk.Content == "<crawl_done>" {
 					if textChunk.Metadata == nil {
 						log.Print("no metadata detected for this textchunk")
@@ -222,6 +223,7 @@ func (s *vectorServer) startTextChunkProcess(ctx context.Context) error {
 							continue
 						}
 					}
+					// TODO: send the signals to other platform topics
 				} else {
 					// Add the textchunk to the batch
 					batch = append(batch, &textChunk)

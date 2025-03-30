@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -285,12 +286,20 @@ func (s *crawlingServer) UpdateDBCrawler() {
 }
 
 // startPeriodicCrawlerWorker starts a periodic crawler worker
-func (s *crawlingServer) startPeriodicCrawlerWorker() {
+
+func (s *crawlingServer) startPeriodicCrawlerWorker(ctx context.Context) {
 	ticker := time.NewTicker(time.Second * 30)
 	go func() {
-		for range ticker.C {
-			log.Println("Running periodic crawler worker...")
-			s.UpdateDBCrawler()
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				log.Println("Stopping periodic crawler worker...")
+				return
+			case <-ticker.C:
+				log.Println("Running periodic crawler worker...")
+				s.UpdateDBCrawler()
+			}
 		}
 	}()
 }
@@ -330,7 +339,7 @@ func storeRetrievalToken(ctx context.Context, db *sql.DB, userID, platform, serv
 func setupDatabase(db *sql.DB) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-
+	// create retrievalTokens table
 	_, err := db.ExecContext(ctx, `
         CREATE TABLE IF NOT EXISTS retrievalTokens (
             id SERIAL PRIMARY KEY,
@@ -587,7 +596,45 @@ func (s *crawlingServer) startCrawlingSignalReading(ctx context.Context) error {
 	}
 }
 
+func (s *crawlingServer) connectToVectorService(tlsConfig *tls.Config) {
+	// Connect to the vector service
+	vectorAddy, ok := os.LookupEnv("VECTOR_ADDRESS")
+	if !ok {
+		log.Fatal("failed to retrieve vector address for connection")
+	}
+	vectorConn, err := grpc.NewClient(
+		vectorAddy,
+		grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)),
+	)
+	if err != nil {
+		log.Fatalf("Failed to establish connection with vector-service: %v", err)
+	}
+
+	s.vectorConn = vectorConn
+	s.vectorService = pb.NewVectorServiceClient(vectorConn)
+}
+
+func (s *crawlingServer) connectToIntegrationService(tlsConfig *tls.Config) {
+	integrationAddress := os.Getenv("INTEGRATION_ADDRESS")
+	if integrationAddress == "" {
+		log.Fatalf("INTEGRATION_ADDRESS environment variable is required")
+	}
+	integrationConn, err := grpc.NewClient(
+		integrationAddress,
+		grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)),
+	)
+	if err != nil {
+		log.Fatalf("Failed to connect to integration service: %v", err)
+	}
+
+	s.integrationConn = integrationConn
+	s.integrationService = pb.NewIntegrationServiceClient(integrationConn)
+}
+
 func main() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	log.Println("Starting the crawling service...")
 
 	// Load the .env file
@@ -602,43 +649,10 @@ func main() {
 	}
 
 	// Load the TLS configuration values for integration service
-	integrationTLSConfig, err := config.LoadClientTLSFromEnv("INTEGRATION_CRT", "INTEGRATION_KEY", "CA_CRT")
+	clientTLSConfig, err := config.LoadClientTLSFromEnv("CRAWLING_CRT", "CRAWLING_KEY", "CA_CRT")
 	if err != nil {
 		log.Fatal("Error loading TLS client config for integration service")
 	}
-	integrationAddress := os.Getenv("INTEGRATION_ADDRESS")
-	if integrationAddress == "" {
-		log.Fatalf("INTEGRATION_ADDRESS environment variable is required")
-	}
-	integrationConn, err := grpc.NewClient(
-		integrationAddress,
-		grpc.WithTransportCredentials(credentials.NewTLS(integrationTLSConfig)),
-	)
-	if err != nil {
-		log.Fatalf("Failed to connect to integration service: %v", err)
-	}
-	defer integrationConn.Close()
-
-	integrationService := pb.NewIntegrationServiceClient(integrationConn)
-
-	// Load the TLS configuration values for vector service
-	vectorTLSConfig, err := config.LoadClientTLSFromEnv("VECTOR_CRT", "VECTOR_KEY", "CA_CRT")
-	if err != nil {
-		log.Fatal("Error loading TLS client config for vector service")
-	}
-	vectorAddress := os.Getenv("VECTOR_ADDRESS")
-	if vectorAddress == "" {
-		log.Fatalf("VECTOR_ADDRESS environment variable is required")
-	}
-	vectorConn, err := grpc.NewClient(
-		vectorAddress,
-		grpc.WithTransportCredentials(credentials.NewTLS(vectorTLSConfig)),
-	)
-	if err != nil {
-		log.Fatalf("Failed to connect to vector service: %v", err)
-	}
-	defer vectorConn.Close()
-	vectorService := pb.NewVectorServiceClient(vectorConn)
 
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
@@ -668,13 +682,13 @@ func main() {
 
 	// Initialize the crawling server
 	server := &crawlingServer{
-		db:                 db,
-		integrationConn:    integrationConn,
-		integrationService: integrationService,
-		vectorConn:         vectorConn,
-		vectorService:      vectorService,
+		db: db,
 	}
 
+	server.connectToVectorService(clientTLSConfig)
+	defer server.vectorConn.Close()
+	server.connectToIntegrationService(clientTLSConfig)
+	defer server.integrationConn.Close()
 	// Connect to Kafka writer
 	if err := server.connectToTextChunkKafkaWriter(); err != nil {
 		log.Fatalf("Failed to connect to Kafka writer: %v", err)
@@ -682,7 +696,7 @@ func main() {
 	defer server.kafkaWriter.Close()
 
 	// Start the periodic crawler worker
-	server.startPeriodicCrawlerWorker()
+	server.startPeriodicCrawlerWorker(ctx)
 
 	// Start the crawling signal reader
 	go func() {

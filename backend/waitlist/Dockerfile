@@ -10,7 +10,6 @@ RUN go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 
 # Copy module files first
 COPY waitlist/go.mod waitlist/go.sum ./waitlist/
-COPY crawling/go.mod crawling/go.sum ./crawling/
 COPY common/go.mod common/go.sum ./common/
 
 # Download dependencies

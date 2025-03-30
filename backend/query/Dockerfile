@@ -11,10 +11,6 @@ RUN go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 # Copy module files first
 COPY query/go.mod query/go.sum ./query/
 COPY common/go.mod common/go.sum ./common/
-COPY query/go.mod query/go.sum ./query/
-COPY authentication/go.mod authentication/go.sum ./authentication/
-COPY waitlist/go.mod waitlist/go.sum ./waitlist/
-COPY crawling/go.mod crawling/go.sum ./crawling/
 
 # Download dependencies
 RUN cd query && go mod download

@@ -181,7 +181,7 @@ func (s *crawlingServer) GetGoogleGmailList(ctx context.Context, client *http.Cl
 		}
 
 		call := srv.Users.Messages.List("me").
-			Q("category:primary OR category:promotions").
+			Q("category:primary").
 			PageToken(pageToken).
 			MaxResults(pageSize).
 			Fields("messages(id),nextPageToken")
