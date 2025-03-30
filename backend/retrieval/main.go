@@ -26,6 +26,8 @@ type retrievalServer struct {
 	vectorClient    pb.VectorServiceClient
 	embeddingConn   *grpc.ClientConn
 	embeddingClient pb.EmbeddingServiceClient
+	crawlingConn    *grpc.ClientConn
+	crawlingClient  pb.CrawlingServiceClient
 }
 
 // rpc(context, retrieve top k chunks request)
@@ -46,36 +48,62 @@ func (s *retrievalServer) RetrieveTopKChunks(ctx context.Context, req *pb.Retrie
 	if err != nil {
 		return &pb.RetrieveTopKChunksResponse{TopKChunks: []*pb.TextChunkMessage{}}, err
 	}
-
 	// TODO: create result slices for other platforms like google, etc. and retrieve them
 
 	var topKDesktopResults []*pb.Metadata
+	var topKGoogleResults []*pb.Metadata
+
+	// Separate chunks by platform
 	for _, metadata := range topKMetadatas.TopKMetadatas {
 		if metadata.Platform == pb.Platform_PLATFORM_LOCAL {
 			topKDesktopResults = append(topKDesktopResults, metadata)
-		} else if metadata.Platform == pb.Platform_PLATFORM_GOOGLE_DRIVE {
-			// TODO: fill out result slices for other platforms
+		} else if metadata.Platform == pb.Platform_PLATFORM_GOOGLE {
+			topKGoogleResults = append(topKGoogleResults, metadata)
 		}
 	}
-
-	// fetch the file contents for desktop
-	desktopChunkResponse, err := s.desktopClient.GetChunksFromUser(ctx, &pb.GetChunksFromUserRequest{
-		UserId:    req.UserId,
-		Metadatas: topKDesktopResults,
-		Ttl:       req.Ttl,
-	})
-	if err != nil {
-		return &pb.RetrieveTopKChunksResponse{
-			TopKChunks: []*pb.TextChunkMessage{},
-		}, err
+	var desktopChunkResponse *pb.GetChunksFromUserResponse
+	// Only try to get desktop chunks if we have results and connection is ready
+	if len(topKDesktopResults) > 0 {
+		if s.desktopConn == nil || s.desktopConn.GetState().String() != "READY" {
+			desktopChunkResponse = &pb.GetChunksFromUserResponse{Chunks: []*pb.TextChunkMessage{}}
+		} else {
+			var err error
+			desktopChunkResponse, err = s.desktopClient.GetChunksFromUser(ctx, &pb.GetChunksFromUserRequest{
+				UserId:    req.UserId,
+				Metadatas: topKDesktopResults,
+				Ttl:       req.Ttl,
+			})
+			if err != nil {
+				// Continue with empty desktop results instead of failing completely
+				desktopChunkResponse = &pb.GetChunksFromUserResponse{Chunks: []*pb.TextChunkMessage{}}
+			}
+		}
+	} else {
+		desktopChunkResponse = &pb.GetChunksFromUserResponse{Chunks: []*pb.TextChunkMessage{}}
 	}
 
-	// TODO: fetch chunks from other platforms
+	// Get Google chunks
+	var googleChunkResponse *pb.GetChunksFromGoogleResponse
+	if len(topKGoogleResults) > 0 {
+		var err error
+		googleChunkResponse, err = s.crawlingClient.GetChunksFromGoogle(ctx, &pb.GetChunksFromGoogleRequest{
+			UserId:    req.UserId,
+			Metadatas: topKGoogleResults,
+			Ttl:       req.Ttl,
+		})
+		if err != nil {
+			googleChunkResponse = &pb.GetChunksFromGoogleResponse{Chunks: []*pb.TextChunkMessage{}}
+		}
+	} else {
+		googleChunkResponse = &pb.GetChunksFromGoogleResponse{Chunks: []*pb.TextChunkMessage{}}
+	}
 
-	// TODO: coalesce chunks from multiple sources to make a response
 	var topKChunks []*pb.TextChunkMessage
 	if desktopChunkResponse.Chunks != nil {
 		topKChunks = append(topKChunks, desktopChunkResponse.Chunks...)
+	}
+	if googleChunkResponse.Chunks != nil {
+		topKChunks = append(topKChunks, googleChunkResponse.Chunks...)
 	}
 
 	// rerank the results by first getting the scores
@@ -186,6 +214,27 @@ func (s *retrievalServer) connectToEmbeddingService(tlsConfig *tls.Config) {
 	s.embeddingClient = pb.NewEmbeddingServiceClient(embeddingConn)
 }
 
+// func(client TLS config)
+//   - connects to the crawling service using the provided client tls config and saves the connection and function interface to the server struct
+//   - assumes: the connection will be closed in the parent function at some point
+func (s *retrievalServer) connectToCrawlingService(tlsConfig *tls.Config) {
+	// Connect to the crawling service
+	crawlingAddy, ok := os.LookupEnv("CRAWLING_ADDRESS")
+	if !ok {
+		log.Fatal("failed to retrieve crawling address for connection")
+	}
+	crawlingConn, err := grpc.NewClient(
+		crawlingAddy,
+		grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)),
+	)
+	if err != nil {
+		log.Fatalf("Failed to establish connection with crawling-service: %v", err)
+	}
+
+	s.crawlingConn = crawlingConn
+	s.crawlingClient = pb.NewCrawlingServiceClient(crawlingConn)
+}
+
 // func()
 //   - sets up the gRPC server, connects it with the global struct, and TLS
 //   - assumes: you will call grpcServer.GracefulStop() in the parent function at some point
@@ -262,6 +311,10 @@ func main() {
 	// Connect to the embedding service
 	server.connectToEmbeddingService(clientTlsConfig)
 	defer server.embeddingConn.Close()
+
+	// Connect to the crawling service
+	server.connectToCrawlingService(clientTlsConfig)
+	defer server.crawlingConn.Close()
 
 	<-sigChan // TODO: implement worker groups
 	log.Print("gracefully shutting down...")
