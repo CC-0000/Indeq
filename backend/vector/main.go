@@ -30,6 +30,7 @@ type vectorServer struct {
 	embeddingConn   *grpc.ClientConn
 	embeddingClient pb.EmbeddingServiceClient
 	desktopWriter   *kafka.Writer
+	crawlingWriter  *kafka.Writer
 	collectionName  string
 }
 
@@ -126,7 +127,7 @@ func (s *vectorServer) startTextChunkProcess(ctx context.Context) error {
 
 				// check if file is done or if crawling is done, or if we're just processing a text chunk
 				if textChunk.Content == "<file_done>" {
-					// we want fire off the batch immediately to finish the rest of this file's chunks
+					// Process batch before handling file_done signal
 					err := s.processBatch(ctx, batch)
 					if err != nil {
 						log.Printf("failed to process batch after file_done signal: %v", err)
@@ -140,7 +141,6 @@ func (s *vectorServer) startTextChunkProcess(ctx context.Context) error {
 						log.Print("no metadata detected for this text chunk, aborting the file_done signal")
 						continue
 					}
-
 					// Write the message to the proper stream to let them know we are done
 					if textChunk.Metadata.Platform == pb.Platform_PLATFORM_LOCAL {
 						fileDoneMessage := &pb.FileDoneProcessing{
@@ -160,8 +160,24 @@ func (s *vectorServer) startTextChunkProcess(ctx context.Context) error {
 							log.Print("error: ", err)
 							continue
 						}
-					} else if textChunk.Metadata.Platform == pb.Platform_PLATFORM_GOOGLE_DRIVE {
-						// TODO: send the signals to other platform topics
+					} else if textChunk.Metadata.Platform == pb.Platform_PLATFORM_GOOGLE {
+						fileDoneMessage := &pb.FileDoneProcessing{
+							UserId:   textChunk.Metadata.UserId,
+							FilePath: textChunk.Metadata.FilePath,
+						}
+						byteMessage, err := proto.Marshal(fileDoneMessage)
+						if err != nil {
+							log.Print("failed to serialized file done message: ", err)
+							continue
+						}
+						message := kafka.Message{
+							Value: byteMessage,
+						}
+
+						if err := s.crawlingWriter.WriteMessages(ctx, message); err != nil {
+							log.Print("error: ", err)
+							continue
+						}
 					}
 				} else if textChunk.Content == "<crawl_done>" {
 					if textChunk.Metadata == nil {
@@ -169,7 +185,6 @@ func (s *vectorServer) startTextChunkProcess(ctx context.Context) error {
 						continue
 					}
 
-					// write the message to the proper stream
 					if textChunk.Metadata.Platform == pb.Platform_PLATFORM_LOCAL {
 						fileDoneMessage := &pb.FileDoneProcessing{
 							UserId:       textChunk.Metadata.UserId,
@@ -188,8 +203,24 @@ func (s *vectorServer) startTextChunkProcess(ctx context.Context) error {
 							log.Print("error: ", err)
 							continue
 						}
-					} else if textChunk.Metadata.Platform == pb.Platform_PLATFORM_GOOGLE_DRIVE {
-						// TODO: send the signals to other platform topics
+					} else if textChunk.Metadata.Platform == pb.Platform_PLATFORM_GOOGLE {
+						fileDoneMessage := &pb.FileDoneProcessing{
+							UserId:       textChunk.Metadata.UserId,
+							CrawlingDone: true,
+						}
+						byteMessage, err := proto.Marshal(fileDoneMessage)
+						if err != nil {
+							log.Print("failed to serialized file done message: ", err)
+							continue
+						}
+						message := kafka.Message{
+							Value: byteMessage,
+						}
+
+						if err := s.crawlingWriter.WriteMessages(ctx, message); err != nil {
+							log.Print("error: ", err)
+							continue
+						}
 					}
 				} else {
 					// Add the textchunk to the batch
@@ -257,8 +288,34 @@ func (s *vectorServer) createDesktopWriter() {
 			}
 		},
 	}
-
 	s.desktopWriter = desktopWriter
+}
+
+// func()
+//   - creates a kafka writer interface for writing crawling signals like (crawl_done, etc.)
+//   - assumes: that a topic called 'crawling-signals' has already been created elsewhere (like in an init routine)
+//   - assumes: you will close the writer elsewhere in the parent once you are done using it
+func (s *vectorServer) createCrawlingWriter() {
+	broker, ok := os.LookupEnv("KAFKA_BROKER_ADDRESS")
+	if !ok {
+		log.Fatal("failed to retrieve kafka broker address")
+	}
+
+	crawlingWriter := &kafka.Writer{
+		Addr:         kafka.TCP(broker),
+		Topic:        "google-crawling-signals",
+		Balancer:     &kafka.LeastBytes{},
+		BatchSize:    10,
+		BatchTimeout: 1 * time.Second,
+		Compression:  kafka.Lz4,
+		Async:        true, // will not wait for the batch timeout to send messages
+		Completion: func(messages []kafka.Message, err error) {
+			if err != nil {
+				log.Printf("encountered error while writing message to crawling-signals: %v", err)
+			}
+		},
+	}
+	s.crawlingWriter = crawlingWriter
 }
 
 // func(context)
@@ -373,6 +430,10 @@ func main() {
 	// connect to apache kafka
 	server.createDesktopWriter()
 	defer server.desktopWriter.Close()
+
+	// connect to crawling kafka
+	server.createCrawlingWriter()
+	defer server.crawlingWriter.Close()
 
 	// TODO: create other writers to signal for google drive, microsoft office, notion, etc.
 
