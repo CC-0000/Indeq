@@ -313,26 +313,24 @@
                               on:scroll={(e) => handleScroll(e, messageIndex)}
                               use:initScrollCheck={messageIndex}
                           >
-                              {#each message.sources as source, i}
+                              {#each message.sources as source}
                                   <div class="flex-none w-[325px]">
-                                      <div class="bg-gray-50 rounded-md p-3 hover:bg-gray-100 transition-colors group-[{i}]">
-                                          <div class="flex items-center gap-2 text-gray-400 mb-1">
+                                      <div class="bg-gray-50 rounded-md p-3 hover:bg-gray-100 transition-colors shadow-sm border border-gray-100">
+                                          <div class="flex items-center gap-1 text-gray-400 mb-1">
                                               <HardDriveIcon size="14" />
-                                              |
+                                              <span class="text-gray-300 mx-1">|</span>
                                               {#if source.extension === 'pdf'}
                                                   <FileTextIcon size="14" />
-                                              {:else if source.extension === 'docx'}
-                                                  <FileIcon size="14" />
                                               {:else}
                                                   <FileIcon size="14" />
                                               {/if}
-                                              <span class="text-[10px] uppercase tracking-wider font-medium">
+                                              <span class="text-xs uppercase tracking-wider font-medium">
                                                   {source.extension}
                                               </span>
                                           </div>
                                           <div>
-                                              <h4 class="text-sm text-gray-900 truncate">{source.title}</h4>
-                                              <p class="text-xs text-gray-500 truncate">{source.filePath}</p>
+                                              <div class="text-sm font-medium text-gray-900 truncate mb-1">{source.title}</div>
+                                              <div class="text-xs text-gray-500 truncate font-light">{source.filePath}</div>
                                           </div>
                                       </div>
                                   </div>

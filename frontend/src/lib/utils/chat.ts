@@ -8,9 +8,10 @@ export function processSource(payload: any, botMessage: BotMessage) {
 
     const source : Source = {
         id: sourceId,
-        extension: sourceExtension,
+        extension: sourceExtension.toLowerCase(),
         filePath: sourceFilePath,
         title: sourceTitle,
+        showTooltip: true,
     }
 
     botMessage.sources.push(source);
