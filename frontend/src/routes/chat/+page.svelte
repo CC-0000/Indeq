@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { SearchIcon, ChevronDownIcon, CheckIcon, FileIcon, FileTextIcon, HardDriveIcon } from "svelte-feather-icons";
+    import { ChevronDownIcon, CheckIcon, FileIcon, FileTextIcon, HardDriveIcon, SendIcon } from "svelte-feather-icons";
     import { onDestroy } from 'svelte';
     import "katex/dist/katex.min.css";
     import { processReasoningMessage, processOutputMessage, toggleReasoning, processSource } from '$lib/utils/chat';
@@ -211,20 +211,45 @@
       </p>
 
       <!-- Search Input -->
-      <div class="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
-        <input
-          type="text"
+      <div class="flex flex-col gap-3 p-3 bg-gray-50 rounded-lg relative">
+        <textarea
           bind:value={userQuery}
-          placeholder="Search for private data insights..."
-          class="flex-1 p-2 bg-transparent focus:outline-none"
-          class:move-to-bottom={isFullscreen}
-          on:keydown={(e) => e.key === 'Enter' && query()}
-        />
+          placeholder="Ask me anything..."
+          class="w-full p-2 bg-transparent focus:outline-none prose prose-lg resize-none overflow-y-auto textarea-scrollbar pr-12"
+          rows="1"
+          on:input={(e) => {
+            const target = e.target as HTMLTextAreaElement;
+            target.style.height = 'auto';
+            const newHeight = target.scrollHeight;
+            const maxHeight = 150;
+            target.style.height = Math.min(newHeight, maxHeight) + 'px';
+            target.style.overflowY = newHeight > maxHeight ? 'auto' : 'hidden';
+            
+            const sendButton = target.parentElement?.querySelector('.send-button-dynamic') as HTMLElement;
+            if (sendButton) {
+              const singleLineHeight = 36;
+              // If height is close to a single line, center it
+              if (newHeight <= singleLineHeight * 1.5) {
+                sendButton.classList.remove('bottom-3');
+                sendButton.classList.add('top-1/2', '-translate-y-1/2');
+              } else {
+                sendButton.classList.remove('top-1/2', '-translate-y-1/2');
+                sendButton.classList.add('bottom-3');
+              }
+            }
+          }}
+          on:keydown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              query();
+            }
+          }}
+        ></textarea>
         <button
-          class="p-2 rounded-lg bg-primary text-white hover:bg-blue-600 transition-colors"
+          class="p-2 rounded-lg bg-primary text-white hover:bg-blue-600 transition-colors absolute right-3 z-10 top-1/2 -translate-y-1/2 send-button-dynamic"
           on:click={query}
         >
-          <SearchIcon size="20" />
+          <SendIcon size="20" />
         </button>
       </div>
 
@@ -428,14 +453,27 @@
           </div>
         {/each}
       </div>
-      <div class="sticky bottom-0 p-4 border-t border-gray-200 bg-white">
-        <input
+      <div class="sticky bottom-0 p-4 border-t border-gray-200 bg-white relative">
+        <textarea
           bind:value={userQuery}
-          type="text"
           placeholder="Ask me anything..."
-          class="w-full px-4 py-3 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-lg"
-          on:keydown={(e) => e.key === 'Enter' && query()}
-        />
+          class="w-full px-4 py-3 rounded-lg shadow-sm prose prose-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none overflow-y-auto textarea-scrollbar pr-14"
+          rows="1"
+          on:input={(e) => {
+            const target = e.target as HTMLTextAreaElement;
+            target.style.height = 'auto';
+            const newHeight = target.scrollHeight;
+            const maxHeight = 150;
+            target.style.height = Math.min(newHeight, maxHeight) + 'px';
+            target.style.overflowY = newHeight > maxHeight ? 'auto' : 'hidden';
+          }}
+          on:keydown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              query();
+            }
+          }}
+        ></textarea>
       </div>
     </div>
   {/if}
@@ -506,6 +544,32 @@
     
     .pointer-events-auto {
         pointer-events: auto;
+    }
+
+    /* Textarea scrollbar styling */
+    .textarea-scrollbar {
+      scrollbar-width: thin;
+      -ms-overflow-style: none;
+      scroll-behavior: smooth;
+    }
+
+    .textarea-scrollbar::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .textarea-scrollbar::-webkit-scrollbar-track {
+      background: #f1f1f1;
+      border-radius: 3px;
+      margin: 0;
+    }
+
+    .textarea-scrollbar::-webkit-scrollbar-thumb {
+      background: #888;
+      border-radius: 3px;
+    }
+
+    .textarea-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: #666;
     }
 
 </style>
