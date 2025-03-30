@@ -8,8 +8,7 @@ package api;
 
 enum Platform {
     PLATFORM_LOCAL = 0;
-    PLATFORM_GOOGLE_DRIVE = 1;
-    PLATFORM_GOOGLE_DOCS = 2;
+    PLATFORM_GOOGLE = 1;
     PLATFORM_MICROSOFT = 3;
     PLATFORM_NOTION = 4;
 }
@@ -23,6 +22,11 @@ message Metadata {
     uint32 end = 6;       // Col 10 <-- start of the block INCLUSIVE
     string title = 7;          // "My journal"
     Platform platform = 8;     // google, notion, etc.
+    string file_id = 9;         // e.g., "4i23uh5i-2342-g452-g5gg-o9385h6dahl1"
+    string resource_type = 10;   // e.g., "text/plain"
+    string file_url = 11;        // e.g., "https://drive.google.com/file/xyz"
+    string chunk_id = 12;        // e.g., ""
+    string service = 13;       // google drive, gmail
 }
 
 message TextChunkMessage {

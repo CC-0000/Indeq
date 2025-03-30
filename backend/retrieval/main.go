@@ -17,10 +17,12 @@ import (
 
 type retrievalServer struct {
 	pb.UnimplementedRetrievalServiceServer
-	desktopConn   *grpc.ClientConn
-	desktopClient pb.DesktopServiceClient
-	vectorConn    *grpc.ClientConn
-	vectorClient  pb.VectorServiceClient
+	desktopConn    *grpc.ClientConn
+	desktopClient  pb.DesktopServiceClient
+	vectorConn     *grpc.ClientConn
+	vectorClient   pb.VectorServiceClient
+	crawlingConn   *grpc.ClientConn
+	crawlingClient pb.CrawlingServiceClient
 }
 
 // rpc(context, retrieve top k chunks request)
@@ -35,36 +37,62 @@ func (s *retrievalServer) RetrieveTopKChunks(ctx context.Context, req *pb.Retrie
 	if err != nil {
 		return &pb.RetrieveTopKChunksResponse{TopKChunks: []*pb.TextChunkMessage{}}, err
 	}
-
 	// TODO: create result slices for other platforms like google, etc. and retrieve them
 
 	var topKDesktopResults []*pb.Metadata
+	var topKGoogleResults []*pb.Metadata
+
+	// Separate chunks by platform
 	for _, metadata := range topKMetadatas.TopKMetadatas {
 		if metadata.Platform == pb.Platform_PLATFORM_LOCAL {
 			topKDesktopResults = append(topKDesktopResults, metadata)
-		} else if metadata.Platform == pb.Platform_PLATFORM_GOOGLE_DRIVE {
-			// TODO: fill out result slices for other platforms
+		} else if metadata.Platform == pb.Platform_PLATFORM_GOOGLE {
+			topKGoogleResults = append(topKGoogleResults, metadata)
 		}
 	}
-
-	// fetch the file contents for desktop
-	desktopChunkResponse, err := s.desktopClient.GetChunksFromUser(ctx, &pb.GetChunksFromUserRequest{
-		UserId:    req.UserId,
-		Metadatas: topKDesktopResults,
-		Ttl:       req.Ttl,
-	})
-	if err != nil {
-		return &pb.RetrieveTopKChunksResponse{
-			TopKChunks: []*pb.TextChunkMessage{},
-		}, err
+	var desktopChunkResponse *pb.GetChunksFromUserResponse
+	// Only try to get desktop chunks if we have results and connection is ready
+	if len(topKDesktopResults) > 0 {
+		if s.desktopConn == nil || s.desktopConn.GetState().String() != "READY" {
+			desktopChunkResponse = &pb.GetChunksFromUserResponse{Chunks: []*pb.TextChunkMessage{}}
+		} else {
+			var err error
+			desktopChunkResponse, err = s.desktopClient.GetChunksFromUser(ctx, &pb.GetChunksFromUserRequest{
+				UserId:    req.UserId,
+				Metadatas: topKDesktopResults,
+				Ttl:       req.Ttl,
+			})
+			if err != nil {
+				// Continue with empty desktop results instead of failing completely
+				desktopChunkResponse = &pb.GetChunksFromUserResponse{Chunks: []*pb.TextChunkMessage{}}
+			}
+		}
+	} else {
+		desktopChunkResponse = &pb.GetChunksFromUserResponse{Chunks: []*pb.TextChunkMessage{}}
 	}
 
-	// TODO: fetch chunks from other platforms
+	// Get Google chunks
+	var googleChunkResponse *pb.GetChunksFromGoogleResponse
+	if len(topKGoogleResults) > 0 {
+		var err error
+		googleChunkResponse, err = s.crawlingClient.GetChunksFromGoogle(ctx, &pb.GetChunksFromGoogleRequest{
+			UserId:    req.UserId,
+			Metadatas: topKGoogleResults,
+			Ttl:       req.Ttl,
+		})
+		if err != nil {
+			googleChunkResponse = &pb.GetChunksFromGoogleResponse{Chunks: []*pb.TextChunkMessage{}}
+		}
+	} else {
+		googleChunkResponse = &pb.GetChunksFromGoogleResponse{Chunks: []*pb.TextChunkMessage{}}
+	}
 
-	// TODO: coalesce chunks from multiple sources to make a response
 	var topKChunks []*pb.TextChunkMessage
 	if desktopChunkResponse.Chunks != nil {
 		topKChunks = append(topKChunks, desktopChunkResponse.Chunks...)
+	}
+	if googleChunkResponse.Chunks != nil {
+		topKChunks = append(topKChunks, googleChunkResponse.Chunks...)
 	}
 
 	return &pb.RetrieveTopKChunksResponse{
@@ -112,6 +140,24 @@ func (s *retrievalServer) connectToVectorService(tlsConfig *tls.Config) {
 
 	s.vectorConn = vectorConn
 	s.vectorClient = pb.NewVectorServiceClient(vectorConn)
+}
+
+func (s *retrievalServer) connectToCrawlingService(tlsConfig *tls.Config) {
+	// Connect to the crawling service
+	crawlingAddy, ok := os.LookupEnv("CRAWLING_ADDRESS")
+	if !ok {
+		log.Fatal("failed to retrieve crawling address for connection")
+	}
+	crawlingConn, err := grpc.NewClient(
+		crawlingAddy,
+		grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)),
+	)
+	if err != nil {
+		log.Fatalf("Failed to establish connection with crawling-service: %v", err)
+	}
+
+	s.crawlingConn = crawlingConn
+	s.crawlingClient = pb.NewCrawlingServiceClient(crawlingConn)
 }
 
 // func()
@@ -186,6 +232,10 @@ func main() {
 	// Connect to the vector service
 	server.connectToVectorService(clientTlsConfig)
 	defer server.vectorConn.Close()
+
+	// Connect to the crawling service
+	server.connectToCrawlingService(clientTlsConfig)
+	defer server.crawlingConn.Close()
 
 	<-sigChan // TODO: implement worker groups
 	log.Print("gracefully shutting down...")
