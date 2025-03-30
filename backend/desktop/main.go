@@ -98,7 +98,7 @@ func (s *desktopServer) GetChunksFromUser(ctx context.Context, req *pb.GetChunks
 
 // rpc(context, setup user stats request)
 //   - sets up the default crawl_stats values for the given user
-//   - assumes that the user just registered and is valid
+//   - assumes: the user just registered and is valid
 func (s *desktopServer) SetupUserStats(ctx context.Context, req *pb.SetupUserStatsRequest) (*pb.SetupUserStatsResponse, error) {
 	if err := s.createDefaultCrawlStatsEntry(ctx, req.UserId); err != nil {
 		return &pb.SetupUserStatsResponse{
@@ -110,38 +110,39 @@ func (s *desktopServer) SetupUserStats(ctx context.Context, req *pb.SetupUserSta
 	}, nil
 }
 
-// func()
-//   - starts the desktop-service grpc server
-//   - this is a blocking call
-func (s *desktopServer) startGRPCServer() {
-	log.Println("Starting the desktop gRPC server...")
-
-	grpcAddress, ok := os.LookupEnv("DESKTOP_PORT")
-	if !ok {
-		log.Fatal("failed to find the desktop service port in env variables")
-	}
-
-	tlsConfig, err := config.LoadServerTLSFromEnv("DESKTOP_CRT", "DESKTOP_KEY")
+// rpc(context, get crawl stats request)
+//   - retrieves the crawl statistics for a given user
+//   - returns the number of files crawled, total files, crawling status, and online status
+//   - assumes: the user exists in the database
+func (s *desktopServer) GetCrawlStats(ctx context.Context, req *pb.GetCrawlStatsRequest) (*pb.GetCrawlStatsResponse, error) {
+	// Get the crawl statistics from the database
+	crawledFiles, totalFiles, isCrawling, isOnline, err := s.getCrawlStats(ctx, req.UserId)
 	if err != nil {
-		log.Fatalf("Error loading TLS config for desktop service: %v", err)
+		return nil, fmt.Errorf("failed to get crawl stats: %v", err)
 	}
 
-	listener, err := net.Listen("tcp", grpcAddress)
+	// Return the response with the crawl statistics
+	return &pb.GetCrawlStatsResponse{
+		CrawledFiles: crawledFiles,
+		TotalFiles:   totalFiles,
+		IsCrawling:   isCrawling,
+		IsOnline:     isOnline,
+	}, nil
+}
+
+// rpc(context, update user online status request)
+//   - updates the online status for a given user in the crawl_stats table
+//   - returns an error if the update fails, otherwise returns an empty response
+//   - assumes: the user exists in the database
+func (s *desktopServer) UpdateUserOnlineStatus(ctx context.Context, req *pb.UpdateUserOnlineStatusRequest) (*pb.UpdateUserOnlineStatusResponse, error) {
+	// Update the user's online status in the database
+	err := s.updateUserOnlineStatus(ctx, req.UserId, req.IsOnline)
 	if err != nil {
-		log.Fatalf("Failed to listen: %v", err)
+		return nil, fmt.Errorf("failed to update online status: %v", err)
 	}
-	defer listener.Close()
-	log.Printf("Desktop gRPC Service listening on %v\n", listener.Addr())
 
-	// set up TLS for the gRPC server and serve it
-	opts := []grpc.ServerOption{
-		grpc.Creds(credentials.NewTLS(tlsConfig)),
-	}
-	grpcServer := grpc.NewServer(opts...)
-	pb.RegisterDesktopServiceServer(grpcServer, s)
-	if err := grpcServer.Serve(listener); err != nil {
-		log.Fatalf("Failed to serve: %v", err)
-	}
+	// Return empty response on success
+	return &pb.UpdateUserOnlineStatusResponse{}, nil
 }
 
 // func(context, how often we want to check, how long can a crawl be running for before cancelled)
@@ -422,6 +423,48 @@ func (s *desktopServer) connectToTextChunkKafkaWriter() {
 	s.kafkaWriter = kafkaWriter
 }
 
+// func()
+//   - sets up the gRPC server, connects it with the global struct, and TLS
+//   - assumes: you will call grpcServer.GracefulStop() in the parent function at some point
+func (s *desktopServer) createGRPCServer() *grpc.Server {
+	// set up TLS for the gRPC server and serve it
+	tlsConfig, err := config.LoadServerTLSFromEnv("DESKTOP_CRT", "DESKTOP_KEY")
+	if err != nil {
+		log.Fatalf("Error loading TLS config for desktop service: %v", err)
+	}
+
+	opts := []grpc.ServerOption{
+		grpc.Creds(credentials.NewTLS(tlsConfig)),
+	}
+	grpcServer := grpc.NewServer(opts...)
+	pb.RegisterDesktopServiceServer(grpcServer, s)
+
+	return grpcServer
+}
+
+// func(pointer to a fully set up grpc server)
+//   - starts the desktop-service grpc server
+//   - this is a blocking call
+func (s *desktopServer) startGRPCServer(grpcServer *grpc.Server) {
+	log.Println("Starting the desktop gRPC server...")
+
+	grpcAddress, ok := os.LookupEnv("DESKTOP_PORT")
+	if !ok {
+		log.Fatal("failed to find the desktop service port in env variables")
+	}
+
+	listener, err := net.Listen("tcp", grpcAddress)
+	if err != nil {
+		log.Fatalf("Failed to listen: %v", err)
+	}
+	defer listener.Close()
+	log.Printf("Desktop gRPC Service listening on %v\n", listener.Addr())
+
+	if err := grpcServer.Serve(listener); err != nil {
+		log.Fatalf("Failed to serve: %v", err)
+	}
+}
+
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -468,8 +511,10 @@ func main() {
 	// Start reading from the kafka stream
 	go server.startDesktopSignalReading(ctx)
 
-	// start the gRPC server (this is blocking)
-	server.startGRPCServer()
+	// create and start the gRPC server
+	grpcServer := server.createGRPCServer()
+	go server.startGRPCServer(grpcServer)
+	defer grpcServer.GracefulStop()
 
 	<-sigChan // TODO: implement worker groups
 	log.Print("gracefully shutting down...")
