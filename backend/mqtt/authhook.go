@@ -1,11 +1,20 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"log"
+	"os"
+	"time"
 
+	pb "github.com/cc-0000/indeq/common/api"
+	"github.com/cc-0000/indeq/common/config"
 	mqtt "github.com/mochi-mqtt/server/v2"
 	"github.com/mochi-mqtt/server/v2/packets"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 // struct(extends mqtt.HookBase class)
@@ -14,15 +23,44 @@ import (
 type CertAuthHook struct {
 	mqtt.HookBase
 	clientIDtoUID map[string]string // Map of client IDs --> certificate UIDs
+	desktopClient pb.DesktopServiceClient
+	desktopConn   *grpc.ClientConn
 }
 
 // func()
 //   - static constructor
-//   - initializes the client to certificate uid map
+//   - initializes the client to certificate uid map and connects to desktop service
 func NewCertAuthHook() *CertAuthHook {
-	return &CertAuthHook{
+	hook := &CertAuthHook{
 		clientIDtoUID: make(map[string]string),
 	}
+
+	// Connect to desktop service
+	desktopAddy, ok := os.LookupEnv("DESKTOP_ADDRESS")
+	if !ok {
+		log.Printf("Warning: DESKTOP_ADDRESS environment variable not set, online status updates will be disabled")
+		return hook
+	}
+
+	// Configure TLS for desktop service connection
+	tlsConfig, err := config.LoadClientTLSFromEnv("MQTT_CRT", "MQTT_KEY", "CA_CRT")
+	if err != nil {
+		log.Printf("Warning: Failed to load TLS config for desktop service: %v, online status updates will be disabled", err)
+		return hook
+	}
+
+	// Set up connection to desktop service with TLS
+	conn, err := grpc.NewClient(desktopAddy,
+		grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)),
+	)
+	if err != nil {
+		log.Printf("Warning: Failed to connect to desktop service: %v, online status updates will be disabled", err)
+		return hook
+	}
+
+	hook.desktopConn = conn
+	hook.desktopClient = pb.NewDesktopServiceClient(conn)
+	return hook
 }
 
 // func()
@@ -51,6 +89,7 @@ func (h *CertAuthHook) Init(config any) error {
 // func(client pointer, packet)
 //   - overrides the OnConnectAuthenticate() method in mqtt.HookBase
 //   - authenticates clients if they have the valid TLS certificates
+//   - updates the user's online status to true in the desktop service
 //   - maps the client ID to the client's embedded UID
 func (h *CertAuthHook) OnConnectAuthenticate(cl *mqtt.Client, pk packets.Packet) bool {
 	// Check if client has TLS connection and certificate
@@ -74,6 +113,21 @@ func (h *CertAuthHook) OnConnectAuthenticate(cl *mqtt.Client, pk packets.Packet)
 
 	// Store the mapping between client ID and certificate UID in our hook
 	h.clientIDtoUID[cl.ID] = uid
+
+	// Update user's online status to true in desktop service
+	if h.desktopClient != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		_, err := h.desktopClient.UpdateUserOnlineStatus(ctx, &pb.UpdateUserOnlineStatusRequest{
+			UserId:   uid,
+			IsOnline: true,
+		})
+
+		if err != nil {
+			log.Printf("Failed to update online status for user %s: %v", uid, err)
+		}
+	}
 
 	return true
 }
@@ -153,6 +207,34 @@ func extractUIDFromCert(cert *x509.Certificate) string {
 // func(client pointer, error, boolean)
 // - overrides the OnDisconnect() method in mqtt.HookBase
 // - deletes the clientID to UID mapping when a client disconnects
+// - updates the user's online status to false in the desktop service
 func (h *CertAuthHook) OnDisconnect(cl *mqtt.Client, err error, expire bool) {
+	// Get the UID before deleting the mapping
+	uid, ok := h.clientIDtoUID[cl.ID]
 	delete(h.clientIDtoUID, cl.ID)
+	if !ok {
+		return
+	}
+
+	// Update user's online status to false in desktop service
+	if h.desktopClient != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		_, err := h.desktopClient.UpdateUserOnlineStatus(ctx, &pb.UpdateUserOnlineStatusRequest{
+			UserId:   uid,
+			IsOnline: false,
+		})
+
+		if err != nil {
+			log.Printf("Failed to update offline status for user %s: %v", uid, err)
+		}
+	}
+}
+
+// func()
+//   - overrides the OnStopped() method in mqtt.HookBase
+//   - closes the connection to the desktop service
+func (h *CertAuthHook) OnStopped() {
+	h.desktopConn.Close()
 }

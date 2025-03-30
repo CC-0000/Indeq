@@ -236,3 +236,50 @@ func markAllCrawlingDone(ctx context.Context, db *sql.DB) {
 		log.Print("failed to set all crawls to done")
 	}
 }
+
+// func(context, user's ID)
+//   - retrieves the crawl statistics for a given user
+//   - returns crawled files count, total files count, crawling status, and online status
+//   - assumes: the user exists in the database
+func (s *desktopServer) getCrawlStats(ctx context.Context, userID string) (int32, int32, bool, bool, error) {
+	var crawledFiles, totalFiles int32
+	var isCrawling, isOnline bool
+
+	err := s.db.QueryRowContext(ctx, `
+		SELECT 
+			crawled_files, 
+			total_files, 
+			crawling, 
+			online
+		FROM 
+			crawl_stats
+		WHERE 
+			user_id = $1
+	`, userID).Scan(&crawledFiles, &totalFiles, &isCrawling, &isOnline)
+
+	if err != nil {
+		return 0, 0, false, false, fmt.Errorf("failed to get crawl stats for user %s: %v", userID, err)
+	}
+
+	return crawledFiles, totalFiles, isCrawling, isOnline, nil
+}
+
+// func(context, user's ID, online status)
+//   - updates the online status for a given user in the crawl_stats table
+//   - returns an error if the update fails
+//   - assumes: the user exists in the database
+func (s *desktopServer) updateUserOnlineStatus(ctx context.Context, userID string, isOnline bool) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE crawl_stats
+		SET 
+			online = $2
+		WHERE 
+			user_id = $1
+	`, userID, isOnline)
+
+	if err != nil {
+		return fmt.Errorf("failed to update online status for user %s: %v", userID, err)
+	}
+
+	return nil
+}

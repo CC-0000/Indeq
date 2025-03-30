@@ -133,6 +133,8 @@ services:
         condition: service_healthy
       authentication:
         condition: service_started
+      desktop:
+        condition: service_started
       init:
         condition: service_completed_successfully
     networks:
@@ -160,6 +162,18 @@ services:
       dockerfile: query/Dockerfile
     depends_on:
       rabbitmq:
+        condition: service_healthy
+    networks:
+      - indeq-net
+  crawling:
+    image: crawling-service
+    build:
+      context: .
+      dockerfile: crawling/Dockerfile
+    env_file:
+      - ./common/config/.env
+    depends_on:
+      appDB:
         condition: service_healthy
     networks:
       - indeq-net

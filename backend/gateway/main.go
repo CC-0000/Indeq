@@ -7,18 +7,18 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	pb "github.com/cc-0000/indeq/common/api"
-	"github.com/cc-0000/indeq/common/config"
-	"github.com/golang/protobuf/jsonpb"
-	"github.com/google/uuid"
-	amqp "github.com/rabbitmq/amqp091-go"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
 	"log"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
+
+	pb "github.com/cc-0000/indeq/common/api"
+	"github.com/cc-0000/indeq/common/config"
+	"github.com/google/uuid"
+	amqp "github.com/rabbitmq/amqp091-go"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 type ServiceClients struct {
@@ -26,7 +26,9 @@ type ServiceClients struct {
 	authClient        pb.AuthenticationServiceClient
 	integrationClient pb.IntegrationServiceClient
 	waitlistClient    pb.WaitlistServiceClient
+	desktopClient     pb.DesktopServiceClient
 	rabbitMQConn      *amqp.Connection
+	crawlingClient    pb.CrawlingServiceClient
 }
 
 func helloHandler(w http.ResponseWriter, r *http.Request) {
@@ -452,16 +454,54 @@ func handleAddToWaitlist(clients *ServiceClients) http.HandlerFunc {
 		res, err := clients.waitlistClient.AddToWaitlist(r.Context(), &pb.AddToWaitlistRequest{
 			Email: addToWaitlistRequest.Email,
 		})
-
 		if err != nil {
 			http.Error(w, "Failed to add to waitlist", http.StatusInternalServerError)
 			return
 		}
-
 		httpResponse := &pb.HttpAddToWaitlistResponse{
 			Success: res.Success,
 			Message: res.Message,
 		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(httpResponse)
+	}
+}
+
+func handleGetDesktopStatsGenerator(clients *ServiceClients) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Set up context
+		ctx := r.Context()
+
+		// NOTE: expects authentication middleware to have already verified the token
+		// Grab the token --> userId
+		auth_header := r.Header.Get("Authorization")
+		auth_token := strings.TrimPrefix(auth_header, "Bearer ")
+		verifyRes, err := clients.authClient.Verify(ctx, &pb.VerifyRequest{
+			Token: auth_token,
+		})
+		if err != nil {
+			http.Error(w, "Failed to verify token", http.StatusInternalServerError)
+			return
+		}
+
+		// Get the desktop stats for the user
+		res, err := clients.desktopClient.GetCrawlStats(ctx, &pb.GetCrawlStatsRequest{
+			UserId: verifyRes.UserId,
+		})
+		if err != nil {
+			log.Printf("Error getting desktop stats: %v", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
+		// Return the response using the proto message definition
+		httpResponse := &pb.HttpGetDesktopStatsResponse{
+			CrawledFiles: res.CrawledFiles,
+			TotalFiles:   res.TotalFiles,
+			IsCrawling:   res.IsCrawling,
+			IsOnline:     res.IsOnline,
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(httpResponse)
 	}
@@ -551,13 +591,7 @@ func handleVerifyGenerator(clients *ServiceClients) http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		marshaler := &jsonpb.Marshaler{
-			EmitDefaults: true,
-		}
-		err := marshaler.Marshal(w, httpResponse)
-		if err != nil {
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		}
+		json.NewEncoder(w).Encode(httpResponse)
 	}
 }
 
@@ -592,6 +626,37 @@ func handleSignCSRGenerator(clients *ServiceClients) http.HandlerFunc {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(httpResponse)
+	}
+}
+
+func handleManualCrawlGenerator(clients *ServiceClients) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log.Println("Received manual crawl request")
+
+		ctx := r.Context()
+		auth_header := r.Header.Get("Authorization")
+		auth_token := strings.TrimPrefix(auth_header, "Bearer ")
+		verifyRes, err := clients.authClient.Verify(ctx, &pb.VerifyRequest{
+			Token: auth_token,
+		})
+
+		if err != nil || !verifyRes.Valid {
+			log.Println("Invalid token")
+			http.Error(w, "Invalid token", http.StatusUnauthorized)
+			return
+		}
+
+		res, err := clients.crawlingClient.ManualCrawler(ctx, &pb.ManualCrawlerRequest{
+			UserId: verifyRes.UserId,
+		})
+		if err != nil {
+			log.Printf("Error updating crawler: %v", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(res)
 	}
 }
 
@@ -671,6 +736,19 @@ func main() {
 	defer integrationConn.Close()
 	integrationServiceClient := pb.NewIntegrationServiceClient(integrationConn)
 
+	//Connect to the crawling service
+	crawlingConn, err := grpc.NewClient(
+		os.Getenv("CRAWLING_ADDRESS"),
+		grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
+			RootCAs: certPool,
+		})),
+	)
+	if err != nil {
+		log.Fatalf("Failed to establish connection with crawling-service: %v", err)
+	}
+	defer crawlingConn.Close()
+	crawlingServiceClient := pb.NewCrawlingServiceClient(crawlingConn)
+
 	// Connect to the waitlist service
 	waitlistConn, err := grpc.NewClient(
 		os.Getenv("WAITLIST_ADDRESS"),
@@ -684,13 +762,28 @@ func main() {
 	defer waitlistConn.Close()
 	waitlistServiceClient := pb.NewWaitlistServiceClient(waitlistConn)
 
+	// Connect to the desktop service
+	desktopConn, err := grpc.NewClient(
+		os.Getenv("DESKTOP_ADDRESS"),
+		grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{
+			RootCAs: certPool,
+		})),
+	)
+	if err != nil {
+		log.Fatalf("Failed to establish connection with desktop-service: %v", err)
+	}
+	defer desktopConn.Close()
+	desktopServiceClient := pb.NewDesktopServiceClient(desktopConn)
+
 	// Save the service clients for future use
 	serviceClients := &ServiceClients{
 		queryClient:       queryServiceClient,
 		authClient:        authServiceClient,
-		integrationClient: integrationServiceClient,
 		waitlistClient:    waitlistServiceClient,
+		desktopClient:     desktopServiceClient,
+		crawlingClient:    crawlingServiceClient,
 		rabbitMQConn:      rabbitMQConn,
+		integrationClient: integrationServiceClient,
 	}
 	log.Print("Server has established connection with other services")
 
@@ -707,6 +800,8 @@ func main() {
 	mux.HandleFunc("GET /api/integrations", authMiddleware(handleGetIntegrationsGenerator(serviceClients), serviceClients))
 	mux.HandleFunc("POST /api/oauth", handleOAuthURLGenerator(serviceClients))
 	mux.HandleFunc("POST /api/waitlist", handleAddToWaitlist(serviceClients))
+	mux.HandleFunc("GET /api/desktop_stats", authMiddleware(handleGetDesktopStatsGenerator(serviceClients), serviceClients))
+	mux.HandleFunc("POST /api/manualcrawl", authMiddleware(handleManualCrawlGenerator(serviceClients), serviceClients))
 
 	httpPort := os.Getenv("GATEWAY_ADDRESS")
 	server := &http.Server{

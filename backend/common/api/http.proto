@@ -98,3 +98,13 @@ message HttpAddToWaitlistResponse {
   bool success = 1;
   string message = 2;
 }
+
+message HttpGetDesktopStatsRequest {
+}
+
+message HttpGetDesktopStatsResponse {
+  int32 crawled_files = 1;
+  int32 total_files = 2;
+  bool is_crawling = 3;
+  bool is_online = 4;
+}

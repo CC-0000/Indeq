@@ -3,10 +3,13 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"log"
 	"net"
 	"os"
 	"os/signal"
+	"sort"
+	"strconv"
 	"syscall"
 
 	pb "github.com/cc-0000/indeq/common/api"
@@ -17,41 +20,96 @@ import (
 
 type retrievalServer struct {
 	pb.UnimplementedRetrievalServiceServer
-	desktopConn   *grpc.ClientConn
-	desktopClient pb.DesktopServiceClient
-	vectorConn    *grpc.ClientConn
-	vectorClient  pb.VectorServiceClient
+	desktopConn     *grpc.ClientConn
+	desktopClient   pb.DesktopServiceClient
+	vectorConn      *grpc.ClientConn
+	vectorClient    pb.VectorServiceClient
+	embeddingConn   *grpc.ClientConn
+	embeddingClient pb.EmbeddingServiceClient
+	crawlingConn    *grpc.ClientConn
+	crawlingClient  pb.CrawlingServiceClient
 }
 
 // rpc(context, retrieve top k chunks request)
 //   - retrieves the top K related chunks of text to the prompt for the given user
 //   - times out after ttl miliseconds
 func (s *retrievalServer) RetrieveTopKChunks(ctx context.Context, req *pb.RetrieveTopKChunksRequest) (*pb.RetrieveTopKChunksResponse, error) {
+	numberOfSources := req.K
+	kVal, err := strconv.Atoi(os.Getenv("RETRIEVAL_K_VAL"))
+	if err != nil {
+		return &pb.RetrieveTopKChunksResponse{TopKChunks: []*pb.TextChunkMessage{}}, fmt.Errorf("failed to retrieve the k value from the env variables: %w", err)
+	}
+
 	topKMetadatas, err := s.vectorClient.GetTopKChunks(ctx, &pb.GetTopKChunksRequest{
 		UserId: req.UserId,
-		Prompt: req.Prompt,
-		K:      req.K,
+		Prompt: req.ExpandedPrompt,
+		K:      int32(kVal),
 	})
 	if err != nil {
 		return &pb.RetrieveTopKChunksResponse{TopKChunks: []*pb.TextChunkMessage{}}, err
 	}
-
 	// TODO: create result slices for other platforms like google, etc. and retrieve them
 
 	var topKDesktopResults []*pb.Metadata
+	var topKGoogleResults []*pb.Metadata
+
+	// Separate chunks by platform
 	for _, metadata := range topKMetadatas.TopKMetadatas {
 		if metadata.Platform == pb.Platform_PLATFORM_LOCAL {
 			topKDesktopResults = append(topKDesktopResults, metadata)
-		} else if metadata.Platform == pb.Platform_PLATFORM_GOOGLE_DRIVE {
-			// TODO: fill out result slices for other platforms
+		} else if metadata.Platform == pb.Platform_PLATFORM_GOOGLE {
+			topKGoogleResults = append(topKGoogleResults, metadata)
 		}
 	}
+	var desktopChunkResponse *pb.GetChunksFromUserResponse
+	// Only try to get desktop chunks if we have results and connection is ready
+	if len(topKDesktopResults) > 0 {
+		desktopChunkResponse, err = s.desktopClient.GetChunksFromUser(ctx, &pb.GetChunksFromUserRequest{
+			UserId:    req.UserId,
+			Metadatas: topKDesktopResults,
+			Ttl:       req.Ttl,
+		})
+		if err != nil {
+			// Continue with empty desktop results instead of failing completely
+			desktopChunkResponse = &pb.GetChunksFromUserResponse{Chunks: []*pb.TextChunkMessage{}}
+		}
+	} else {
+		desktopChunkResponse = &pb.GetChunksFromUserResponse{Chunks: []*pb.TextChunkMessage{}}
+	}
 
-	// fetch the file contents for desktop
-	desktopChunkResponse, err := s.desktopClient.GetChunksFromUser(ctx, &pb.GetChunksFromUserRequest{
-		UserId:    req.UserId,
-		Metadatas: topKDesktopResults,
-		Ttl:       req.Ttl,
+	// Get Google chunks
+	var googleChunkResponse *pb.GetChunksFromGoogleResponse
+	if len(topKGoogleResults) > 0 {
+		googleChunkResponse, err = s.crawlingClient.GetChunksFromGoogle(ctx, &pb.GetChunksFromGoogleRequest{
+			UserId:    req.UserId,
+			Metadatas: topKGoogleResults,
+			Ttl:       req.Ttl,
+		})
+		if err != nil {
+			googleChunkResponse = &pb.GetChunksFromGoogleResponse{Chunks: []*pb.TextChunkMessage{}}
+		}
+	} else {
+		googleChunkResponse = &pb.GetChunksFromGoogleResponse{Chunks: []*pb.TextChunkMessage{}}
+	}
+
+	var topKChunks []*pb.TextChunkMessage
+	if desktopChunkResponse.Chunks != nil {
+		topKChunks = append(topKChunks, desktopChunkResponse.Chunks...)
+	}
+	if googleChunkResponse.Chunks != nil {
+		topKChunks = append(topKChunks, googleChunkResponse.Chunks...)
+	}
+
+	// rerank the results by first getting the scores
+	scores, err := s.embeddingClient.RerankPassages(ctx, &pb.RerankingRequest{
+		Query: req.Prompt,
+		Passages: func() []string {
+			var passages []string
+			for _, chunk := range topKChunks {
+				passages = append(passages, chunk.Content)
+			}
+			return passages
+		}(),
 	})
 	if err != nil {
 		return &pb.RetrieveTopKChunksResponse{
@@ -59,16 +117,31 @@ func (s *retrievalServer) RetrieveTopKChunks(ctx context.Context, req *pb.Retrie
 		}, err
 	}
 
-	// TODO: fetch chunks from other platforms
+	type passageScore struct {
+		score float32
+		chunk *pb.TextChunkMessage
+	}
+	var passageScores []passageScore
+	for i, chunk := range topKChunks {
+		passageScores = append(passageScores, passageScore{
+			chunk: chunk,
+			score: scores.Scores[i],
+		})
+	}
 
-	// TODO: coalesce chunks from multiple sources to make a response
-	var topKChunks []*pb.TextChunkMessage
-	if desktopChunkResponse.Chunks != nil {
-		topKChunks = append(topKChunks, desktopChunkResponse.Chunks...)
+	// order the chunks by their scores
+	sort.Slice(passageScores, func(i, j int) bool {
+		return passageScores[i].score > passageScores[j].score
+	})
+
+	// collect only the first numberOfSources chunks
+	var topNumberOfSourcesChunks []*pb.TextChunkMessage
+	for i := range min(numberOfSources, int32(len(passageScores))) {
+		topNumberOfSourcesChunks = append(topNumberOfSourcesChunks, passageScores[i].chunk)
 	}
 
 	return &pb.RetrieveTopKChunksResponse{
-		TopKChunks: topKChunks,
+		TopKChunks: topNumberOfSourcesChunks,
 	}, nil
 }
 
@@ -112,6 +185,48 @@ func (s *retrievalServer) connectToVectorService(tlsConfig *tls.Config) {
 
 	s.vectorConn = vectorConn
 	s.vectorClient = pb.NewVectorServiceClient(vectorConn)
+}
+
+// func(client TLS config)
+//   - connects to the embedding service using the provided client tls config and saves the connection and function interface to the server struct
+//   - assumes: the connection will be closed in the parent function at some point
+func (s *retrievalServer) connectToEmbeddingService(tlsConfig *tls.Config) {
+	// connect to the embedding service
+	embeddingAddy, ok := os.LookupEnv("EMBEDDING_ADDRESS")
+	if !ok {
+		log.Fatal("failed to retrieve desktop address for connection")
+	}
+	embeddingConn, err := grpc.NewClient(
+		embeddingAddy,
+		grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)),
+	)
+	if err != nil {
+		log.Fatalf("Failed to establish connection with embedding-service: %v", err)
+	}
+
+	s.embeddingConn = embeddingConn
+	s.embeddingClient = pb.NewEmbeddingServiceClient(embeddingConn)
+}
+
+// func(client TLS config)
+//   - connects to the crawling service using the provided client tls config and saves the connection and function interface to the server struct
+//   - assumes: the connection will be closed in the parent function at some point
+func (s *retrievalServer) connectToCrawlingService(tlsConfig *tls.Config) {
+	// Connect to the crawling service
+	crawlingAddy, ok := os.LookupEnv("CRAWLING_ADDRESS")
+	if !ok {
+		log.Fatal("failed to retrieve crawling address for connection")
+	}
+	crawlingConn, err := grpc.NewClient(
+		crawlingAddy,
+		grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)),
+	)
+	if err != nil {
+		log.Fatalf("Failed to establish connection with crawling-service: %v", err)
+	}
+
+	s.crawlingConn = crawlingConn
+	s.crawlingClient = pb.NewCrawlingServiceClient(crawlingConn)
 }
 
 // func()
@@ -186,6 +301,14 @@ func main() {
 	// Connect to the vector service
 	server.connectToVectorService(clientTlsConfig)
 	defer server.vectorConn.Close()
+
+	// Connect to the embedding service
+	server.connectToEmbeddingService(clientTlsConfig)
+	defer server.embeddingConn.Close()
+
+	// Connect to the crawling service
+	server.connectToCrawlingService(clientTlsConfig)
+	defer server.crawlingConn.Close()
 
 	<-sigChan // TODO: implement worker groups
 	log.Print("gracefully shutting down...")
