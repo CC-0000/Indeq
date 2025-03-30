@@ -8,6 +8,7 @@
 
   let userQuery = '';
   let conversationId: string | null = null;
+  let isLoading = false;
   const truncateLength = 80;
 
   let eventSource: EventSource | null = null;
@@ -23,6 +24,7 @@
 
   async function query() {
     try {
+      isLoading = true;
       const res = await fetch('/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -32,6 +34,7 @@
       if (!res.ok) {
         const msg = await res.text();
         console.error('Error from /chat POST:', msg);
+        isLoading = false;
         return;
       }
 
@@ -44,15 +47,25 @@
         streamResponse();
         } catch (err) {
         console.error('sendMessage error:', err);
+        isLoading = false;
         }
 
-    // Reset the user query
     userQuery = '';
+    
+    // Reset textarea height for both textareas
+    setTimeout(() => {
+      const textareas = document.querySelectorAll('textarea');
+      textareas.forEach(textarea => {
+        textarea.style.height = 'auto';
+        textarea.rows = 1;
+      });
+    }, 0);
   }
 
   function streamResponse() {
     if (!conversationId) {
       console.error('No conversationId to stream');
+      isLoading = false;
       return;
     }
 
@@ -102,6 +115,7 @@
             case "end":
                 if (eventSource) {
                     eventSource.close();
+                    isLoading = false;
                 }
                 return;
             case "token":
@@ -125,6 +139,7 @@
     eventSource.addEventListener('error', (err) => {
       console.error('SSE error:', err);
       eventSource?.close();
+      isLoading = false;
     });
   }
 
@@ -246,10 +261,11 @@
           }}
         ></textarea>
         <button
-          class="p-2 rounded-lg bg-primary text-white hover:bg-blue-600 transition-colors absolute right-3 z-10 top-1/2 -translate-y-1/2 send-button-dynamic"
+          class="p-2 rounded-lg bg-primary text-white hover:bg-blue-600 transition-colors absolute right-3 z-10 top-1/2 -translate-y-1/2 send-button-dynamic flex items-center justify-center"
           on:click={query}
+          disabled={isLoading}
         >
-          <SendIcon size="20" />
+            <SendIcon size="20" />
         </button>
       </div>
 
@@ -302,14 +318,14 @@
   {:else}
     <div class="flex-1 flex flex-col bg-white w-full max-w-3xl">
       <div
-        class="conversation-container flex-1 overflow-y-auto p-4 space-y-6"
+        class="conversation-container flex-1 overflow-y-auto p-4 space-y-6 pb-32"
         bind:this={conversationContainer}
       >
         {#each messages as message, messageIndex}
           <div class="space-y-4">
             <div class="prose max-w-3xl mx-auto prose-lg">
               {#if message.sender === 'user'}
-                <div class="font-bold prose-xl">{message.text}</div>
+                <div class="font-bold prose-xl break-words whitespace-normal overflow-hidden w-full">{message.text}</div>
               {:else}
                 {#if message.sources.length > 0}
                   <div class="mb-6">
@@ -453,27 +469,98 @@
           </div>
         {/each}
       </div>
-      <div class="sticky bottom-0 p-4 border-t border-gray-200 bg-white relative">
-        <textarea
-          bind:value={userQuery}
-          placeholder="Ask me anything..."
-          class="w-full px-4 py-3 rounded-lg shadow-sm prose prose-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none overflow-y-auto textarea-scrollbar pr-14"
-          rows="1"
-          on:input={(e) => {
-            const target = e.target as HTMLTextAreaElement;
-            target.style.height = 'auto';
-            const newHeight = target.scrollHeight;
-            const maxHeight = 150;
-            target.style.height = Math.min(newHeight, maxHeight) + 'px';
-            target.style.overflowY = newHeight > maxHeight ? 'auto' : 'hidden';
-          }}
-          on:keydown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              query();
-            }
-          }}
-        ></textarea>
+      <!-- Chat Input -->
+      <div class="fixed bottom-0 left-0 right-0 flex justify-center bg-white z-10 opacity-95">
+        <div class="w-full max-w-3xl p-4 pt-0">
+          <div class="relative rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+            <textarea
+              bind:value={userQuery}
+              placeholder="Ask me anything..."
+              class="w-full px-4 py-3 pb-14 focus:outline-none prose prose-lg resize-none overflow-y-auto textarea-scrollbar border-none"
+              rows="1"
+              on:input={(e) => {
+                const target = e.target as HTMLTextAreaElement;
+                target.style.height = 'auto';
+                const newHeight = target.scrollHeight;
+                const maxHeight = 150;
+                target.style.height = Math.min(newHeight, maxHeight) + 'px';
+                target.style.overflowY = newHeight > maxHeight ? 'auto' : 'hidden';
+              }}
+              on:keydown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  query();
+                }
+              }}
+            ></textarea>
+            
+            <div class="absolute pr-2 bottom-0 left-0 right-0 bg-white p-2 px-4 flex items-center justify-between">
+              <!-- Integration Badges -->
+              <div class="flex gap-2">
+                <!-- Google -->
+                <div class="flex items-center gap-1 bg-gray-50 px-2 py-1 rounded-full">
+                  <div class="relative">
+                    <div
+                      class="w-2 h-2 rounded-full"
+                      style="background-color: {isIntegrated('GOOGLE') ? 'green' : 'red'}"
+                    ></div>
+                    <div
+                      class="w-2 h-2 rounded-full absolute top-0 animate-ping"
+                      style="background-color: {isIntegrated('GOOGLE') ? 'green' : 'red'}"
+                    ></div>
+                  </div>
+                  <span class="text-xs text-gray-600 ml-1">Google</span>
+                </div>
+                <!-- Microsoft -->
+                <div class="flex items-center gap-1 bg-gray-50 px-2 py-1 rounded-full">
+                  <div class="relative">
+                    <div
+                      class="w-2 h-2 rounded-full"
+                      style="background-color: {isIntegrated('MICROSOFT') ? 'green' : 'red'}"
+                    ></div>
+                    <div
+                      class="w-2 h-2 rounded-full absolute top-0 animate-ping"
+                      style="background-color: {isIntegrated('MICROSOFT') ? 'green' : 'red'}"
+                    ></div>
+                  </div>
+                  <span class="text-xs text-gray-600 ml-1">Microsoft</span>
+                </div>
+                <!-- Notion -->
+                <div class="flex items-center gap-1 bg-gray-50 px-2 py-1 rounded-full">
+                  <div class="relative">
+                    <div
+                      class="w-2 h-2 rounded-full"
+                      style="background-color: {isIntegrated('NOTION') ? 'green' : 'red'}"
+                    ></div>
+                    <div
+                      class="w-2 h-2 rounded-full absolute top-0 animate-ping"
+                      style="background-color: {isIntegrated('NOTION') ? 'green' : 'red'}"
+                    ></div>
+                  </div>
+                  <span class="text-xs text-gray-600 ml-1">Notion</span>
+                </div>
+              </div>
+              
+              <!-- Send Button -->
+              <button
+                class="p-1.5 rounded-lg bg-primary text-white hover:bg-blue-600 transition-colors flex items-center justify-center"
+                style="width: 32px; height: 32px;"
+                on:click={query}
+                disabled={isLoading}
+              >
+                {#if isLoading}
+                  <div class="pulse-loader">
+                    <div class="bar"></div>
+                    <div class="bar"></div>
+                    <div class="bar"></div>
+                  </div>
+                {:else}
+                  <SendIcon size="18" />
+                {/if}
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   {/if}
@@ -497,79 +584,135 @@
     max-height: 1.5em;
   }
 
-    .reasoning-content.expanded {
-      white-space: normal;
-      max-height: 500px;
-    }
+  .reasoning-content.expanded {
+    white-space: normal;
+    max-height: 500px;
+  }
 
-    .scrollbar-thin {
-        scrollbar-width: thin;
-        -ms-overflow-style: none;
-        scroll-behavior: smooth;
-    }
-
-    .scrollbar-thin::-webkit-scrollbar {
-        height: 6px;
-    }
-
-    .scrollbar-thin::-webkit-scrollbar-track {
-        background: #f1f1f1;
-        border-radius: 3px;
-        margin: 0;
-    }
-
-    .scrollbar-thin::-webkit-scrollbar-thumb {
-        background: #888;
-        border-radius: 3px;
-    }
-
-    .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-        background: #666;
-    }
-
-    .group {
-        position: relative;
-    }
-
-    /* Prevent tooltip from being cut off */
-    .scroll-container {
-        margin-top: 0;
-        padding-top: 0;
-    }
-
-    /* Remove previous tooltip styles and add these */
-    .pointer-events-none {
-        pointer-events: none;
-    }
-    
-    .pointer-events-auto {
-        pointer-events: auto;
-    }
-
-    /* Textarea scrollbar styling */
-    .textarea-scrollbar {
+  .scrollbar-thin {
       scrollbar-width: thin;
       -ms-overflow-style: none;
       scroll-behavior: smooth;
-    }
+  }
 
-    .textarea-scrollbar::-webkit-scrollbar {
-      width: 6px;
-    }
+  .scrollbar-thin::-webkit-scrollbar {
+      height: 6px;
+  }
 
-    .textarea-scrollbar::-webkit-scrollbar-track {
+  .scrollbar-thin::-webkit-scrollbar-track {
       background: #f1f1f1;
       border-radius: 3px;
       margin: 0;
-    }
+  }
 
-    .textarea-scrollbar::-webkit-scrollbar-thumb {
+  .scrollbar-thin::-webkit-scrollbar-thumb {
       background: #888;
       border-radius: 3px;
-    }
+  }
 
-    .textarea-scrollbar::-webkit-scrollbar-thumb:hover {
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
       background: #666;
-    }
+  }
 
+  .group {
+      position: relative;
+  }
+
+  /* Prevent tooltip from being cut off */
+  .scroll-container {
+      margin-top: 0;
+      padding-top: 0;
+  }
+
+  /* Remove previous tooltip styles and add these */
+  .pointer-events-none {
+      pointer-events: none;
+  }
+  
+  .pointer-events-auto {
+      pointer-events: auto;
+  }
+
+  /* Textarea scrollbar styling */
+  .textarea-scrollbar {
+    scrollbar-width: thin;
+    -ms-overflow-style: none;
+    scroll-behavior: smooth;
+  }
+
+  .textarea-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .textarea-scrollbar::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 3px;
+    margin: 0;
+  }
+
+  .textarea-scrollbar::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 3px;
+  }
+
+  .textarea-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #666;
+  }
+
+  .textarea-container {
+    border-radius: 0.5rem;
+    overflow: hidden;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .animate-spin {
+    animation: spin 1s linear infinite;
+  }
+
+  /* New pulse loader styles */
+  .pulse-loader {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    height: 20px;
+    width: 20px;
+    justify-content: center;
+    position: relative;
+  }
+
+  .pulse-loader .bar {
+    width: 3px;
+    background-color: white;
+    border-radius: 1px;
+    animation: pulse 0.6s ease-in-out infinite;
+  }
+
+  .pulse-loader .bar:nth-child(1) {
+    height: 5px;
+    animation-delay: 0s;
+  }
+
+  .pulse-loader .bar:nth-child(2) {
+    height: 8px;
+    animation-delay: 0.15s;
+  }
+
+  .pulse-loader .bar:nth-child(3) {
+    height: 6px;
+    animation-delay: 0.3s;
+  }
+
+  @keyframes pulse {
+    0%, 100% {
+      transform: scaleY(1);
+    }
+    50% {
+      transform: scaleY(1.35);
+    }
+  }
 </style>
