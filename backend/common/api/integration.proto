@@ -71,7 +71,7 @@ message ValidateOAuthStateResponse {
 
 message GetAccessTokenRequest {
     string user_id = 1;
-    Provider provider = 2;
+    Provider platform = 2;
 }
 
 message GetAccessTokenResponse {

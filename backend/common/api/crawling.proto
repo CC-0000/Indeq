@@ -4,16 +4,19 @@ option go_package = "github.com/cc-0000/indeq/common/api";
 
 package api;
 
+import "api/kafka.proto";
+
 // CrawlingService definition
 service CrawlingService {
     rpc StartInitialCrawler (StartInitalCrawlerRequest) returns (StartInitalCrawlerResponse);
     rpc ManualCrawler (ManualCrawlerRequest) returns (ManualCrawlerResponse);
     rpc DeleteCrawlerData (DeleteCrawlerDataRequest) returns (DeleteCrawlerDataResponse);
+    rpc GetChunksFromGoogle (GetChunksFromGoogleRequest) returns (GetChunksFromGoogleResponse);
 }
 
 message StartInitalCrawlerRequest {
     string user_id = 1;
-    string provider = 2;
+    string platform = 2;
     string access_token = 3;
 }
 
@@ -37,11 +40,22 @@ message ManualCrawlerResponse {
 // Request message for deleting crawler data
 message DeleteCrawlerDataRequest {
   string user_id = 1;
-  string provider = 2;
+  string platform = 2;
 }
 
 // Response message for deleting crawler data
 message DeleteCrawlerDataResponse {
   bool success = 1;
   string message = 2;
+}
+
+message GetChunksFromGoogleRequest {
+    string user_id = 1;
+    repeated Metadata metadatas = 2;
+    uint32 ttl = 3; 
+}
+
+message GetChunksFromGoogleResponse {
+    int64 numChunks = 1;
+    repeated TextChunkMessage chunks = 2;
 }

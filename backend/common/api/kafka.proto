@@ -8,8 +8,7 @@ package api;
 
 enum Platform {
     PLATFORM_LOCAL = 0;
-    PLATFORM_GOOGLE_DRIVE = 1;
-    PLATFORM_GOOGLE_DOCS = 2;
+    PLATFORM_GOOGLE = 1;
     PLATFORM_MICROSOFT = 3;
     PLATFORM_NOTION = 4;
 }
@@ -27,9 +26,7 @@ message Metadata {
     string resource_type = 10;   // e.g., "text/plain"
     string file_url = 11;        // e.g., "https://drive.google.com/file/xyz"
     string chunk_id = 12;        // e.g., ""
-    uint64 chunk_size = 13;      // Size in bytes, e.g., 1024
-    uint64 chunk_number = 14;   // Sequence number, e.g., 1
-
+    string service = 13;       // google drive, gmail
 }
 
 message TextChunkMessage {

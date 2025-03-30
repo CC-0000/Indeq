@@ -114,7 +114,6 @@ func (sp *SlidesProcessor) SlidesFetchDocument(ctx context.Context, resourceID s
 // ChunkPresentation splits a Google Slides presentation into text chunks
 func (sp *SlidesProcessor) ChunkPresentation(presentation *slides.Presentation, baseMetadata Metadata) ([]TextChunkMessage, error) {
 	var chunks []TextChunkMessage
-	chunkNumber := uint64(1)
 
 	wordInfoList := make([]SlideWordInfo, 0, 1000)
 
@@ -166,23 +165,19 @@ func (sp *SlidesProcessor) ChunkPresentation(presentation *slides.Presentation, 
 		endInfo := wordInfoList[endIndex-1]
 		endOffset := endInfo.SlideOffset + len(endInfo.Word)
 
-		chunk, err := sp.CreateSlidesChunk(chunkWords, baseMetadata, chunkNumber, startInfo.SlideIndex, startInfo.SlideOffset, endInfo.SlideIndex, endOffset)
+		chunk, err := sp.CreateSlidesChunk(chunkWords, baseMetadata, startInfo.SlideIndex, startInfo.SlideOffset, endInfo.SlideIndex, endOffset)
 		if err != nil {
 			return nil, err
 		}
 		chunks = append(chunks, chunk)
-
-		chunkNumber++
 	}
 
 	return chunks, nil
 }
 
 // createChunk constructs a TextChunkMessage with metadata
-func (sp *SlidesProcessor) CreateSlidesChunk(words []string, baseMetadata Metadata, chunkNumber uint64, startSlide, startOffset, endSlide, endOffset int) (TextChunkMessage, error) {
+func (sp *SlidesProcessor) CreateSlidesChunk(words []string, baseMetadata Metadata, startSlide, startOffset, endSlide, endOffset int) (TextChunkMessage, error) {
 	chunkMetadata := baseMetadata
-	chunkMetadata.ChunkNumber = chunkNumber
-	chunkMetadata.ChunkSize = uint64(len(words))
 	chunkMetadata.ChunkID = fmt.Sprintf("%d-%d-%d-%d", startSlide, startOffset, endSlide, endOffset)
 
 	return TextChunkMessage{

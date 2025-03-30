@@ -60,7 +60,6 @@ func (dp *DocProcessor) DocsProcess(ctx context.Context, file File) (File, error
 	if err != nil {
 		return file, err
 	}
-
 	return File{File: chunks}, nil
 }
 
@@ -117,8 +116,6 @@ func (dp *DocProcessor) DocsFetchDocument(ctx context.Context, resourceID string
 // chunkDocument splits a document into overlapping chunks
 func (dp *DocProcessor) ChunkDocument(doc *docs.Document, baseMetadata Metadata) ([]TextChunkMessage, error) {
 	var chunks []TextChunkMessage
-	chunkNumber := uint64(1)
-
 	wordInfoList := make([]WordInfo, 0, 5000)
 	for paraIndex, elem := range doc.Body.Content {
 		if elem.Paragraph == nil {
@@ -167,22 +164,18 @@ func (dp *DocProcessor) ChunkDocument(doc *docs.Document, baseMetadata Metadata)
 		endInfo := wordInfoList[endIndex-1]
 		endOffset := endInfo.ParaOffset + len(endInfo.Word)
 
-		chunk, err := dp.createDocsChunk(chunkWords, baseMetadata, chunkNumber, startInfo.ParaIndex, startInfo.ParaOffset, endInfo.ParaIndex, endOffset)
+		chunk, err := dp.createDocsChunk(chunkWords, baseMetadata, startInfo.ParaIndex, startInfo.ParaOffset, endInfo.ParaIndex, endOffset)
 		if err != nil {
 			return nil, err
 		}
 		chunks = append(chunks, chunk)
-
-		chunkNumber++
 	}
 	return chunks, nil
 }
 
 // createChunk constructs a TextChunkMessage with metadata
-func (dp *DocProcessor) createDocsChunk(words []string, baseMetadata Metadata, chunkNumber uint64, startPara, startOffset, endPara, endOffset int) (TextChunkMessage, error) {
+func (dp *DocProcessor) createDocsChunk(words []string, baseMetadata Metadata, startPara, startOffset, endPara, endOffset int) (TextChunkMessage, error) {
 	chunkMetadata := baseMetadata
-	chunkMetadata.ChunkNumber = chunkNumber
-	chunkMetadata.ChunkSize = uint64(len(words))
 	chunkMetadata.ChunkID = fmt.Sprintf("StartParagraph:%d-StartOffset:%d-EndParagraph:%d-EndOffset:%d", startPara, startOffset, endPara, endOffset)
 
 	return TextChunkMessage{
@@ -209,16 +202,13 @@ func (dp *DocProcessor) ExtractDocsChunk(doc *docs.Document, startPara, startOff
 			paraMap[index] = elem
 		}
 	}
-
 	for paraIndex := startPara; paraIndex <= endPara; paraIndex++ {
 		elem, exists := paraMap[paraIndex]
 		if !exists {
 			continue
 		}
-
 		paraWords := make([]string, 0, 100)
 		paraOffsets := make([]int, 0, 100)
-
 		paraOffset := 0
 		for _, textElem := range elem.Paragraph.Elements {
 			if textElem.TextRun == nil {
@@ -234,7 +224,6 @@ func (dp *DocProcessor) ExtractDocsChunk(doc *docs.Document, startPara, startOff
 				paraOffset += len(word) + 1
 			}
 		}
-
 		for i, offset := range paraOffsets {
 			if i >= len(paraWords) {
 				break
@@ -255,12 +244,10 @@ func (dp *DocProcessor) ExtractDocsChunk(doc *docs.Document, startPara, startOff
 			}
 		}
 	}
-
 	if len(chunkWords) == 0 {
 		return nil, fmt.Errorf("no content found for chunk boundary StartParagraph:%d-StartOffset:%d-EndParagraph:%d-EndOffset:%d",
 			startPara, startOffset, endPara, endOffset)
 	}
-
 	return chunkWords, nil
 }
 
@@ -270,7 +257,6 @@ func ProcessGoogleDoc(ctx context.Context, client *http.Client, file File) (File
 	if err != nil {
 		return file, err
 	}
-
 	return processor.DocsProcess(ctx, file)
 }
 

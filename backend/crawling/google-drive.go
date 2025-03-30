@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
+	pb "github.com/cc-0000/indeq/common/api"
 	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/option"
 )
@@ -18,6 +20,16 @@ var mimeHandlers = map[string]func(context.Context, *http.Client, File) (File, e
 	"application/vnd.google-apps.presentation": ProcessGoogleSlides,
 }
 
+var (
+	folderCache    sync.Map
+	folderCacheTTL = 5 * time.Minute
+)
+
+type cachedFolder struct {
+	hierarchy string
+	timestamp time.Time
+}
+
 // CrawlGoogleDrive retrieves and processes files from Google Drive
 func (s *crawlingServer) CrawlGoogleDrive(ctx context.Context, client *http.Client, userID string) (ListofFiles, error) {
 	filelist, err := GetGoogleDriveList(ctx, client, userID)
@@ -25,7 +37,7 @@ func (s *crawlingServer) CrawlGoogleDrive(ctx context.Context, client *http.Clie
 		return ListofFiles{}, fmt.Errorf("error retrieving Google Drive file list: %w", err)
 	}
 
-	processedFiles, err := ProcessAllGoogleDriveFiles(ctx, client, filelist)
+	processedFiles, err := s.ProcessAllGoogleDriveFiles(ctx, client, filelist)
 	if err != nil {
 		return ListofFiles{}, fmt.Errorf("error processing Google Drive files: %w", err)
 	}
@@ -35,24 +47,14 @@ func (s *crawlingServer) CrawlGoogleDrive(ctx context.Context, client *http.Clie
 		return ListofFiles{}, fmt.Errorf("error getting start page token: %w", err)
 	}
 
-	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO retrievalTokens (user_id, provider, service, retrieval_token, created_at, updated_at, requires_update)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		ON CONFLICT (user_id, service)
-		DO UPDATE SET 
-			retrieval_token = EXCLUDED.retrieval_token, 
-			updated_at = EXCLUDED.updated_at, 
-			requires_update = EXCLUDED.requires_update
-	`, userID, "GOOGLE", "GOOGLE_DRIVE", retrievalToken, time.Now(), time.Now(), true)
-	if err != nil {
+	if err := StoreGoogleDriveToken(ctx, s.db, userID, retrievalToken); err != nil {
 		return ListofFiles{}, fmt.Errorf("failed to store change token: %w", err)
 	}
-
 	return processedFiles, nil
 }
 
 // UpdateCrawlGoogleDrive retrieves and processes changes in Google Drive
-func UpdateCrawlGoogleDrive(ctx context.Context, client *http.Client, userID string, changeToken string) (string, ListofFiles, error) {
+func (s *crawlingServer) UpdateCrawlGoogleDrive(ctx context.Context, client *http.Client, userID string, changeToken string) (string, ListofFiles, error) {
 	filelist, newChangeToken, err := GetGoogleDriveChanges(ctx, client, changeToken, userID)
 	if err != nil {
 		return "", ListofFiles{}, fmt.Errorf("error retrieving Google Drive changes: %w", err)
@@ -62,12 +64,65 @@ func UpdateCrawlGoogleDrive(ctx context.Context, client *http.Client, userID str
 		return changeToken, ListofFiles{}, nil
 	}
 
-	processedFiles, err := ProcessAllGoogleDriveFiles(ctx, client, filelist)
+	var filePaths []string
+	for _, file := range filelist.Files {
+		if len(file.File) > 0 {
+			filePaths = append(filePaths, file.File[0].Metadata.FilePath)
+		}
+	}
+
+	if len(filePaths) > 0 {
+		_, err = s.vectorService.DeleteFiles(ctx, &pb.VectorFileDeleteRequest{
+			UserId:    userID,
+			Platform:  pb.Platform_PLATFORM_GOOGLE,
+			Files:     filePaths,
+			Exclusive: false,
+		})
+		if err != nil {
+			log.Printf("Warning: failed to delete old file versions: %v", err)
+		}
+	}
+
+	processedFiles, err := s.ProcessAllGoogleDriveFiles(ctx, client, filelist)
 	if err != nil {
 		return "", ListofFiles{}, fmt.Errorf("error processing Google Drive files: %w", err)
 	}
-
 	return newChangeToken, processedFiles, nil
+}
+
+// createGoogleFileMetadata creates metadata for a Google Drive file
+func createGoogleFileMetadata(srv *drive.Service, userID string, file *drive.File) (Metadata, error) {
+	createdTime := parseTime(file.CreatedTime)
+	modifiedTime := parseTime(file.ModifiedTime)
+
+	hierarchy := "/"
+	if len(file.Parents) > 0 {
+		h, err := getFolderHierarchy(srv, file.Parents)
+		if err == nil {
+			hierarchy = h
+		}
+	}
+
+	filePath := buildFilePath(hierarchy, file.Name)
+
+	return Metadata{
+		DateCreated:      createdTime,
+		DateLastModified: modifiedTime,
+		UserID:           userID,
+		ResourceID:       file.Id,
+		Title:            file.Name,
+		ResourceType:     file.MimeType,
+		FileURL:          file.WebViewLink,
+		FilePath:         filePath,
+		Platform:         "GOOGLE",
+		Service:          "GOOGLE_DRIVE",
+	}, nil
+}
+
+// isValidGoogleFile checks if the file is a supported Google file type
+func isValidGoogleFile(mimeType string) bool {
+	return mimeType == "application/vnd.google-apps.document" ||
+		mimeType == "application/vnd.google-apps.presentation"
 }
 
 // GetGoogleDriveList retrieves the list of files from Google Drive
@@ -76,7 +131,6 @@ func GetGoogleDriveList(ctx context.Context, client *http.Client, userID string)
 	if err != nil {
 		return ListofFiles{}, fmt.Errorf("failed to create Google Drive service: %w", err)
 	}
-
 	var fileList ListofFiles
 	pageToken := ""
 	const pageSize = 1000
@@ -99,42 +153,20 @@ func GetGoogleDriveList(ctx context.Context, client *http.Client, userID string)
 		}
 
 		for _, driveFile := range res.Files {
-			if driveFile.MimeType != "application/vnd.google-apps.document" &&
-				driveFile.MimeType != "application/vnd.google-apps.presentation" {
+			if !isValidGoogleFile(driveFile.MimeType) {
 				continue
 			}
 
-			createdTime := parseTime(driveFile.CreatedTime)
-			modifiedTime := parseTime(driveFile.ModifiedTime)
-
-			hierarchy := "/"
-			if len(driveFile.Parents) > 0 {
-				h, err := getFolderHierarchy(srv, driveFile.Parents)
-				if err == nil {
-					hierarchy = h
-				}
-			}
-
-			filePath := buildFilePath(hierarchy, driveFile.Name)
-
-			googleFile := Metadata{
-				DateCreated:      createdTime,
-				DateLastModified: modifiedTime,
-				UserID:           userID,
-				ResourceID:       driveFile.Id,
-				Title:            driveFile.Name,
-				ResourceType:     driveFile.MimeType,
-				FileURL:          driveFile.WebViewLink,
-				FilePath:         filePath,
-				Platform:         "GOOGLE_DRIVE",
-				Provider:         "GOOGLE",
-				Exists:           true,
+			metadata, err := createGoogleFileMetadata(srv, userID, driveFile)
+			if err != nil {
+				log.Printf("Warning: failed to create metadata for file %s: %v", driveFile.Id, err)
+				continue
 			}
 
 			fileList.Files = append(fileList.Files, File{
 				File: []TextChunkMessage{
 					{
-						Metadata: googleFile,
+						Metadata: metadata,
 						Content:  "",
 					},
 				},
@@ -171,9 +203,7 @@ func GetGoogleDriveChanges(ctx context.Context, client *http.Client, retrievalTo
 		}
 
 		for _, change := range res.Changes {
-			if change.File == nil ||
-				(change.File.MimeType != "application/vnd.google-apps.document" &&
-					change.File.MimeType != "application/vnd.google-apps.presentation") {
+			if change.File == nil || !isValidGoogleFile(change.File.MimeType) {
 				continue
 			}
 
@@ -183,39 +213,16 @@ func GetGoogleDriveChanges(ctx context.Context, client *http.Client, retrievalTo
 				continue
 			}
 
-			createdTime := parseTime(change.File.CreatedTime)
-			modifiedTime := parseTime(change.File.ModifiedTime)
-
-			hierarchy := "/"
-			if len(change.File.Parents) > 0 {
-				h, err := getFolderHierarchy(srv, change.File.Parents)
-				if err == nil {
-					hierarchy = h
-				}
-			}
-
-			filePath := buildFilePath(hierarchy, change.File.Name)
-
-			exists := !change.File.Trashed && !change.Removed
-
-			googleFile := Metadata{
-				DateCreated:      createdTime,
-				DateLastModified: modifiedTime,
-				UserID:           userID,
-				ResourceID:       change.File.Id,
-				Title:            change.File.Name,
-				ResourceType:     change.File.MimeType,
-				FileURL:          change.File.WebViewLink,
-				FilePath:         filePath,
-				Platform:         "GOOGLE_DRIVE",
-				Provider:         "GOOGLE",
-				Exists:           exists,
+			metadata, err := createGoogleFileMetadata(srv, userID, change.File)
+			if err != nil {
+				log.Printf("Warning: failed to create metadata for changed file %s: %v", change.FileId, err)
+				continue
 			}
 
 			fileList.Files = append(fileList.Files, File{
 				File: []TextChunkMessage{
 					{
-						Metadata: googleFile,
+						Metadata: metadata,
 						Content:  "",
 					},
 				},
@@ -223,7 +230,6 @@ func GetGoogleDriveChanges(ctx context.Context, client *http.Client, retrievalTo
 			hasChanges = true
 		}
 
-		// Check for more pages or return results
 		if res.NextPageToken == "" {
 			newToken := res.NewStartPageToken
 			if !hasChanges {
@@ -244,15 +250,6 @@ func parseTime(timeStr string) time.Time {
 	return parsedTime
 }
 
-// Helper function to build file path
-func buildFilePath(hierarchy, fileName string) string {
-	filePath := hierarchy
-	if hierarchy != "/" {
-		filePath += "/"
-	}
-	return filePath + fileName
-}
-
 // Helper function to create removed file entry
 func createRemovedFileEntry(userID, fileID string) File {
 	return File{
@@ -261,73 +258,189 @@ func createRemovedFileEntry(userID, fileID string) File {
 				Metadata: Metadata{
 					UserID:     userID,
 					ResourceID: fileID,
-					Platform:   "GOOGLE_DRIVE",
-					Provider:   "GOOGLE",
-					Exists:     false,
+					Platform:   "GOOGLE",
+					Service:    "GOOGLE_DRIVE",
 				},
 			},
 		},
 	}
 }
 
-// ProcessAllGoogleDriveFiles processes all Google Drive files concurrently
-func ProcessAllGoogleDriveFiles(ctx context.Context, client *http.Client, fileList ListofFiles) (ListofFiles, error) {
+// ProcessAllGoogleDriveFiles processes all Google Drive files concurrently by MIME type
+func (s *crawlingServer) ProcessAllGoogleDriveFiles(ctx context.Context, client *http.Client, fileList ListofFiles) (ListofFiles, error) {
 	type result struct {
 		index int
 		file  File
 		err   error
 	}
 
-	resultChan := make(chan result, len(fileList.Files))
-	var wg sync.WaitGroup
+	resultCh := make(chan result)
+	chunkBatchSize := 50
+	chunkCh := make(chan TextChunkMessage, chunkBatchSize)
 
+	mimeGroups := make(map[string][]struct {
+		index int
+		file  File
+	})
 	for i, file := range fileList.Files {
-		if len(file.File) == 0 {
-			resultChan <- result{i, file, nil}
+		if len(file.File) == 0 || file.File[0].Metadata.ResourceType == "" {
+			resultCh <- result{index: i, file: file}
 			continue
 		}
+		mimeType := file.File[0].Metadata.ResourceType
+		mimeGroups[mimeType] = append(mimeGroups[mimeType], struct {
+			index int
+			file  File
+		}{i, file})
+	}
 
+	var wg sync.WaitGroup
+	var chunkWg sync.WaitGroup
+
+	chunkWg.Add(1)
+	go func() {
+		defer chunkWg.Done()
+		batch := make([]TextChunkMessage, 0, chunkBatchSize)
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+
+		processBatch := func() {
+			if len(batch) > 0 {
+				if err := s.sendChunkBatchToVector(ctx, batch); err != nil {
+					log.Printf("Error sending chunk batch: %v", err)
+				}
+				batch = batch[:0]
+			}
+		}
+
+		for {
+			select {
+			case chunk, ok := <-chunkCh:
+				if !ok {
+					processBatch()
+					return
+				}
+				batch = append(batch, chunk)
+				if len(batch) >= chunkBatchSize {
+					processBatch()
+				}
+			case <-ticker.C:
+				processBatch()
+			case <-ctx.Done():
+				processBatch()
+				return
+			}
+		}
+	}()
+
+	for mimeType, files := range mimeGroups {
 		wg.Add(1)
-		go func(index int, f File) {
+		go func(mimeType string, files []struct {
+			index int
+			file  File
+		}) {
 			defer wg.Done()
-
-			mimeType := f.File[0].Metadata.ResourceType
-			handler, exists := mimeHandlers[mimeType]
-			if !exists {
-				resultChan <- result{index, f, nil}
+			handler, ok := mimeHandlers[mimeType]
+			if !ok {
+				for _, f := range files {
+					resultCh <- result{index: f.index, file: f.file}
+				}
 				return
 			}
 
-			processedFile, err := handler(ctx, client, f)
-			resultChan <- result{index, processedFile, err}
-		}(i, file)
+			const batchSize = 5
+			for i := 0; i < len(files); i += batchSize {
+				end := i + batchSize
+				if end > len(files) {
+					end = len(files)
+				}
+
+				var batchWg sync.WaitGroup
+				for j := i; j < end; j++ {
+					batchWg.Add(1)
+					go func(f struct {
+						index int
+						file  File
+					}) {
+						defer batchWg.Done()
+
+						originalFilePath := f.file.File[0].Metadata.FilePath
+						originalUserID := f.file.File[0].Metadata.UserID
+						originalResourceID := f.file.File[0].Metadata.ResourceID
+
+						if s.isFileProcessed(originalUserID, originalFilePath) {
+							log.Printf("Skipping already processed file: %s", originalFilePath)
+							resultCh <- result{index: f.index, file: f.file}
+							return
+						}
+
+						processedFile, err := handler(ctx, client, f.file)
+						if err != nil {
+							resultCh <- result{index: f.index, err: fmt.Errorf("error processing file %s: %w", originalResourceID, err)}
+							return
+						}
+
+						if len(processedFile.File) > 0 {
+							for _, chunk := range processedFile.File {
+								select {
+								case chunkCh <- chunk:
+								case <-ctx.Done():
+									return
+								}
+							}
+
+							if err := s.sendFileDoneSignal(ctx, originalUserID, originalFilePath, "GOOGLE"); err != nil {
+								log.Printf("Error sending file done signal for %s: %v", originalFilePath, err)
+							}
+						} else {
+							log.Printf("No chunks generated for file: %s", originalFilePath)
+						}
+
+						resultCh <- result{index: f.index, file: processedFile}
+					}(files[j])
+				}
+				batchWg.Wait()
+			}
+		}(mimeType, files)
 	}
 
 	go func() {
 		wg.Wait()
-		close(resultChan)
+		close(resultCh)
+		close(chunkCh)
 	}()
 
-	processedList := ListofFiles{
-		Files: make([]File, len(fileList.Files)),
-	}
+	processedFiles := make([]File, len(fileList.Files))
+	var errs []error
+	var userID string
+	var successfullyProcessed int
 
-	for i, file := range fileList.Files {
-		processedList.Files[i] = File{
-			File: make([]TextChunkMessage, len(file.File)),
+	for res := range resultCh {
+		if res.err != nil {
+			errs = append(errs, res.err)
+			continue
 		}
-		copy(processedList.Files[i].File, file.File)
-	}
-
-	var firstErr error
-	for res := range resultChan {
-		if res.err != nil && firstErr == nil {
-			firstErr = res.err
+		processedFiles[res.index] = res.file
+		if len(res.file.File) > 0 {
+			successfullyProcessed++
+			if userID == "" {
+				userID = res.file.File[0].Metadata.UserID
+			}
 		}
-		processedList.Files[res.index] = res.file
 	}
 
-	return processedList, firstErr
+	chunkWg.Wait()
+
+	if len(errs) > 0 {
+		return ListofFiles{Files: processedFiles}, fmt.Errorf("some files failed to process: %v", errs)
+	}
+	if userID != "" {
+		log.Printf("Drive crawling complete for user %s", userID)
+	} else {
+		log.Print("No valid files found in Drive crawl")
+	}
+
+	return ListofFiles{Files: processedFiles}, nil
 }
 
 // GetStartPageToken retrieves the start page token for Google Drive changes
@@ -353,8 +466,16 @@ func RetrieveFromDrive(ctx context.Context, client *http.Client, metadata Metada
 	case "application/vnd.google-apps.presentation":
 		return RetrieveGoogleSlides(ctx, client, metadata)
 	default:
-		return TextChunkMessage{}, nil
+		return TextChunkMessage{}, fmt.Errorf("unsupported resource type: %s", metadata.ResourceType)
 	}
+}
+
+func buildFilePath(hierarchy, fileName string) string {
+	filePath := hierarchy
+	if hierarchy != "/" {
+		filePath += "/"
+	}
+	return filePath + fileName
 }
 
 // getFolderHierarchy resolves the folder hierarchy for a given file
@@ -363,25 +484,91 @@ func getFolderHierarchy(srv *drive.Service, parentIDs []string) (string, error) 
 		return "/", nil
 	}
 
-	pathParts := []string{}
-	seen := make(map[string]bool)
+	cacheKey := strings.Join(parentIDs, ",")
 
-	currentIDs := parentIDs
-	for len(currentIDs) > 0 && !seen[currentIDs[0]] {
-		seen[currentIDs[0]] = true
-		file, err := srv.Files.Get(currentIDs[0]).
-			Fields("name, parents").
-			Do()
-		if err != nil {
-			return "", fmt.Errorf("failed to get folder name: %w", err)
+	if cached, ok := folderCache.Load(cacheKey); ok {
+		entry := cached.(cachedFolder)
+		if time.Since(entry.timestamp) < folderCacheTTL {
+			return entry.hierarchy, nil
 		}
-
-		pathParts = append([]string{file.Name}, pathParts...)
-		if len(file.Parents) == 0 {
-			break
-		}
-		currentIDs = file.Parents
+		folderCache.Delete(cacheKey)
 	}
 
-	return "/" + strings.Join(pathParts, "/"), nil
+	pathParts := make([]string, 0, len(parentIDs))
+	currentID := parentIDs[0]
+
+	for currentID != "" {
+		if err := rateLimiter.Wait(context.Background(), "GOOGLE_DRIVE", "system"); err != nil {
+			return "/", fmt.Errorf("rate limit error: %w", err)
+		}
+
+		folder, err := srv.Files.Get(currentID).
+			Fields("name, parents").
+			SupportsAllDrives(true).
+			Do()
+		if err != nil {
+			return "/", fmt.Errorf("failed to get folder %s: %w", currentID, err)
+		}
+
+		pathParts = append([]string{folder.Name}, pathParts...)
+		if len(folder.Parents) == 0 {
+			break
+		}
+		currentID = folder.Parents[0]
+	}
+
+	result := "/" + strings.Join(pathParts, "/")
+
+	folderCache.Store(cacheKey, cachedFolder{
+		hierarchy: result,
+		timestamp: time.Now(),
+	})
+
+	return result, nil
+}
+
+// Add new helper function for batch vector processing
+func (s *crawlingServer) sendChunkBatchToVector(ctx context.Context, chunks []TextChunkMessage) error {
+	if len(chunks) == 0 {
+		return nil
+	}
+
+	const maxParallelBatches = 5
+	batchSize := (len(chunks) + maxParallelBatches - 1) / maxParallelBatches
+	var wg sync.WaitGroup
+	errCh := make(chan error, maxParallelBatches)
+
+	for i := 0; i < len(chunks); i += batchSize {
+		end := i + batchSize
+		if end > len(chunks) {
+			end = len(chunks)
+		}
+
+		wg.Add(1)
+		go func(batch []TextChunkMessage) {
+			defer wg.Done()
+			for _, chunk := range batch {
+				if err := s.sendChunkToVector(ctx, chunk); err != nil {
+					errCh <- fmt.Errorf("error sending chunk to vector service: %w", err)
+					return
+				}
+			}
+		}(chunks[i:end])
+	}
+
+	go func() {
+		wg.Wait()
+		close(errCh)
+	}()
+
+	var errs []error
+	for err := range errCh {
+		errs = append(errs, err)
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("batch processing errors: %v", errs)
+	}
+
+	return nil
 }

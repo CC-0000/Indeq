@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,32 +20,31 @@ type CrawlResult struct {
 }
 
 func (s *crawlingServer) CrawlGmail(ctx context.Context, client *http.Client, userID string) (ListofFiles, error) {
-	result, retrievalToken, err := GetGoogleGmailList(ctx, client, userID)
+	result, retrievalToken, err := s.GetGoogleGmailList(ctx, client, userID)
 	if err != nil {
 		return ListofFiles{}, fmt.Errorf("error retrieving Google Gmail file list: %w", err)
 	}
-	_, err = s.db.ExecContext(ctx, `
-	INSERT INTO retrievalTokens (user_id, provider, service, retrieval_token, created_at, updated_at, requires_update)
-	VALUES ($1, $2, $3, $4, $5, $6, $7)
-	ON CONFLICT (user_id, service)
-	DO UPDATE SET retrieval_token = EXCLUDED.retrieval_token, updated_at = EXCLUDED.updated_at, requires_update = EXCLUDED.requires_update
-	`, userID, "GOOGLE", "GOOGLE_GMAIL", retrievalToken, time.Now(), time.Now(), true)
-	if err != nil {
+
+	if err := StoreGoogleGmailToken(ctx, s.db, userID, retrievalToken); err != nil {
 		return ListofFiles{}, fmt.Errorf("failed to store change token: %w", err)
 	}
 	return result, nil
 }
 
-func UpdateCrawlGmail(ctx context.Context, client *http.Client, userID string, retrievalToken string) (string, ListofFiles, error) {
+func (s *crawlingServer) UpdateCrawlGmail(ctx context.Context, client *http.Client, userID string, retrievalToken string) (string, ListofFiles, error) {
 	tokenUint64, err := strconv.ParseUint(retrievalToken, 10, 64)
 	if err != nil {
-		return retrievalToken, ListofFiles{}, err
+		result, newToken, err := s.GetGoogleGmailList(ctx, client, userID)
+		return newToken, result, err
 	}
-	result, newRetrievalToken, err := CrawlGmailHistory(ctx, client, userID, tokenUint64)
+	result, newRetrievalToken, err := s.CrawlGmailHistory(ctx, client, userID, tokenUint64)
+	if err != nil && strings.Contains(err.Error(), "Error 404") {
+		result, newRetrievalToken, err = s.GetGoogleGmailList(ctx, client, userID)
+	}
 	return newRetrievalToken, result, err
 }
 
-func CrawlGmailHistory(ctx context.Context, client *http.Client, userID string, lastHistoryID uint64) (ListofFiles, string, error) {
+func (s *crawlingServer) CrawlGmailHistory(ctx context.Context, client *http.Client, userID string, lastHistoryID uint64) (ListofFiles, string, error) {
 	srv, err := gmail.NewService(ctx, option.WithHTTPClient(client))
 	if err != nil {
 		return ListofFiles{}, "", fmt.Errorf("failed to create Gmail service: %w", err)
@@ -76,13 +75,28 @@ func CrawlGmailHistory(ctx context.Context, client *http.Client, userID string, 
 			if len(history.MessagesAdded) > 0 {
 				for _, msg := range history.MessagesAdded {
 					fullMsg, err := srv.Users.Messages.Get("me", msg.Message.Id).
-						Fields("id,internalDate,payload(headers,body/data,parts),historyId").
+						Fields("id,internalDate,payload(headers,body,parts),historyId").
 						Do()
 					if err != nil {
 						continue
 					}
 					file, err := processMessage(fullMsg, userID)
 					if err == nil {
+						if len(file.File) > 0 && s.isFileProcessed(userID, file.File[0].Metadata.FilePath) {
+							continue
+						}
+
+						for _, chunk := range file.File {
+							if err := s.sendChunkToVector(ctx, chunk); err != nil {
+								continue
+							}
+						}
+						if len(file.File) > 0 {
+							if err := s.sendFileDoneSignal(ctx, userID, file.File[0].Metadata.FilePath, "GOOGLE"); err != nil {
+								continue
+							}
+						}
+
 						files = append(files, file)
 						if fullMsg.HistoryId > latestHistoryID {
 							latestHistoryID = fullMsg.HistoryId
@@ -97,12 +111,13 @@ func CrawlGmailHistory(ctx context.Context, client *http.Client, userID string, 
 		}
 		pageToken = res.NextPageToken
 	}
-	retrievalToken := strconv.FormatUint(latestHistoryID, 10)
 
+	s.markCrawlingComplete(userID)
+	retrievalToken := strconv.FormatUint(latestHistoryID, 10)
 	return ListofFiles{Files: files}, retrievalToken, nil
 }
 
-func GetGoogleGmailList(ctx context.Context, client *http.Client, userID string) (ListofFiles, string, error) {
+func (s *crawlingServer) GetGoogleGmailList(ctx context.Context, client *http.Client, userID string) (ListofFiles, string, error) {
 	srv, err := gmail.NewService(ctx, option.WithHTTPClient(client))
 	if err != nil {
 		return ListofFiles{}, "", fmt.Errorf("failed to create Gmail service: %w", err)
@@ -117,9 +132,9 @@ func GetGoogleGmailList(ctx context.Context, client *http.Client, userID string)
 
 	pageToken := ""
 	workerChan := make(chan *gmail.Message, workers*10)
+	resultChan := make(chan CrawlResult, workers)
 	var wg sync.WaitGroup
 
-	// Worker pool
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
@@ -127,34 +142,52 @@ func GetGoogleGmailList(ctx context.Context, client *http.Client, userID string)
 			for msg := range workerChan {
 				file, err := processMessage(msg, userID)
 				if err != nil {
-					log.Printf("failed to process message: %v", err)
+					resultChan <- CrawlResult{Err: fmt.Errorf("failed to process message: %v", err)}
 					continue
 				}
+
+				if len(file.File) > 0 && s.isFileProcessed(userID, file.File[0].Metadata.FilePath) {
+					resultChan <- CrawlResult{Files: []File{file}}
+					continue
+				}
+
+				for _, chunk := range file.File {
+					if err := s.sendChunkToVector(ctx, chunk); err != nil {
+						continue
+					}
+				}
+
+				if len(file.File) > 0 {
+					if err := s.sendFileDoneSignal(ctx, userID, file.File[0].Metadata.FilePath, "GOOGLE"); err != nil {
+						continue
+					}
+				}
+
 				mu.Lock()
 				files = append(files, file)
 				if msg.HistoryId > latestHistoryID {
 					latestHistoryID = msg.HistoryId
 				}
 				mu.Unlock()
+
+				resultChan <- CrawlResult{Files: []File{file}}
 			}
 		}()
 	}
 
 	for {
-		if err := rateLimiter.Wait(ctx, "GOOGLE_GMAIL", "a"); err != nil {
-			log.Printf("rate limiter error: %v", err)
+		if err := rateLimiter.Wait(ctx, "GOOGLE_GMAIL", userID); err != nil {
 			break
 		}
 
 		call := srv.Users.Messages.List("me").
-			Q("in:sent OR category:primary").
+			Q("category:primary OR category:promotions").
 			PageToken(pageToken).
 			MaxResults(pageSize).
 			Fields("messages(id),nextPageToken")
 
 		res, err := call.Do()
 		if err != nil {
-			log.Printf("failed to list messages: %v", err)
 			break
 		}
 
@@ -163,7 +196,6 @@ func GetGoogleGmailList(ctx context.Context, client *http.Client, userID string)
 				Fields("id,internalDate,historyId,payload(headers,body/data,parts)").
 				Do()
 			if err != nil {
-				log.Printf("failed to fetch message %s: %v", msg.Id, err)
 				continue
 			}
 			workerChan <- fullMsg
@@ -176,8 +208,24 @@ func GetGoogleGmailList(ctx context.Context, client *http.Client, userID string)
 	}
 
 	close(workerChan)
-	wg.Wait()
 
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	var errs []error
+	for result := range resultChan {
+		if result.Err != nil {
+			errs = append(errs, result.Err)
+		}
+	}
+
+	if len(errs) > 0 {
+		return ListofFiles{}, "", fmt.Errorf("some messages failed to process: %v", errs)
+	}
+
+	s.markCrawlingComplete(userID)
 	retrievalToken := strconv.FormatUint(latestHistoryID, 10)
 	return ListofFiles{Files: files}, retrievalToken, nil
 }
@@ -202,26 +250,60 @@ func processMessage(fullMsg *gmail.Message, userID string) (File, error) {
 	}
 
 	createdTime := time.UnixMilli(fullMsg.InternalDate)
-	metadata := Metadata{
-		DateCreated:      createdTime,
-		DateLastModified: createdTime,
-		UserID:           userID,
-		ResourceID:       fullMsg.Id,
-		Title:            from + " : " + subject,
-		ResourceType:     "gmail/message",
-		ChunkID:          "",
-		ChunkSize:        0,
-		ChunkNumber:      0,
-		FileURL:          "https://mail.google.com/mail/u/0/#inbox/" + fullMsg.Id,
-		FilePath:         "",
-		Platform:         "GOOGLE_GMAIL",
-		Provider:         "GOOGLE",
+
+	const chunkSize = 1000
+	var chunks []TextChunkMessage
+	content := []rune(bodyContent)
+
+	for i := 0; i < len(content); i += chunkSize {
+		end := i + chunkSize
+		if end > len(content) {
+			end = len(content)
+		}
+
+		chunkID := fmt.Sprintf("start:%d-end:%d", i, end)
+		chunkContent := string(content[i:end])
+
+		metadata := Metadata{
+			DateCreated:      createdTime,
+			DateLastModified: createdTime,
+			UserID:           userID,
+			ResourceID:       fullMsg.Id,
+			Title:            subject,
+			ResourceType:     "gmail/message",
+			ChunkID:          chunkID,
+			FileURL:          "https://mail.google.com/mail/u/0/#inbox/" + fullMsg.Id,
+			FilePath:         from,
+			Platform:         "GOOGLE",
+			Service:          "GOOGLE_GMAIL",
+		}
+
+		chunks = append(chunks, TextChunkMessage{
+			Metadata: metadata,
+			Content:  chunkContent,
+		})
 	}
 
-	return File{File: []TextChunkMessage{{
-		Metadata: metadata,
-		Content:  bodyContent,
-	}}}, nil
+	if len(chunks) == 0 {
+		metadata := Metadata{
+			DateCreated:      createdTime,
+			DateLastModified: createdTime,
+			UserID:           userID,
+			ResourceID:       fullMsg.Id,
+			Title:            subject,
+			ResourceType:     "gmail/message",
+			ChunkID:          fmt.Sprintf("%s_chunk_0", fullMsg.Id),
+			FileURL:          "https://mail.google.com/mail/u/0/#inbox/" + fullMsg.Id,
+			FilePath:         from,
+			Platform:         "GOOGLE",
+			Service:          "GOOGLE_GMAIL",
+		}
+		chunks = append(chunks, TextChunkMessage{
+			Metadata: metadata,
+			Content:  "",
+		})
+	}
+	return File{File: chunks}, nil
 }
 
 // Decode base64url encoded data
@@ -236,39 +318,92 @@ func decodeBase64Url(encoded string) string {
 
 // Extract body content from the message parts
 func extractBodyFromParts(parts []*gmail.MessagePart) string {
+	if parts == nil {
+		return ""
+	}
+
+	var content string
 	for _, part := range parts {
 		if part.MimeType == "text/plain" && part.Body != nil && part.Body.Data != "" {
-			return decodeBase64Url(part.Body.Data)
-		}
-		if part.MimeType == "text/html" && part.Body != nil && part.Body.Data != "" {
-			return decodeBase64Url(part.Body.Data)
+			content += decodeBase64Url(part.Body.Data) + "\n"
+		} else if part.Parts != nil {
+			content += extractBodyFromParts(part.Parts)
 		}
 	}
-	return ""
+	return content
 }
 
-// New function to retrieve a specific email by resource ID
+// RetrieveFromGmail retrieves a specific email chunk by resource ID and chunk boundaries
 func RetrieveFromGmail(ctx context.Context, client *http.Client, metadata Metadata) (TextChunkMessage, error) {
+	var startPos, endPos int
+	if _, err := fmt.Sscanf(metadata.ChunkID, "start:%d-end:%d", &startPos, &endPos); err != nil {
+		chunkNumStr := strings.TrimPrefix(metadata.ChunkID, metadata.ResourceID+"_chunk_")
+		chunkNum, err := strconv.ParseUint(chunkNumStr, 10, 64)
+		if err != nil {
+			return TextChunkMessage{}, fmt.Errorf("invalid chunk ID format: %w", err)
+		}
+		const chunkSize = 1000
+		startPos = int(chunkNum * chunkSize)
+		endPos = startPos + chunkSize
+	}
+
 	srv, err := gmail.NewService(ctx, option.WithHTTPClient(client))
 	if err != nil {
 		return TextChunkMessage{}, fmt.Errorf("failed to create Gmail service: %w", err)
 	}
 
 	fullMsg, err := srv.Users.Messages.Get("me", metadata.ResourceID).
-		Fields("id,internalDate,payload(headers,body/data,parts)").
+		Fields("id,internalDate,payload(headers,body,parts)").
 		Do()
 	if err != nil {
 		return TextChunkMessage{}, fmt.Errorf("failed to retrieve email with ID %s: %w", metadata.ResourceID, err)
 	}
 
-	file, err := processMessage(fullMsg, metadata.UserID)
-	if err != nil {
-		return TextChunkMessage{}, err
+	var subject, from string
+	for _, header := range fullMsg.Payload.Headers {
+		switch header.Name {
+		case "Subject":
+			subject = header.Value
+		case "From":
+			from = header.Value
+		}
 	}
 
-	if len(file.File) == 0 {
-		return TextChunkMessage{}, fmt.Errorf("no content found for email with ID %s", metadata.ResourceID)
+	var bodyContent string
+	if fullMsg.Payload.Body != nil && fullMsg.Payload.Body.Data != "" {
+		bodyContent = decodeBase64Url(fullMsg.Payload.Body.Data)
+	} else {
+		bodyContent = extractBodyFromParts(fullMsg.Payload.Parts)
 	}
 
-	return file.File[0], nil
+	content := []rune(bodyContent)
+	if startPos >= len(content) {
+		return TextChunkMessage{}, fmt.Errorf("start position %d exceeds content length %d", startPos, len(content))
+	}
+
+	if endPos > len(content) {
+		endPos = len(content)
+	}
+
+	chunkContent := string(content[startPos:endPos])
+
+	createdTime := time.UnixMilli(fullMsg.InternalDate)
+
+	resultMetadata := Metadata{
+		DateCreated:      createdTime,
+		DateLastModified: createdTime,
+		UserID:           metadata.UserID,
+		ResourceID:       fullMsg.Id,
+		Title:            subject,
+		ResourceType:     "gmail/message",
+		ChunkID:          metadata.ChunkID,
+		FileURL:          "https://mail.google.com/mail/u/0/#inbox/" + fullMsg.Id,
+		FilePath:         from,
+		Platform:         "GOOGLE",
+		Service:          "GOOGLE_GMAIL",
+	}
+	return TextChunkMessage{
+		Metadata: resultMetadata,
+		Content:  chunkContent,
+	}, nil
 }

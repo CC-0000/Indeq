@@ -606,7 +606,7 @@ func (s *integrationServer) ConnectIntegration(ctx context.Context, req *pb.Conn
 		bgCtx := context.Background()
 		crawlerReq := &pb.StartInitalCrawlerRequest{
 			UserId:      req.UserId,
-			Provider:    providerStr,
+			Platform:    providerStr,
 			AccessToken: tokenRes.AccessToken,
 		}
 		_, err = s.crawlingService.StartInitialCrawler(bgCtx, crawlerReq)
@@ -662,7 +662,7 @@ func (s *integrationServer) DisconnectIntegration(ctx context.Context, req *pb.D
 
 	_, err = s.crawlingService.DeleteCrawlerData(ctx, &pb.DeleteCrawlerDataRequest{
 		UserId:   req.UserId,
-		Provider: providerStr,
+		Platform: providerStr,
 	})
 	if err != nil {
 		log.Printf("Failed to delete crawler data: %v", err)
@@ -690,7 +690,7 @@ func (s *integrationServer) ValidateOAuthState(ctx context.Context, req *pb.Vali
 }
 
 func (s *integrationServer) GetAccessToken(ctx context.Context, req *pb.GetAccessTokenRequest) (*pb.GetAccessTokenResponse, error) {
-	providerStr, err := enumToString(req.Provider)
+	providerStr, err := enumToString(req.Platform)
 	if err != nil {
 		return &pb.GetAccessTokenResponse{
 			Success:      false,
