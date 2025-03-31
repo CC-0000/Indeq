@@ -1,6 +1,7 @@
 import type { PageServerLoad } from './$types';
 import { redirect, error } from '@sveltejs/kit';
 import { GO_BACKEND_URL } from '$env/static/private';
+import type { DesktopIntegration } from '$lib/types/desktopIntegration';
 
 export const load: PageServerLoad = async ({ cookies, fetch }) => {
   const session = cookies.get('jwt');
@@ -16,11 +17,22 @@ export const load: PageServerLoad = async ({ cookies, fetch }) => {
     }
   });
 
+  const desktopIntegration = await fetch(`${GO_BACKEND_URL}/api/desktop_stats`, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session}`
+    }
+  });
+
   let data: { providers?: string[] };
+  let desktopIntegrationData: DesktopIntegration;
   try {
     data = await integrations.json();
+    desktopIntegrationData = await desktopIntegration.json();
+    console.log(desktopIntegrationData);
   } catch (err) {
-    throw error(500, 'Failed to fetch integrations');
+    throw error(500, ' to fetch integrations');
   }
 
   const providers = data.providers ?? [];
