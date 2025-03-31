@@ -4,15 +4,15 @@ import type { DesktopIntegration } from '$lib/types/desktopIntegration';
 
 // Create a writable store with initial empty state
 const desktopIntegration = writable<DesktopIntegration>({
-  crawled_files: 0,
-  total_files: 0,
-  is_online: false,
-  is_crawling: false
+  crawledFiles: 0,
+  totalFiles: 0,
+  isOnline: false,
+  isCrawling: false
 });
 
 // Polling internals
 let pollingInterval: ReturnType<typeof setInterval> | null = null;
-const POLL_INTERVAL = 30000; // 30 seconds
+const POLL_INTERVAL = 500; // 5 seconds
 
 // Function to start polling the local endpoint (not the GO backend directly)
 function startPolling(interval = POLL_INTERVAL) {
@@ -41,6 +41,7 @@ function startPolling(interval = POLL_INTERVAL) {
 
 // Initialize with initial data
 function initialize(initialData: DesktopIntegration) {
+  console.log(initialData);
   desktopIntegration.set(initialData);
 }
 

@@ -19,17 +19,19 @@
   let isReasoning = false;
   let conversationContainer: HTMLElement | null = null;
 
-  export let data: { integrations: string[] };
-  export let desktopIntegrationData: DesktopIntegration;
+  export let data: { providers: string[], desktopInfo: any };
+  // export let desktopIntegrationData: string;
+
+  console.log(data)
 
   const isIntegrated = (provider: string): boolean => {
-    return data.integrations.includes(provider.toUpperCase());
+    return Array.isArray(data.providers) && data.providers.includes(provider.toUpperCase());
   };
 
   onMount(() => {
-    initialize(desktopIntegrationData);
-    console.log(desktopIntegrationData);
-    if (desktopIntegrationData && desktopIntegrationData.is_crawling) {
+    initialize(data.desktopInfo);
+    console.log("DATA MOUNt", data.desktopInfo)
+    if (data.desktopInfo.isCrawling) {
       startPolling();
     }
   });
@@ -346,14 +348,14 @@
           <div class="relative">
             <div
               class="w-2 h-2 rounded-full"
-              style="background-color: {$desktopIntegration && $desktopIntegration.is_online ? 'green' : $desktopIntegration && !$desktopIntegration.is_crawling ? 'yellow' : 'red'}"
+              style="background-color: {$desktopIntegration && $desktopIntegration.isCrawling ? 'orange' : $desktopIntegration && $desktopIntegration.isOnline ? 'green' : 'red'}"
             ></div>
             <div
               class="w-2 h-2 rounded-full absolute top-0 animate-ping"
-              style="background-color: {$desktopIntegration && $desktopIntegration.is_online ? 'green' : $desktopIntegration && !$desktopIntegration.is_crawling ? 'yellow' : 'red'}"
+              style="background-color: {$desktopIntegration && $desktopIntegration.isCrawling ? 'orange' : $desktopIntegration && $desktopIntegration.isOnline ? 'green' : 'red'}"
             ></div>
           </div>
-          <span class="text-sm text-gray-600">Desktop {$desktopIntegration && $desktopIntegration.is_crawling && $desktopIntegration.crawled_files + ' / ' + $desktopIntegration.total_files + ' files'}</span>
+          <span class="text-sm text-gray-600">Desktop {$desktopIntegration && $desktopIntegration.isCrawling ? $desktopIntegration.crawledFiles + ' / ' + $desktopIntegration.totalFiles + ' files' : ""}</span>
         </div>
         <!-- Google -->
         <div class="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-full">
@@ -604,14 +606,14 @@
                   <div class="relative">
                     <div
                       class="w-2 h-2 rounded-full"
-                      style="background-color: {$desktopIntegration && $desktopIntegration.is_online ? 'green' : $desktopIntegration && !$desktopIntegration.is_crawling ? 'yellow' : 'red'}" 
+                      style="background-color: {$desktopIntegration && $desktopIntegration.isCrawling ? 'orange' : $desktopIntegration && $desktopIntegration.isOnline ? 'green' : 'red'}" 
                     ></div>
                     <div
                       class="w-2 h-2 rounded-full absolute top-0 animate-ping"
-                      style="background-color: {$desktopIntegration && $desktopIntegration.is_online ? 'green' : $desktopIntegration && !$desktopIntegration.is_crawling ? 'yellow' : 'red'}"
+                      style="background-color: {$desktopIntegration && $desktopIntegration.isCrawling ? 'orange' : $desktopIntegration && $desktopIntegration.isOnline ? 'green' : 'red'}"
                     ></div>
                   </div>
-                  <span class="text-xs text-gray-600 ml-1">Desktop {$desktopIntegration && $desktopIntegration.is_crawling && $desktopIntegration.crawled_files + ' / ' + $desktopIntegration.total_files + ' files'}</span>
+                  <span class="text-xs text-gray-600 ml-1">Desktop {$desktopIntegration && $desktopIntegration.isCrawling && $desktopIntegration.crawledFiles + ' / ' + $desktopIntegration.totalFiles + ' files'}</span>
                 </div>
                 
                 <!-- Google -->

@@ -25,12 +25,14 @@ export const load: PageServerLoad = async ({ cookies, fetch }) => {
     }
   });
 
-  let data: { providers?: string[] };
-  let desktopIntegrationData: DesktopIntegration;
+  const data: { providers?: string[], desktopInfo: any } = {
+    providers: [],
+    desktopInfo: await desktopIntegration.json()
+  };
+
   try {
-    data = await integrations.json();
-    desktopIntegrationData = await desktopIntegration.json();
-    console.log(desktopIntegrationData);
+    data.providers = await integrations.json();
+    console.log(data)
   } catch (err) {
     throw error(500, ' to fetch integrations');
   }
@@ -38,6 +40,7 @@ export const load: PageServerLoad = async ({ cookies, fetch }) => {
   const providers = data.providers ?? [];
 
   return {
-    integrations: providers
+    providers,
+    desktopInfo: data.desktopInfo
   };
 };
