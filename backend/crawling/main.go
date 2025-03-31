@@ -85,22 +85,44 @@ func ValidateAccessToken(accessToken, platform string) ([]string, error) {
 // validateGoogleAccessToken validates a Google access token
 func validateGoogleAccessToken(accessToken string) (*TokenInfo, error) {
 	url := fmt.Sprintf("https://oauth2.googleapis.com/tokeninfo?access_token=%s", accessToken)
-	resp, err := http.Get(url)
-	if err != nil {
-		return nil, fmt.Errorf("failed to make request: %v", err)
-	}
-	defer resp.Body.Close()
 
-	var tokenInfo TokenInfo
-	if err := json.NewDecoder(resp.Body).Decode(&tokenInfo); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %v", err)
-	}
-
-	if tokenInfo.Error != "" {
-		return &tokenInfo, fmt.Errorf("invalid token: %s - %s", tokenInfo.Error, tokenInfo.ErrorDesc)
+	// Create custom HTTP client with increased timeouts
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			TLSHandshakeTimeout: 20 * time.Second,
+			IdleConnTimeout:     90 * time.Second,
+		},
 	}
 
-	return &tokenInfo, nil
+	maxRetries := 3
+	var lastErr error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * 2 * time.Second)
+		}
+
+		resp, err := client.Get(url)
+		if err != nil {
+			lastErr = fmt.Errorf("attempt %d failed to make request: %v", attempt+1, err)
+			continue
+		}
+		defer resp.Body.Close()
+
+		var tokenInfo TokenInfo
+		if err := json.NewDecoder(resp.Body).Decode(&tokenInfo); err != nil {
+			lastErr = fmt.Errorf("attempt %d failed to decode response: %v", attempt+1, err)
+			continue
+		}
+
+		if tokenInfo.Error != "" {
+			return &tokenInfo, fmt.Errorf("invalid token: %s - %s", tokenInfo.Error, tokenInfo.ErrorDesc)
+		}
+
+		return &tokenInfo, nil
+	}
+
+	return nil, fmt.Errorf("all attempts failed, last error: %v", lastErr)
 }
 
 // Helper function to convert platform string to Provider enum

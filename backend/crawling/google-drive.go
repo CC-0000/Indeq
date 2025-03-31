@@ -68,6 +68,12 @@ func (s *crawlingServer) UpdateCrawlGoogleDrive(ctx context.Context, client *htt
 	for _, file := range filelist.Files {
 		if len(file.File) > 0 {
 			filePaths = append(filePaths, file.File[0].Metadata.FilePath)
+			resourceID := file.File[0].Metadata.ResourceID
+			if s.isFileProcessed(userID, resourceID) {
+				if err := UpsertProcessingStatus(ctx, s.db, userID, resourceID, false); err != nil {
+					log.Printf("Warning: failed to reset tracking status for file %s: %v", resourceID, err)
+				}
+			}
 		}
 	}
 
@@ -368,7 +374,7 @@ func (s *crawlingServer) ProcessAllGoogleDriveFiles(ctx context.Context, client 
 						originalUserID := f.file.File[0].Metadata.UserID
 						originalResourceID := f.file.File[0].Metadata.ResourceID
 
-						if s.isFileProcessed(originalUserID, originalFilePath) {
+						if s.isFileProcessed(originalUserID, originalResourceID) {
 							log.Printf("Skipping already processed file: %s", originalFilePath)
 							resultCh <- result{index: f.index, file: f.file}
 							return
