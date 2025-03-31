@@ -19,6 +19,7 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 type ServiceClients struct {
@@ -502,8 +503,16 @@ func handleGetDesktopStatsGenerator(clients *ServiceClients) http.HandlerFunc {
 			IsOnline:     res.IsOnline,
 		}
 
+		jsonBytes, err := protojson.MarshalOptions{
+			EmitUnpopulated: true,
+		}.Marshal(httpResponse)
+		if err != nil {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(httpResponse)
+		w.Write(jsonBytes)
 	}
 }
 

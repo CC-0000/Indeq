@@ -3,6 +3,7 @@ export interface Source {
     extension: string;
     filePath: string;
     title: string;
+    showTooltip: boolean;
 }
 
 export interface BotMessage {
