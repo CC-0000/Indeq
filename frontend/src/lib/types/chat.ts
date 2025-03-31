@@ -2,6 +2,7 @@ export interface Source {
     id: number;
     extension: string;
     filePath: string;
+    fileUrl?: string;
     title: string;
     showTooltip: boolean;
 }

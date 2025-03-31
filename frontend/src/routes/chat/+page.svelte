@@ -437,15 +437,20 @@
                               use:initScrollCheck={messageIndex}
                           >
                               {#each message.sources as source, sourceIndex}
-                                  <div class="flex-none w-[325px]">
+                                  <button 
+                                      type="button"
+                                      class="flex-none w-[325px] text-left"
+                                      on:click={source.fileUrl ? () => window.open(source.fileUrl, '_blank') : undefined}
+                                      aria-label={source.title}
+                                      disabled={!source.fileUrl}
+                                  >
                                       <div 
                                           class="bg-gray-50 rounded-md p-3 hover:bg-gray-100 transition-colors duration-200 shadow-sm border border-gray-100 relative tooltip-container"
                                           on:mouseenter={positionTooltip}
                                           on:mouseleave={hideTooltip}
                                           data-tooltip-id={`tooltip-${messageIndex}-${sourceIndex}`}
-                                          role="button"
-                                          tabindex="0"
                                           aria-describedby={`tooltip-${messageIndex}-${sourceIndex}`}
+                                          role="presentation"
                                       >
                                           <div class="flex items-center gap-1 text-gray-400 mb-1">
                                               <HardDriveIcon size="14" />
@@ -474,7 +479,7 @@
                                               <div class="text-xs text-gray-600 break-words">{source.filePath}</div>
                                           </div>
                                       </div>
-                                  </div>
+                                  </button>
                               {/each}
                           </div>
                       </div>

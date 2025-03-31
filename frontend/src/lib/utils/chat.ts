@@ -4,12 +4,14 @@ export function processSource(payload: any, botMessage: BotMessage) {
     const sourceId = payload.excerpt_number;
     const sourceExtension = payload.extension;
     const sourceFilePath = payload.file_path;
+    const sourceFileUrl = payload.file_url;
     const sourceTitle = payload.title;
 
     const source : Source = {
         id: sourceId,
         extension: sourceExtension.toLowerCase(),
         filePath: sourceFilePath,
+        fileUrl: sourceFileUrl,
         title: sourceTitle,
         showTooltip: true,
     }
