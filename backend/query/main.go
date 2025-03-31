@@ -254,7 +254,7 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 			FilePath:      chunks[0].Metadata.FilePath,
 			FileURL:       "",
 		}
-		if chunks[0].Metadata.FileUrl != "" {
+		if len(chunks[0].Metadata.FileUrl) > 0 {
 			queueSourceMessage.FileURL = chunks[0].Metadata.FileUrl
 		}
 		byteMessage, err := json.Marshal(queueSourceMessage)
