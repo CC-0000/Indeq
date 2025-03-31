@@ -49,6 +49,7 @@ type QueueSourceMessage struct {
 	Title         string `json:"title"`
 	Extension     string `json:"extension"`
 	FilePath      string `json:"file_path"`
+	FileURL       string `json:"file_url"`
 }
 
 // func(context, rabbitmq channel, queue to send message to, byte encoded message of some json)
@@ -251,6 +252,10 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 			Title:         chunks[0].Metadata.Title[:len(chunks[0].Metadata.Title)-len(filepath.Ext(chunks[0].Metadata.FilePath))],
 			Extension:     strings.TrimPrefix(filepath.Ext(chunks[0].Metadata.FilePath), "."),
 			FilePath:      chunks[0].Metadata.FilePath,
+			FileURL:       "",
+		}
+		if chunks[0].Metadata.FileUrl != "" {
+			queueSourceMessage.FileURL = chunks[0].Metadata.FileUrl
 		}
 		byteMessage, err := json.Marshal(queueSourceMessage)
 		if err != nil {
