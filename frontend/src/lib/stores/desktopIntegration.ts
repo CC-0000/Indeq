@@ -41,7 +41,6 @@ function startPolling(interval = POLL_INTERVAL) {
 
 // Initialize with initial data
 function initialize(initialData: DesktopIntegration) {
-  console.log(initialData);
   desktopIntegration.set(initialData);
 }
 
