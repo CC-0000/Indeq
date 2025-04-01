@@ -418,7 +418,15 @@ func (s *crawlingServer) DeleteCrawlerData(ctx context.Context, req *pb.DeleteCr
 	if err != nil {
 		return &pb.DeleteCrawlerDataResponse{
 			Success: false,
-			Message: fmt.Sprintf("Database error deleting crawler data: %v", err),
+			Message: fmt.Sprintf("Database error deleting retrieval tokens: %v", err),
+		}, nil
+	}
+
+	_, err = s.db.ExecContext(ctx, deleteProcessingStatusQuery, req.UserId)
+	if err != nil {
+		return &pb.DeleteCrawlerDataResponse{
+			Success: false,
+			Message: fmt.Sprintf("Database error deleting processing status: %v", err),
 		}, nil
 	}
 

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"strconv"
 	"sync"
 
 	pb "github.com/cc-0000/indeq/common/api"
@@ -129,32 +131,77 @@ func (s *crawlingServer) GetChunksFromGoogle(ctx context.Context, req *pb.GetChu
 	}
 
 	client := createGoogleOAuthClient(ctx, accessToken)
+
+	type chunkResult struct {
+		chunk *pb.TextChunkMessage
+		err   error
+	}
+
+	kVal, err := strconv.Atoi(os.Getenv("CRAWLING_K_VAL"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve the k value from the env variables: %w", err)
+	}
+	numWorkers := kVal
+	resultChan := make(chan chunkResult, len(req.Metadatas))
+	var wg sync.WaitGroup
+
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func(start int) {
+			defer wg.Done()
+			for j := start; j < len(req.Metadatas); j += numWorkers {
+				metadata := req.Metadatas[j]
+				internalMetadata := Metadata{
+					DateCreated:      metadata.DateCreated.AsTime(),
+					DateLastModified: metadata.DateLastModified.AsTime(),
+					UserID:           metadata.UserId,
+					ResourceID:       metadata.FileId,
+					ResourceType:     metadata.ResourceType,
+					FileURL:          metadata.FileUrl,
+					Title:            metadata.Title,
+					ChunkID:          metadata.ChunkId,
+					FilePath:         metadata.FilePath,
+					Platform:         "GOOGLE",
+					Service:          metadata.Service,
+				}
+
+				chunk, err := RetrieveGoogleCrawler(ctx, client, internalMetadata)
+				if err != nil {
+					resultChan <- chunkResult{
+						err: fmt.Errorf("error retrieving chunk for %s: %w", internalMetadata.FilePath, err),
+					}
+					continue
+				}
+
+				protoChunk := &pb.TextChunkMessage{
+					Metadata: s.convertToProtoMetadata(chunk.Metadata),
+					Content:  chunk.Content,
+				}
+				resultChan <- chunkResult{chunk: protoChunk}
+			}
+		}(i)
+	}
+
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
 	var chunks []*pb.TextChunkMessage
-	for _, metadata := range req.Metadatas {
-		internalMetadata := Metadata{
-			DateCreated:      metadata.DateCreated.AsTime(),
-			DateLastModified: metadata.DateLastModified.AsTime(),
-			UserID:           metadata.UserId,
-			ResourceID:       metadata.FileId,
-			ResourceType:     metadata.ResourceType,
-			FileURL:          metadata.FileUrl,
-			Title:            metadata.Title,
-			ChunkID:          metadata.ChunkId,
-			FilePath:         metadata.FilePath,
-			Platform:         "GOOGLE",
-			Service:          metadata.Service,
-		}
-		chunk, err := RetrieveGoogleCrawler(ctx, client, internalMetadata)
-		if err != nil {
-			log.Printf("Error retrieving chunk for %s: %v", internalMetadata.FilePath, err)
+	var errs []error
+	for result := range resultChan {
+		if result.err != nil {
+			errs = append(errs, result.err)
+			log.Printf("Warning: %v", result.err)
 			continue
 		}
-
-		protoChunk := &pb.TextChunkMessage{
-			Metadata: s.convertToProtoMetadata(chunk.Metadata),
-			Content:  chunk.Content,
+		if result.chunk != nil {
+			chunks = append(chunks, result.chunk)
 		}
-		chunks = append(chunks, protoChunk)
+	}
+
+	if len(errs) > 0 {
+		log.Printf("Some chunks failed to retrieve: %v", errs)
 	}
 
 	return &pb.GetChunksFromGoogleResponse{
