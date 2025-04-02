@@ -10,12 +10,14 @@ import (
 	"crypto/x509"
 	"database/sql"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"log"
 	"math/big"
 	"net"
 	"net/mail"
+	"net/smtp"
 	"os"
 	"os/signal"
 	"strconv"
@@ -25,12 +27,13 @@ import (
 
 	pb "github.com/cc-0000/indeq/common/api"
 	"github.com/cc-0000/indeq/common/config"
+	"github.com/cc-0000/indeq/common/redis"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	_ "github.com/lib/pq"
 	"golang.org/x/crypto/argon2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-	"github.com/redis/go-redis/v9"
 )
 
 type params struct {
@@ -51,27 +54,41 @@ type authServer struct {
 	MinPasswordLength int
 	MaxPasswordLength int
 	MaxEmailLength    int
-	redisClient *redis.RedisClient
+	redisClient       *redis.RedisClient
 }
 
 type RegistrationPayload struct {
-	Email string `json:"email"`
+	Email          string `json:"email"`
 	HashedPassword string `json:"hashed_password"`
-	Name string `json:"name"`
-	OTP string `json:"otp"`
+	Name           string `json:"name"`
+	OTP            string `json:"otp"`
 }
 
 func generateOTP() (string, error) {
-	digits := "0123456789"
-	buf := make([]byte, 6)
-	_, err := rand.Read(buf)
-	if err != nil {
-		return "", err
+	const digits = "0123456789"
+	const length = 6
+	otp := make([]byte, 0, length)
+	// Use 250 as the maximum to avoid modulo bias
+	max := byte(250)
+	// buffer to read random bytes in batches
+	buf := make([]byte, 16) 
+	for len(otp) < length {
+		_, err := rand.Read(buf)
+		if err != nil {
+			return "", fmt.Errorf("failed to generate OTP: %w", err)
+		}
+		for _, b := range buf {
+			if b > max {
+				continue
+			}
+			otp = append(otp, digits[b%10])
+			if len(otp) == length {
+				break
+			}
+		}
 	}
-	for i := range buf {
-		buf[i] = digits[int(buf[i]) % 10]
-	}
-	return string(buf), nil
+
+	return string(otp), nil
 }
 
 // func()
@@ -305,6 +322,79 @@ func (s *authServer) Login(ctx context.Context, req *pb.LoginRequest) (*pb.Login
 	return &pb.LoginResponse{Token: tokenString, UserId: id}, nil
 }
 
+func (s *authServer) sendEmail(to string, subject string, body string) error {
+	from := os.Getenv("SMTP_FROM")
+	user := os.Getenv("SMTP_USER")
+	pass := os.Getenv("SMTP_PASS")
+	host := os.Getenv("SMTP_HOST")
+	port := os.Getenv("SMTP_PORT")
+
+	if from == "" || user == "" || pass == "" || host == "" || port == "" {
+		return fmt.Errorf("SMTP configuration is incomplete")
+	}
+
+	addr := fmt.Sprintf("%s:%s", host, port)
+
+	// Set up TLS configuration.
+	tlsConfig := &tls.Config{
+		ServerName: host,
+	}
+
+	conn, err := tls.Dial("tcp", addr, tlsConfig)
+	if err != nil {
+		return fmt.Errorf("failed to dial TLS connection: %w", err)
+	}
+	defer conn.Close()
+
+	client, err := smtp.NewClient(conn, host)
+	if err != nil {
+		return fmt.Errorf("failed to create SMTP client: %w", err)
+	}
+	defer client.Close()
+
+	auth := smtp.PlainAuth("", user, pass, host)
+	if ok, _ := client.Extension("AUTH"); ok {
+		if err := client.Auth(auth); err != nil {
+			return fmt.Errorf("failed to authenticate: %w", err)
+		}
+	}
+
+	if err := client.Mail(from); err != nil {
+		return fmt.Errorf("failed to set sender: %w", err)
+	}
+	if err := client.Rcpt(to); err != nil {
+		return fmt.Errorf("failed to set recipient: %w", err)
+	}
+
+	w, err := client.Data()
+	if err != nil {
+		return fmt.Errorf("failed to start data command: %w", err)
+	}
+
+	msg := []byte("From: " + from + "\r\n" +
+		"To: " + to + "\r\n" +
+		"Subject: " + subject + "\r\n" +
+		"MIME-Version: 1.0\r\n" +
+		"Content-Type: text/plain; charset=\"utf-8\"\r\n" +
+		"\r\n" +
+		body + "\r\n")
+
+	if _, err := w.Write(msg); err != nil {
+		return fmt.Errorf("failed to write message: %w", err)
+	}
+
+	if err := w.Close(); err != nil {
+		return fmt.Errorf("failed to close data writer: %w", err)
+	}
+
+
+	if err := client.Quit(); err != nil {
+		return fmt.Errorf("failed to quit SMTP client: %w", err)
+	}
+
+	return nil
+}
+
 // TODO: implement email-sending validation with redis
 // rpc(context, register request)
 //   - takes in a email, name and password and registers the user in our database
@@ -333,6 +423,33 @@ func (s *authServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb
 			Success: false,
 			Error:   fmt.Sprintf("invalid password: %v", err),
 		}, err
+	}
+
+	// throttle per email
+	throttleKey := fmt.Sprintf("reg_throttle:%s", req.Email)
+	throttleCount, err := s.redisClient.Incr(ctx, throttleKey, 1)
+	if err != nil {
+		return &pb.RegisterResponse{
+			Success: false,
+			Error: "Something went wrong. Please try again later.",
+		}, err
+	}
+
+	if throttleCount == 1 {
+		err = s.redisClient.Expire(ctx, throttleKey, 5*time.Minute)
+		if err != nil {
+			return &pb.RegisterResponse{
+				Success: false,
+				Error: "Something went wrong. Please try again later.",
+			}, err
+		}
+	}
+
+	if throttleCount > 5 {
+		return &pb.RegisterResponse{
+			Success: false,
+			Error: "Too many attempts. Please try again later.",
+		}, nil
 	}
 
 	// Generate a random salt
@@ -365,46 +482,103 @@ func (s *authServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb
 		base64.RawStdEncoding.EncodeToString(hash),
 	)
 
+	otp, err := generateOTP()
+	if err != nil {
+		return &pb.RegisterResponse{
+			Success: false,
+			Error: "Something went wrong. Please try again later.",
+		}, err
+	}
+
+	token := uuid.NewString()
+	redisKey := fmt.Sprintf("reg:%s", token)
+
+	payload := RegistrationPayload{
+		Email: req.Email,
+		HashedPassword: encodedHash,
+		Name: req.Name,
+		OTP: otp,
+	}
+
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return &pb.RegisterResponse{
+			Success: false,
+			Error: "Something went wrong. Please try again later.",
+		}, err
+	}
+
+	err = s.redisClient.Set(ctx, redisKey, payloadBytes, 5*time.Minute)
+	if err != nil {
+		return &pb.RegisterResponse{
+			Success: false,
+			Error: "Something went wrong. Please try again later.",
+		}, err
+	}
+	verifyLink := fmt.Sprintf("%s/verify/%s", os.Getenv("WEBSITE"), token)
+emailBody := fmt.Sprintf(`Welcome to Indeq!
+
+To verify your account, click the link below and enter your 6-digit code:
+
+Verification link:
+%s
+
+Your verification code: %s
+
+This link and code will expire in 5 minutes.
+`, verifyLink, otp)
+
+	emailSubject := "Indeq - Verify your account"
+	err = s.sendEmail(req.Email, emailSubject, emailBody)
+	if err != nil {
+		return &pb.RegisterResponse{
+			Success: false,
+			Error:   "Something went wrong. Please try again later.",
+		}, err
+	}
+
+
+
 	// Store in the database
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return &pb.RegisterResponse{
-			Success: false,
-			Error:   err.Error(),
-		}, fmt.Errorf("failed to begin transaction: %v", err)
-	}
-	defer tx.Rollback()
+	// tx, err := s.db.BeginTx(ctx, nil)
+	// if err != nil {
+	// 	return &pb.RegisterResponse{
+	// 		Success: false,
+	// 		Error:   err.Error(),
+	// 	}, fmt.Errorf("failed to begin transaction: %v", err)
+	// }
+	// defer tx.Rollback()
 
-	var userId string
-	err = tx.QueryRowContext(
-		ctx,
-		"INSERT INTO users (email, password_hash, name) VALUES ($1, $2, $3) RETURNING id",
-		strings.ToLower(req.Email), // Normalize email
-		encodedHash,
-		req.Name,
-	).Scan(&userId)
+	// var userId string
+	// err = tx.QueryRowContext(
+	// 	ctx,
+	// 	"INSERT INTO users (email, password_hash, name) VALUES ($1, $2, $3) RETURNING id",
+	// 	strings.ToLower(req.Email), // Normalize email
+	// 	encodedHash,
+	// 	req.Name,
+	// ).Scan(&userId)
 
-	if err != nil {
-		return &pb.RegisterResponse{
-			Success: false,
-			Error:   "email already exists",
-		}, err
-	}
+	// if err != nil {
+	// 	return &pb.RegisterResponse{
+	// 		Success: false,
+	// 		Error:   "email already exists",
+	// 	}, err
+	// }
 
-	// Try to create a corresponding entry in the desktop tracking collection
-	dRes, err := s.desktopClient.SetupUserStats(ctx, &pb.SetupUserStatsRequest{
-		UserId: userId,
-	})
-	if err != nil || !dRes.Success {
-		return &pb.RegisterResponse{
-			Success: false,
-			Error:   "failed to setup user datastores",
-		}, err
-	}
+	// // Try to create a corresponding entry in the desktop tracking collection
+	// dRes, err := s.desktopClient.SetupUserStats(ctx, &pb.SetupUserStatsRequest{
+	// 	UserId: userId,
+	// })
+	// if err != nil || !dRes.Success {
+	// 	return &pb.RegisterResponse{
+	// 		Success: false,
+	// 		Error:   "failed to setup user datastores",
+	// 	}, err
+	// }
 
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("failed to commit transaction: %v", err)
-	}
+	// if err := tx.Commit(); err != nil {
+	// 	return nil, fmt.Errorf("failed to commit transaction: %v", err)
+	// }
 
 	return &pb.RegisterResponse{Success: true}, nil
 }
@@ -726,6 +900,14 @@ func main() {
 
 	// create the server struct
 	server := &authServer{}
+
+	// connect to redis
+	redisClient, err := redis.NewRedisClient(ctx, 1)
+	if err != nil {
+		log.Fatalf("failed to connect to redis: %v", err)
+	}
+	defer redisClient.Client.Close()
+	server.redisClient = redisClient
 
 	// load password settings
 	if err := server.loadPasswordSettings(); err != nil {
