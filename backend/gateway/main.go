@@ -63,8 +63,8 @@ func handleGetQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 
 		// Get the query parameters
 		queryParams := r.URL.Query()
-		incomingId := queryParams.Get("conversationId")
-		conversationId := fmt.Sprintf("%s-%s", verifyRes.UserId, incomingId)
+		incomingId := queryParams.Get("requestId")
+		requestId := fmt.Sprintf("%s-%s", verifyRes.UserId, incomingId)
 
 		// Handle SSE connection
 		allowedOrigins, ok := os.LookupEnv("ALLOWED_CLIENT_IP")
@@ -91,11 +91,11 @@ func handleGetQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 		defer channel.Close()
 
 		queue, err := channel.QueueDeclare(
-			conversationId, // name
-			false,          // durable
-			true,           // delete when unused
-			false,          // exclusive
-			false,          // no-wait
+			requestId, // name
+			false,     // durable
+			true,      // delete when unused
+			false,     // exclusive
+			false,     // no-wait
 			amqp.Table{ // arguments
 				"x-expires": queueTTL,
 			},
@@ -161,8 +161,8 @@ func handlePostQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 		})
 
 		// Generate a per-request UUID
-		newId := uuid.New()
-		conversationId := fmt.Sprintf("%s-%s", verifyRes.UserId, newId.String())
+		newRequestId := uuid.New().String()
+		userHashedRequestId := fmt.Sprintf("%s-%s", verifyRes.UserId, newRequestId)
 
 		// Grab the query
 		var queryRequest pb.HttpQueryRequest
@@ -175,13 +175,21 @@ func handlePostQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 			return
 		}
 
+		// Generate a new conversation UUID ONLY IF the user did not provide one
+		conversationId := queryRequest.ConversationId
+		if len(conversationId) == 0 {
+			conversationId = uuid.New().String()
+		}
+		userHashedConversationId := fmt.Sprintf("%s-%s", verifyRes.UserId, conversationId)
+
 		// Send the query in a goroutine
 		go func() {
 			detachedCtx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			_, err := clients.queryClient.MakeQuery(detachedCtx, &pb.QueryRequest{
 				UserId:         verifyRes.UserId,
-				ConversationId: conversationId,
+				RequestId:      userHashedRequestId,
+				ConversationId: userHashedConversationId,
 				Query:          queryRequest.Query,
 			})
 			if err != nil {
@@ -190,7 +198,8 @@ func handlePostQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 		}()
 
 		httpResponse := &pb.HttpQueryResponse{
-			ConversationId: newId.String(),
+			RequestId:      newRequestId,
+			ConversationId: conversationId,
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(httpResponse)

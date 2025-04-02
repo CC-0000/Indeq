@@ -11,7 +11,36 @@ service QueryService {
 message QueryRequest {
     string user_id = 1;
     string conversation_id = 2;
-    string query = 3;
+    string request_id = 3;
+    string query = 4;
 }
 
 message QueryResponse {}
+
+message QueryTokenMessage {
+    string type = 1;
+    string token = 2;
+}
+
+message QuerySourceMessage {
+    string type = 1;
+    int32 excerpt_number = 2;
+    string title = 3;
+    string extension = 4;
+    string file_path = 5;
+}
+
+// this is a giant block of text either from the model or from the user
+// if it's from the model, it will contain reasoning and sources
+// if it's from the user, it will only contain text
+message QueryMessage {
+    string text = 1;
+    string sender = 2; // should be "user" or "model"
+    repeated string reasoning = 3;
+    repeated QuerySourceMessage sources = 4;
+}
+
+message QueryConversation {
+    string conversation_id = 1;
+    repeated QueryMessage messages = 2;
+}

@@ -10,10 +10,12 @@ message HttpHelloResponse {
 
 message HttpQueryRequest {
   string query = 1;
+  string conversation_id = 2; // optional --> this will be blank if the user is creating a new conversation
 }
 
 message HttpQueryResponse {
-  string conversation_id = 1;
+  string request_id = 1;
+  string conversation_id = 2;
 }
 
 message HttpRegisterRequest {
