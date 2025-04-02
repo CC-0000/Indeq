@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -280,27 +282,8 @@ func (s *crawlingServer) ProcessAllGoogleDriveFiles(ctx context.Context, client 
 		err   error
 	}
 
-	resultCh := make(chan result)
 	chunkBatchSize := 50
 	chunkCh := make(chan TextChunkMessage, chunkBatchSize)
-
-	mimeGroups := make(map[string][]struct {
-		index int
-		file  File
-	})
-	for i, file := range fileList.Files {
-		if len(file.File) == 0 || file.File[0].Metadata.ResourceType == "" {
-			resultCh <- result{index: i, file: file}
-			continue
-		}
-		mimeType := file.File[0].Metadata.ResourceType
-		mimeGroups[mimeType] = append(mimeGroups[mimeType], struct {
-			index int
-			file  File
-		}{i, file})
-	}
-
-	var wg sync.WaitGroup
 	var chunkWg sync.WaitGroup
 
 	chunkWg.Add(1)
@@ -339,75 +322,94 @@ func (s *crawlingServer) ProcessAllGoogleDriveFiles(ctx context.Context, client 
 		}
 	}()
 
-	for mimeType, files := range mimeGroups {
-		wg.Add(1)
-		go func(mimeType string, files []struct {
-			index int
-			file  File
-		}) {
-			defer wg.Done()
-			handler, ok := mimeHandlers[mimeType]
-			if !ok {
-				for _, f := range files {
-					resultCh <- result{index: f.index, file: f.file}
-				}
-				return
+	type workItem struct {
+		index int
+		file  File
+	}
+	workItemsByType := make(map[string][]workItem)
+	resultCh := make(chan result, len(fileList.Files))
+
+	for i, file := range fileList.Files {
+		if len(file.File) == 0 || file.File[0].Metadata.ResourceType == "" {
+			resultCh <- result{index: i, file: file}
+			continue
+		}
+		mimeType := file.File[0].Metadata.ResourceType
+		workItemsByType[mimeType] = append(workItemsByType[mimeType], workItem{
+			index: i,
+			file:  file,
+		})
+	}
+
+	var wg sync.WaitGroup
+	for mimeType, items := range workItemsByType {
+		numWorkers := 5
+		var err error
+		switch mimeType {
+		case "application/vnd.google-apps.document":
+			numWorkers, err = strconv.Atoi(os.Getenv("CRAWLING_GOOGLE_RETRIVAL_MAX_WORKERS"))
+			if err != nil {
+				fmt.Printf("Warning: failed to retrieve the k value from the env variables: %v", err)
 			}
 
-			const batchSize = 5
-			for i := 0; i < len(files); i += batchSize {
-				end := i + batchSize
-				if end > len(files) {
-					end = len(files)
-				}
-
-				var batchWg sync.WaitGroup
-				for j := i; j < end; j++ {
-					batchWg.Add(1)
-					go func(f struct {
-						index int
-						file  File
-					}) {
-						defer batchWg.Done()
-
-						originalFilePath := f.file.File[0].Metadata.FilePath
-						originalUserID := f.file.File[0].Metadata.UserID
-						originalResourceID := f.file.File[0].Metadata.ResourceID
-
-						if s.isFileProcessed(originalUserID, originalResourceID) {
-							log.Printf("Skipping already processed file: %s", originalFilePath)
-							resultCh <- result{index: f.index, file: f.file}
-							return
-						}
-
-						processedFile, err := handler(ctx, client, f.file)
-						if err != nil {
-							resultCh <- result{index: f.index, err: fmt.Errorf("error processing file %s: %w", originalResourceID, err)}
-							return
-						}
-
-						if len(processedFile.File) > 0 {
-							for _, chunk := range processedFile.File {
-								select {
-								case chunkCh <- chunk:
-								case <-ctx.Done():
-									return
-								}
-							}
-
-							if err := s.sendFileDoneSignal(ctx, originalUserID, originalFilePath, "GOOGLE"); err != nil {
-								log.Printf("Error sending file done signal for %s: %v", originalFilePath, err)
-							}
-						} else {
-							log.Printf("No chunks generated for file: %s", originalFilePath)
-						}
-
-						resultCh <- result{index: f.index, file: processedFile}
-					}(files[j])
-				}
-				batchWg.Wait()
+		case "application/vnd.google-apps.presentation":
+			numWorkers, err = strconv.Atoi(os.Getenv("CRAWLING_GOOGLE_RETRIVAL_MAX_WORKERS"))
+			if err != nil {
+				fmt.Printf("Warning: failed to retrieve the k value from the env variables: %v", err)
 			}
-		}(mimeType, files)
+		}
+
+		// Create worker pool for this MIME type
+		for i := 0; i < numWorkers; i++ {
+			wg.Add(1)
+			go func(mimeType string, workerID int, items []workItem) {
+				defer wg.Done()
+				handler, ok := mimeHandlers[mimeType]
+				if !ok {
+					for _, item := range items {
+						resultCh <- result{index: item.index, file: item.file}
+					}
+					return
+				}
+
+				for j := workerID; j < len(items); j += numWorkers {
+					item := items[j]
+					originalFilePath := item.file.File[0].Metadata.FilePath
+					originalUserID := item.file.File[0].Metadata.UserID
+					originalResourceID := item.file.File[0].Metadata.ResourceID
+
+					if s.isFileProcessed(originalUserID, originalResourceID) {
+						log.Printf("Skipping already processed file: %s", originalFilePath)
+						resultCh <- result{index: item.index, file: item.file}
+						continue
+					}
+
+					processedFile, err := handler(ctx, client, item.file)
+					if err != nil {
+						resultCh <- result{index: item.index, err: fmt.Errorf("error processing file %s: %w", originalResourceID, err)}
+						continue
+					}
+
+					if len(processedFile.File) > 0 {
+						for _, chunk := range processedFile.File {
+							select {
+							case chunkCh <- chunk:
+							case <-ctx.Done():
+								return
+							}
+						}
+
+						if err := s.sendFileDoneSignal(ctx, originalUserID, originalFilePath, "GOOGLE"); err != nil {
+							log.Printf("Error sending file done signal for %s: %v", originalFilePath, err)
+						}
+					} else {
+						log.Printf("No chunks generated for file: %s", originalFilePath)
+					}
+
+					resultCh <- result{index: item.index, file: processedFile}
+				}
+			}(mimeType, i, items)
+		}
 	}
 
 	go func() {

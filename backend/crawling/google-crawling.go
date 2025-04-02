@@ -137,11 +137,10 @@ func (s *crawlingServer) GetChunksFromGoogle(ctx context.Context, req *pb.GetChu
 		err   error
 	}
 
-	kVal, err := strconv.Atoi(os.Getenv("CRAWLING_K_VAL"))
+	numWorkers, err := strconv.Atoi(os.Getenv("CRAWLING_GOOGLE_RETRIVAL_MAX_WORKERS"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve the k value from the env variables: %w", err)
 	}
-	numWorkers := kVal
 	resultChan := make(chan chunkResult, len(req.Metadatas))
 	var wg sync.WaitGroup
 

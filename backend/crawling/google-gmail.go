@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -126,9 +127,12 @@ func (s *crawlingServer) GetGoogleGmailList(ctx context.Context, client *http.Cl
 	if err != nil {
 		return ListofFiles{}, "", fmt.Errorf("failed to create Gmail service: %w", err)
 	}
+	workers, err := strconv.Atoi(os.Getenv("CRAWLING_GMAIL_MAX_WORKERS"))
+	if err != nil {
+		return ListofFiles{}, "", fmt.Errorf("failed to retrieve the k value from the env variables: %w", err)
+	}
 
 	const pageSize = 1000
-	const workers = 10
 
 	var files []File
 	var mu sync.Mutex
