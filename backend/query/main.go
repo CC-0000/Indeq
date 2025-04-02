@@ -25,17 +25,23 @@ import (
 	"github.com/google/generative-ai-go/genai"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
+
+	kivik "github.com/go-kivik/kivik/v4"
+	_ "github.com/go-kivik/kivik/v4/couchdb"
 )
 
 type queryServer struct {
 	pb.UnimplementedQueryServiceServer
-	rabbitMQConn           *amqp.Connection
-	retrievalConn          *grpc.ClientConn
-	retrievalService       pb.RetrievalServiceClient
-	queueTTL               int
-	geminiClient           *genai.Client
-	geminiFlash2ModelHeavy *genai.GenerativeModel
-	geminiFlash2ModelLight *genai.GenerativeModel
+	rabbitMQConn                   *amqp.Connection
+	retrievalConn                  *grpc.ClientConn
+	retrievalService               pb.RetrievalServiceClient
+	queueTTL                       int
+	geminiClient                   *genai.Client
+	geminiFlash2ModelHeavy         *genai.GenerativeModel
+	geminiFlash2ModelLight         *genai.GenerativeModel
+	geminiFlash2ModelSummarization *genai.GenerativeModel
+	couchdbClient                  *kivik.Client
+	conversationsDB                *kivik.DB
 }
 
 type QueueTokenMessage struct {
@@ -80,16 +86,10 @@ func (s *queryServer) expandQuery(ctx context.Context, query string) (string, er
 		return query, nil
 	}
 
-	fullprompt := "IMPORTANT: Do NOT answer the query directly. Your task is ONLY to expand and rephrase the query into search terms.\n\n" +
-		"Instructions:\n" +
-		"1. Analyze the user query below\n" +
-		"2. Generate 3-5 alternative phrasings, related concepts, and key terms that would be useful for searching documents\n" +
-		"3. Format your response ONLY as a list of search terms and phrases\n" +
-		"4. Do NOT provide explanations or direct answers to the query\n\n" +
-		"User Query: {" + query + "}\n\n" +
+	fullprompt := "User Query: {" + query + "}\n\n" +
 		"Search Terms:"
 
-	session := s.geminiFlash2ModelHeavy.StartChat()
+	session := s.geminiFlash2ModelLight.StartChat()
 	session.History = []*genai.Content{}
 
 	resp, err := session.SendMessage(ctx, genai.Text(fullprompt))
@@ -161,7 +161,7 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 	}
 
 	// assemble the full prompt from the chunks and the query
-	var fullprompt string = "Below are relevant excerpts from user documents. Use this information to answer the question that follows. If the information provided is not sufficient, use your general knowledge but prioritize the given context. Always cite sources when using specific information from the excerpts.\n\n"
+	var fullprompt string = ""
 
 	excerptNumber := 1
 	for _, chunks := range chunksByFilePath {
@@ -178,7 +178,7 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 	}
 
 	fullprompt += "Question: " + req.Query + "\n\n"
-	fullprompt += "Instructions: Provide a comprehensive answer to the question above, using the given excerpts as your primary source of information. Cite sources using the title of the document. If the excerpts don't contain relevant information, state this and provide an answer based on your general knowledge."
+	fullprompt += "Instructions: Provide a comprehensive answer to the question above, using the given excerpts as your primary source of information. Cite sources using the <Excerpt number> (with angle brackets!) of the document. If the excerpts don't contain relevant information, state this and provide an answer based on your general knowledge."
 
 	// use the following to debug quality and size of context retrieved:
 	// log.Print("the number of characters in the full prompt is: ", len(fullprompt))
@@ -433,17 +433,96 @@ func (s *queryServer) connectToGoogleGemini() {
 	heavyModel.SetTemperature(1)
 	heavyModel.SetTopK(1)
 	heavyModel.SetTopP(0.95)
-	heavyModel.SetMaxOutputTokens(8000)
+	heavyModel.SetMaxOutputTokens(8196)
 	heavyModel.ResponseMIMEType = "text/plain"
+	systemPrompt := "Below are relevant excerpts from user documents. Use this information to answer the question that follows. If the information provided is not sufficient, use your general knowledge but prioritize the given context. Always cite sources using the <Excerpt number> (with angle brackets!) when using specific information from the excerpts.\n\n"
+	heavyModel.SystemInstruction = &genai.Content{
+		Parts: []genai.Part{
+			genai.Text(systemPrompt),
+		},
+	}
 	s.geminiFlash2ModelHeavy = heavyModel
 
 	lightModel := client.GenerativeModel("gemini-2.0-flash-lite")
 	lightModel.SetTemperature(1)
 	lightModel.SetTopK(1)
 	lightModel.SetTopP(0.95)
-	lightModel.SetMaxOutputTokens(100)
+	lightModel.SetMaxOutputTokens(200)
 	lightModel.ResponseMIMEType = "text/plain"
+	systemPrompt = "IMPORTANT: Do NOT answer the query directly. Your task is ONLY to expand and rephrase the query into search terms.\n\n" +
+		"Instructions:\n" +
+		"1. Analyze the user query\n" +
+		"2. Generate 3-5 alternative phrasings, related concepts, and key terms that would be useful for searching documents\n" +
+		"3. Format your response ONLY as a list of search terms and phrases\n" +
+		"4. Do NOT provide explanations or direct answers to the query\n\n"
+
+	lightModel.SystemInstruction = &genai.Content{
+		Parts: []genai.Part{
+			genai.Text(systemPrompt),
+		},
+	}
 	s.geminiFlash2ModelLight = lightModel
+
+	summarizationModel := client.GenerativeModel("gemini-2.0-flash-lite")
+	summarizationModel.SetTemperature(0.3)
+	summarizationModel.SetTopK(1)
+	summarizationModel.SetTopP(0.95)
+	summarizationModel.SetMaxOutputTokens(1024)
+	summarizationModel.ResponseMIMEType = "text/plain"
+	systemPrompt = "Your task is to create a concise summary of the following conversation between a human and an AI assistant. Focus on capturing the key points, questions, and information exchanged.\n\n" +
+		"Instructions:\n" +
+		"1. Extract the main topics, questions, and information from the conversation\n" +
+		"2. Identify any decisions made or conclusions reached\n" +
+		"3. Maintain factual accuracy while condensing the exchange\n" +
+		"4. Summarize in third person (e.g., 'The human asked about X, and the AI explained Y')\n" +
+		"5. Be brief but comprehensive, highlighting the most important information\n" +
+		"6. Exclude pleasantries, acknowledgments, and other non-essential dialogue\n\n" +
+		"The summary should be significantly shorter than the original conversation while preserving the essential context needed for understanding the interaction.\n\n"
+
+	summarizationModel.SystemInstruction = &genai.Content{
+		Parts: []genai.Part{
+			genai.Text(systemPrompt),
+		},
+	}
+	s.geminiFlash2ModelSummarization = summarizationModel
+}
+
+// func()
+//   - connects to the couchdb database
+//   - assumes: you will call couchdbClient.Close() in the parent function at some point
+//   - assumes: you will call conversationsDB.Close() in the parent function at some point
+func (s *queryServer) connectToCouchDB() {
+	// retrieve env credentials
+	couchdbUser, ok := os.LookupEnv("COUCHDB_USER")
+	if !ok {
+		log.Fatalf("failed to retrieve the couchdb user")
+	}
+	couchdbPassword, ok := os.LookupEnv("COUCHDB_PASSWORD")
+	if !ok {
+		log.Fatalf("failed to retrieve the couchdb password")
+	}
+	couchdbAddress, ok := os.LookupEnv("COUCHDB_ADDRESS")
+	if !ok {
+		log.Fatalf("failed to retrieve the couchdb address")
+	}
+
+	// connect to couchdb
+	client, err := kivik.New("couch", fmt.Sprintf("http://%s:%s@%s/", couchdbUser, couchdbPassword, couchdbAddress))
+	if err != nil {
+		log.Fatalf("failed to connect to couchdb: %v", err)
+	}
+	s.couchdbClient = client
+
+	// Create or get a database
+	db := client.DB("conversations")
+	if db.Err() != nil {
+		// Database doesn't exist, create it
+		if err := client.CreateDB(context.TODO(), "conversations"); err != nil {
+			log.Fatalf("failed to create couchdb database: %v", err)
+		}
+		db = client.DB("conversations")
+	}
+	s.conversationsDB = db
 }
 
 func main() {
@@ -482,6 +561,11 @@ func main() {
 	// Connect to google gemini
 	server.connectToGoogleGemini()
 	defer server.geminiClient.Close()
+
+	// Connect to couchdb
+	server.connectToCouchDB()
+	defer server.couchdbClient.Close()
+	defer server.conversationsDB.Close()
 
 	// listen for shutdown signal
 	<-sigChan // TODO: implement worker groups

@@ -54,6 +54,8 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+      couchdb:
+        condition: service_healthy
     networks:
       - indeq-net
 
@@ -237,12 +239,28 @@ services:
       - app_data:/var/lib/postgresql/data
     networks:
       - indeq-net
+  
+  couchdb:
+    image: couchdb
+    env_file:
+      - ./common/config/.env
+    restart: always
+    volumes:
+      - couch_data:/opt/couchdb/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl --silent --fail http://localhost:5984 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - indeq-net
 
 volumes:
   app_data:
   ollama_models:
   embedding_data:
   redis_data:
+  couch_data:
 
 networks:
   indeq-net:
