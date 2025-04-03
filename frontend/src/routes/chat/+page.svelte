@@ -398,7 +398,7 @@
       </div>
     </div>
   {:else}
-    <div class="flex-1 flex flex-col bg-white w-full max-w-3xl">
+    <div class="flex-1 flex flex-col w-full max-w-3xl">
       <div
         class="conversation-container flex-1 overflow-y-auto p-4 space-y-6 pb-32"
         bind:this={conversationContainer}
@@ -465,7 +465,7 @@
                                           </div>
                                           
                                           <!-- Source tooltip that appears on hover -->
-                                          <div class="tooltip fixed opacity-0 pointer-events-none bg-white text-gray-800 p-3 rounded shadow-md text-sm z-20 max-w-full whitespace-normal border border-gray-100" 
+                                          <div class="tooltip fixed opacity-0 pointer-events-none text-gray-800 p-3 rounded shadow-md text-sm z-20 max-w-full whitespace-normal border border-gray-100" 
                                                id={`tooltip-${messageIndex}-${sourceIndex}`}
                                                role="tooltip"
                                                aria-hidden="true">
@@ -570,9 +570,9 @@
         {/each}
       </div>
       <!-- Chat Input -->
-      <div class="fixed bottom-0 left-0 right-0 flex justify-center bg-white z-10 opacity-95">
+      <div class="bottom-0 left-0 right-0 flex justify-center z-10 opacity-95">
         <div class="w-full max-w-3xl p-4 pt-0">
-          <div class="relative rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+          <div class="relative bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
             <textarea
               bind:value={userQuery}
               placeholder="Ask me anything..."
