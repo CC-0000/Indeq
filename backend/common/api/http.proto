@@ -4,6 +4,8 @@ option go_package = "github.com/cc-0000/indeq/common/api";
 
 package api;
 
+import "api/query.proto";
+
 message HttpHelloResponse {
   string message = 1;
 }
@@ -16,6 +18,34 @@ message HttpQueryRequest {
 message HttpQueryResponse {
   string request_id = 1;
   string conversation_id = 2;
+}
+
+message HttpQueryDeleteConversationRequest {
+  string conversation_id = 1;
+}
+
+message HttpQueryDeleteConversationResponse {
+}
+
+message HttpQueryGetConversationRequest {
+  string conversation_id = 1;
+}
+
+message HttpConversation {
+  string title = 1;
+  string conversation_id = 2;
+  repeated QueryMessage full_messages = 3;
+}
+
+message HttpQueryGetConversationResponse {
+  HttpConversation conversation = 1;
+}
+
+message HttpQueryGetAllConversationsRequest {
+}
+
+message HttpQueryGetAllConversationsResponse {
+  repeated QueryConversationHeader conversation_headers = 1;
 }
 
 message HttpRegisterRequest {

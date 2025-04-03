@@ -6,6 +6,10 @@ package api;
 
 service QueryService {
     rpc MakeQuery(QueryRequest) returns (QueryResponse);
+    rpc StartNewConversation(StartNewConversationRequest) returns (StartNewConversationResponse);
+    rpc GetAllConversations(QueryGetAllConversationsRequest) returns (QueryGetAllConversationsResponse);
+    rpc GetConversation(QueryGetConversationRequest) returns (QueryGetConversationResponse);
+    rpc DeleteConversation(QueryDeleteConversationRequest) returns (QueryDeleteConversationResponse);
 }
 
 message QueryRequest {
@@ -17,9 +21,46 @@ message QueryRequest {
 
 message QueryResponse {}
 
+message StartNewConversationRequest {
+    string user_id = 1;
+    string query = 2;
+}
+
+message StartNewConversationResponse {
+    string conversation_id = 1;
+}
+
+
+message QueryGetAllConversationsRequest {
+    string user_id = 1;
+}
+
+message QueryGetAllConversationsResponse {
+    repeated QueryConversationHeader conversation_headers = 1;
+}
+
+message QueryGetConversationRequest {
+    string user_id = 1;
+    string conversation_id = 2;
+}
+
+message QueryGetConversationResponse {
+	QueryConversation conversation = 1;
+}
+
+message QueryDeleteConversationRequest {
+	string user_id = 1;
+	string conversation_id = 2;
+}
+
+message QueryDeleteConversationResponse {}
+
+
+/* general use */
+
 message QueryTokenMessage {
-    string type = 1;
-    string token = 2;
+	string type = 1;
+	string token = 2;
 }
 
 message QuerySourceMessage {
@@ -42,5 +83,16 @@ message QueryMessage {
 
 message QueryConversation {
     string conversation_id = 1;
-    repeated QueryMessage messages = 2;
+    string title = 2;
+    repeated QueryMessage summarized_messages = 3;
+    repeated QueryMessage full_messages = 4;
+}
+
+message QueryConversationHeader {
+    string title = 1;
+    string conversation_id = 2;
+}
+
+message QueryOwnershipMapping {
+    repeated QueryConversationHeader conversation_headers = 1;
 }
