@@ -1,5 +1,28 @@
-import { fail, type Actions } from "@sveltejs/kit";
+import type { Actions } from "@sveltejs/kit";
+import type { PageServerLoad } from "./$types";
+import { fail, redirect } from "@sveltejs/kit";
 import { GO_BACKEND_URL } from "$env/static/private";
+
+export const load: PageServerLoad = async ({ url, cookies }) => {
+  const type = url.searchParams.get('type');
+
+  if (!type || !['register', 'forgot'].includes(type)) {
+    throw redirect(303, '/register');
+  }
+
+  const pendingRegister = cookies.get('pendingRegister');
+  const pendingReset = cookies.get('pendingReset');
+
+  if (type === 'register' && !pendingRegister) {
+    throw redirect(303, '/register');
+  }
+
+  if (type === 'forgot' && !pendingReset) {
+    throw redirect(303, '/forgot-password');
+  }
+
+  return { context: type };
+};
 
 export const actions: Actions = {
   default: async ({ request, cookies }) => {
@@ -11,6 +34,7 @@ export const actions: Actions = {
     if (!type || typeof type !== 'string') {
       return fail(400, { error: 'Missing or invalid type' });
     }
+
 
     if (resend === 'true') {
       const resendRes = await fetch(`${GO_BACKEND_URL}/api/resend-otp`, {

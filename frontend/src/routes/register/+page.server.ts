@@ -109,7 +109,7 @@ export const actions = {
         secure: true,
         path: '/',
         sameSite: 'lax',
-        maxAge: 60 * 10 // 10 minutes
+        maxAge: 60 * 5 // 5 minutes
       }
     );
 

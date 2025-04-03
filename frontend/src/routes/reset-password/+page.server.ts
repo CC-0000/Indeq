@@ -1,5 +1,17 @@
-import { fail, redirect, type Actions } from '@sveltejs/kit';
-import { GO_BACKEND_URL } from '$env/static/private';
+import type { Actions } from "@sveltejs/kit";
+import type { PageServerLoad } from "./$types";
+import { fail, redirect } from "@sveltejs/kit";
+import { GO_BACKEND_URL } from "$env/static/private";
+
+export const load: PageServerLoad = async ({ cookies }) => {
+  const pendingReset = cookies.get('pendingReset');
+
+  if (!pendingReset) {
+    throw redirect(303, '/forgot-password');
+  }
+
+  return { context: 'reset' };
+};
 
 export const actions: Actions = {
   default: async ({ request, cookies }) => {
