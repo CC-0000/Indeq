@@ -69,6 +69,7 @@ message QuerySourceMessage {
     string title = 3;
     string extension = 4;
     string file_path = 5;
+    string file_url = 6;
 }
 
 // this is a giant block of text either from the model or from the user

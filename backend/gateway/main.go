@@ -937,7 +937,7 @@ func main() {
 	mux.HandleFunc("POST /api/query", authMiddleware(handlePostQueryGenerator(serviceClients), serviceClients))
 	mux.HandleFunc("GET /api/query", authMiddleware(handleGetQueryGenerator(serviceClients), serviceClients))
 	mux.HandleFunc("POST /api/delete_conversation", authMiddleware(handleDeleteConversation(serviceClients), serviceClients))
-	mux.HandleFunc("POST /api/get_all_conversations", authMiddleware(handleGetAllConversationsGenerator(serviceClients), serviceClients))
+	mux.HandleFunc("GET /api/get_all_conversations", authMiddleware(handleGetAllConversationsGenerator(serviceClients), serviceClients))
 	mux.HandleFunc("POST /api/get_conversation_history", authMiddleware(handleGetConversationHistoryGenerator(serviceClients), serviceClients))
 	mux.HandleFunc("POST /api/register", handleRegisterGenerator(serviceClients))
 	mux.HandleFunc("POST /api/login", handleLoginGenerator(serviceClients))

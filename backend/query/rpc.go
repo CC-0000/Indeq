@@ -206,7 +206,7 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 
 	if len(chunksByFilePath) == 0 {
 		fullprompt += "Question: " + req.Query + "\n\n"
-		fullprompt += "Instructions: No relevant excerpts were found. Provide a comprehensive answer to the question above, using the conversation history as context."
+		fullprompt += "Instructions: Provide a comprehensive answer to the question above, using the conversation history as context, as there are no excerpts to use."
 	} else {
 		excerptNumber := 1
 		for _, chunks := range chunksByFilePath {
@@ -292,6 +292,11 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 			Title:         chunks[0].Metadata.Title[:len(chunks[0].Metadata.Title)-len(filepath.Ext(chunks[0].Metadata.FilePath))],
 			Extension:     strings.TrimPrefix(filepath.Ext(chunks[0].Metadata.FilePath), "."),
 			FilePath:      chunks[0].Metadata.FilePath,
+			FileUrl:       chunks[0].Metadata.FileUrl,
+		}
+		// TODO: implement the correct file extension for google sourced documents
+		if chunks[0].Metadata.Platform == pb.Platform_PLATFORM_GOOGLE {
+			queueSourceMessage.Extension = "Google"
 		}
 		byteMessage, err := json.Marshal(queueSourceMessage)
 		if err != nil {
