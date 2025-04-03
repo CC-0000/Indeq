@@ -4,15 +4,13 @@
   import { Input } from '$lib/components/ui/input/index.js';
   import { Button } from '$lib/components/ui/button/index.js';
   import { toast } from 'svelte-sonner';
-  import { goto } from '$app/navigation';
 
   import { enhance } from '$app/forms';
 
   // Check for success or error in the server response
-  $: if (form?.success) {
-    toast.success('Welcome aboard! 🎉');
-    goto('/chat');
-  }
+  // $: if (form?.success) {
+  //   toast.success('Welcome aboard! 🎉');
+  // }
 
   $: if (form?.error) {
     toast.error(form.error);
