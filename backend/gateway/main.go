@@ -38,6 +38,113 @@ func helloHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(&pb.HttpHelloResponse{Message: "Hello, World!"})
 }
 
+func handleDeleteConversation(clients *ServiceClients) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log.Print("received delete conversation request")
+
+		ctx := r.Context()
+
+		// NOTE: expects authentication middleware to have already verified the token!!!
+		// Grab the token --> userId
+		auth_header := r.Header.Get("Authorization")
+		auth_token := strings.TrimPrefix(auth_header, "Bearer ")
+		verifyRes, _ := clients.authClient.Verify(ctx, &pb.VerifyRequest{
+			Token: auth_token,
+		})
+
+		var deleteConversationRequest pb.QueryDeleteConversationRequest
+		if err := json.NewDecoder(r.Body).Decode(&deleteConversationRequest); err != nil {
+			http.Error(w, "Invalid Formatting", http.StatusBadRequest)
+			return
+		}
+
+		// Delete the conversation from the database
+		_, err := clients.queryClient.DeleteConversation(ctx, &pb.QueryDeleteConversationRequest{
+			UserId:         verifyRes.UserId,
+			ConversationId: deleteConversationRequest.ConversationId,
+		})
+		if err != nil {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func handleGetConversationHistoryGenerator(clients *ServiceClients) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log.Print("received get conversation history request")
+
+		ctx := r.Context()
+
+		// NOTE: expects authentication middleware to have already verified the token!!!
+		// Grab the token --> userId
+		auth_header := r.Header.Get("Authorization")
+		auth_token := strings.TrimPrefix(auth_header, "Bearer ")
+		verifyRes, _ := clients.authClient.Verify(ctx, &pb.VerifyRequest{
+			Token: auth_token,
+		})
+
+		var getConversationRequest pb.HttpQueryGetConversationRequest
+		if err := json.NewDecoder(r.Body).Decode(&getConversationRequest); err != nil {
+			http.Error(w, "Invalid Formatting", http.StatusBadRequest)
+			return
+		}
+
+		// Get the conversation history from the database
+		getConversationResponse, err := clients.queryClient.GetConversation(ctx, &pb.QueryGetConversationRequest{
+			UserId:         verifyRes.UserId,
+			ConversationId: getConversationRequest.ConversationId,
+		})
+		if err != nil {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
+		httpResponse := &pb.HttpQueryGetConversationResponse{
+			Conversation: &pb.HttpConversation{
+				Title:          getConversationResponse.Conversation.Title,
+				ConversationId: getConversationResponse.Conversation.ConversationId,
+				FullMessages:   getConversationResponse.Conversation.FullMessages,
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(httpResponse)
+	}
+}
+
+func handleGetAllConversationsGenerator(clients *ServiceClients) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log.Print("received get all conversations request")
+
+		ctx := r.Context()
+
+		// NOTE: expects authentication middleware to have already verified the token!!!
+		// Grab the token --> userId
+		auth_header := r.Header.Get("Authorization")
+		auth_token := strings.TrimPrefix(auth_header, "Bearer ")
+		verifyRes, _ := clients.authClient.Verify(ctx, &pb.VerifyRequest{
+			Token: auth_token,
+		})
+
+		conversationsRes, err := clients.queryClient.GetAllConversations(ctx, &pb.QueryGetAllConversationsRequest{
+			UserId: verifyRes.UserId,
+		})
+		if err != nil {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
+		httpResponse := &pb.HttpQueryGetAllConversationsResponse{
+			ConversationHeaders: conversationsRes.ConversationHeaders,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(httpResponse)
+	}
+}
+
 func handleGetQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		log.Println("received event stream request")
@@ -175,12 +282,32 @@ func handlePostQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 			return
 		}
 
-		// Generate a new conversation UUID ONLY IF the user did not provide one
+		// check to see if the conversation id exists or create a new one if it doesn't
 		conversationId := queryRequest.ConversationId
-		if len(conversationId) == 0 {
-			conversationId = uuid.New().String()
+		_, err := clients.queryClient.GetConversation(ctx, &pb.QueryGetConversationRequest{
+			UserId:         verifyRes.UserId,
+			ConversationId: queryRequest.ConversationId,
+		})
+		if err != nil {
+			if !strings.Contains(err.Error(), "COULD_NOT_FIND_CONVERSATION") {
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				log.Print("error encountered when checking for conversation: ", err)
+				return
+			} else {
+				// this means we need to create a new conversation
+				startNewConvRes, err := clients.queryClient.StartNewConversation(ctx, &pb.StartNewConversationRequest{
+					UserId: verifyRes.UserId,
+					Query:  queryRequest.Query,
+				})
+				if err != nil {
+					http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+					log.Print("error encountered when starting new conversation: ", err)
+					return
+				}
+
+				conversationId = startNewConvRes.ConversationId
+			}
 		}
-		userHashedConversationId := fmt.Sprintf("%s-%s", verifyRes.UserId, conversationId)
 
 		// Send the query in a goroutine
 		go func() {
@@ -189,7 +316,7 @@ func handlePostQueryGenerator(clients *ServiceClients) http.HandlerFunc {
 			_, err := clients.queryClient.MakeQuery(detachedCtx, &pb.QueryRequest{
 				UserId:         verifyRes.UserId,
 				RequestId:      userHashedRequestId,
-				ConversationId: userHashedConversationId,
+				ConversationId: conversationId,
 				Query:          queryRequest.Query,
 			})
 			if err != nil {
@@ -809,6 +936,9 @@ func main() {
 	mux.HandleFunc("GET /hello", helloHandler)
 	mux.HandleFunc("POST /api/query", authMiddleware(handlePostQueryGenerator(serviceClients), serviceClients))
 	mux.HandleFunc("GET /api/query", authMiddleware(handleGetQueryGenerator(serviceClients), serviceClients))
+	mux.HandleFunc("POST /api/delete_conversation", authMiddleware(handleDeleteConversation(serviceClients), serviceClients))
+	mux.HandleFunc("POST /api/get_all_conversations", authMiddleware(handleGetAllConversationsGenerator(serviceClients), serviceClients))
+	mux.HandleFunc("POST /api/get_conversation_history", authMiddleware(handleGetConversationHistoryGenerator(serviceClients), serviceClients))
 	mux.HandleFunc("POST /api/register", handleRegisterGenerator(serviceClients))
 	mux.HandleFunc("POST /api/login", handleLoginGenerator(serviceClients))
 	mux.HandleFunc("POST /api/verify", handleVerifyGenerator(serviceClients))
