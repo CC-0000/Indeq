@@ -4,7 +4,7 @@
 	import { navigation } from '$lib/config/navigation';
 </script>
 
-<nav class="mt-auto grid gap-1 p-1">
+<nav class={`flex flex-col gap-1 mt-auto ${$sidebarExpanded ? "px-3" : ""}`}>
 	{#each navigation.secondary as item}
 		<NavItem {item} expanded={$sidebarExpanded} />
 	{/each}

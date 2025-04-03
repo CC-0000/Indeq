@@ -12,7 +12,7 @@
 <div class="grid h-screen w-full">
     <!-- Sidebar -->
     <aside class="fixed shadow-md inset-y-0 left-0 z-10 hidden md:flex h-[calc(100%-1rem)] flex-col bg-[#eeefec] backdrop-blur supports-[backdrop-filter]:bg-[#eeefec]/60 mx-2 my-2 rounded-xl"
-        class:w-56={$sidebarExpanded}
+        class:w-72={$sidebarExpanded}
         class:w-[70px]={!$sidebarExpanded}>
         <!-- Header -->
         <div class="flex items-center justify-between">
@@ -63,6 +63,7 @@
         </nav>
         <!-- Secondary navigation -->
         <SidebarSecondary/>
+        <hr class="border-t border-gray-300 mx-3 mt-1"/>
         <SidebarFooter/>
     </aside>
     <!--Menubar-->

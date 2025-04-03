@@ -11,7 +11,7 @@
 	  { id: "chat-3", title: "I dont know what this typing is doing but did you see the double the the" },
 	];
 </script>
-  
+
 <nav class={`flex flex-col gap-1 pt-2 ${$sidebarExpanded ? "px-3" : ""}`}>
 	{#each navigation.main as item}
 		<NavItem {item} expanded={$sidebarExpanded} />
