@@ -1,8 +1,8 @@
 export const Routes = {
     chat: "/chat",
-    profileAccount: "/settings/profile",
-    profileIntegration: "/settings/integration",
-    profileSettings: "/settings/account",
+    profileAccount: "/profile/account",
+    profileIntegration: "/profile/integration",
+    profileSettings: "/profile/settings",
   } as const;
   
   export type ValidRoute = (typeof Routes)[keyof typeof Routes];

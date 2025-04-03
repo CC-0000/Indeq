@@ -16,8 +16,8 @@
 {#if expanded}
   <Button
     href={item.url}
-    variant={isActive ? "link" : "ghost"}
-    class="w-full justify-start gap-2"
+    variant={"ghost"}
+    class={`w-full justify-start gap-2 rounded-xl hover:bg-[#e6e4e3] ${isActive ? "bg-[#e6e4e3]" : ""}`}
     aria-label={item.label}
   >
     <svelte:component this={item.icon} class="size-5"/>
@@ -28,13 +28,13 @@
     <Tooltip.Trigger asChild let:builder>
       <Button
         href={item.url}
-        variant={isActive ? "link" : "ghost"}
+        variant={"ghost"}
         size="default"
-        class="rounded-lg"
+        class="rounded-full hover:bg-[#e6e4e3]"
         aria-label={item.label}
         builders={[builder]}
       >
-        <svelte:component this={item.icon} class="size-6" />
+        <svelte:component this={item.icon} class="size-5" />
       </Button>
     </Tooltip.Trigger>
     <Tooltip.Content side="right" sideOffset={5}>{item.label}</Tooltip.Content>

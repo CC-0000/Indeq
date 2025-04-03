@@ -11,28 +11,29 @@
 
 <div class="grid h-screen w-full">
     <!-- Sidebar -->
-    <aside class="fixed inset-y-0 left-0 z-10 hidden md:flex h-full flex-col border-r bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60"
+    <aside class="fixed shadow-md inset-y-0 left-0 z-10 hidden md:flex h-[calc(100%-1rem)] flex-col bg-[#eeefec] backdrop-blur supports-[backdrop-filter]:bg-[#eeefec]/60 mx-2 my-2 rounded-xl"
         class:w-56={$sidebarExpanded}
         class:w-[70px]={!$sidebarExpanded}>
         <!-- Header -->
-        <div class="flex items-center justify-between border-b border-b-grey-200/40">
+        <div class="flex items-center justify-between">
             <div class="flex items-center gap-2 w-full h-full">
                 <a href="/chat" 
-                   class="w-full h-full hover:bg-accent/50 hover:text-accent-foreground rounded-md transition-colors flex items-center"
+                   class="w-full h-full rounded-md flex items-center"
                    aria-label="Home"
                 >
-                    <div class="flex items-center gap-2 px-1 py-1">
+                    <div class="flex items-center gap-2 py-2 pl-4">
                         <img src="/logo-transparent-large.svg" 
                              alt="Indeq Logo" 
-                             class={"h-14 w-14"}
+                             class={"h-9 w-9"}
                         />
                         {#if $sidebarExpanded}
-                            <span class="text-2xl font-sm">Indeq</span>
+                            <span class="text-lg font-medium">Indeq</span>
                         {/if}
                     </div>
                 </a>
             </div>
         </div>
+        <hr class="border-t border-gray-300 mx-3"/>
         <!-- Main navigation -->
         <SidebarMain />
         <nav class="absolute right-0 top-0 h-full translate-x-1/2">
@@ -43,7 +44,7 @@
                             variant="ghost" 
                             size="icon"
                             on:click={toggleSidebar}
-                            class="rounded-lg bg-background/95 border shadow-sm" 
+                            class="rounded-lg bg-[#eeefec] border shadow-sm" 
                             aria-label={$sidebarExpanded ? "Collapse sidebar" : "Expand sidebar"}
                             builders={[builder]}
                         >

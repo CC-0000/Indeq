@@ -12,7 +12,7 @@
 	];
 </script>
   
-<nav class="grid gap-1 px-2 pt-4">
+<nav class={`flex flex-col gap-1 pt-2 ${$sidebarExpanded ? "px-3" : ""}`}>
 	{#each navigation.main as item}
 		<NavItem {item} expanded={$sidebarExpanded} />
 	{/each}

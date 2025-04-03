@@ -294,7 +294,7 @@
       </p>
 
       <!-- Search Input -->
-      <div class="flex flex-col gap-3 p-3 bg-gray-50 rounded-lg relative">
+      <div class="flex flex-col gap-3 p-3 bg-white rounded-lg relative">
         <textarea
           bind:value={userQuery}
           placeholder="Ask me anything..."
