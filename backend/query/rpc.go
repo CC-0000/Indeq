@@ -182,7 +182,6 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 		Ttl:            uint32(ttlVal),
 	})
 	if err != nil {
-		// TODO: don't error out and instead let the llm know that you were unable to find information
 		topKChunksResponse = &pb.RetrieveTopKChunksResponse{
 			TopKChunks: []*pb.TextChunkMessage{},
 		}
@@ -205,22 +204,27 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 	// assemble the full prompt from the chunks and the query
 	var fullprompt string = ""
 
-	excerptNumber := 1
-	for _, chunks := range chunksByFilePath {
-		fullprompt += fmt.Sprintf("Excerpt %d:\n", excerptNumber)
-		fullprompt += fmt.Sprintf("Title: %s\n", chunks[0].Metadata.Title)
-		fullprompt += fmt.Sprintf("Folder: %s\n", filepath.Dir(chunks[0].Metadata.FilePath))
-		fullprompt += fmt.Sprintf("Date Modified: %s\n\n", chunks[0].Metadata.DateLastModified.AsTime().Format("2006-01-02 15:04:05"))
+	if len(chunksByFilePath) == 0 {
+		fullprompt += "Question: " + req.Query + "\n\n"
+		fullprompt += "Instructions: No relevant excerpts were found. Provide a comprehensive answer to the question above, using the conversation history as context."
+	} else {
+		excerptNumber := 1
+		for _, chunks := range chunksByFilePath {
+			fullprompt += fmt.Sprintf("Excerpt %d:\n", excerptNumber)
+			fullprompt += fmt.Sprintf("Title: %s\n", chunks[0].Metadata.Title)
+			fullprompt += fmt.Sprintf("Folder: %s\n", filepath.Dir(chunks[0].Metadata.FilePath))
+			fullprompt += fmt.Sprintf("Date Modified: %s\n\n", chunks[0].Metadata.DateLastModified.AsTime().Format("2006-01-02 15:04:05"))
 
-		for _, chunk := range chunks {
-			content := chunk.Content
-			fullprompt += fmt.Sprintf("Content: %s\n\n", content)
+			for _, chunk := range chunks {
+				content := chunk.Content
+				fullprompt += fmt.Sprintf("Content: %s\n\n", content)
+			}
+			excerptNumber++
 		}
-		excerptNumber++
-	}
 
-	fullprompt += "Question: " + req.Query + "\n\n"
-	fullprompt += "Instructions: Provide a comprehensive answer to the question above, using the given excerpts plus the conversation history if necessary, but falling back to your expert general knowledge if the excerpts are insufficient. Cite sources using the <Excerpt number> (with angle brackets!) of the document."
+		fullprompt += "Question: " + req.Query + "\n\n"
+		fullprompt += "Instructions: Provide a comprehensive answer to the question above, using the given excerpts plus the conversation history if necessary, but falling back to your expert general knowledge if the excerpts are insufficient. Cite sources using the <Excerpt number> (with angle brackets!) of the document."
+	}
 
 	// TODO: add the option to use more than 1 model
 
@@ -276,7 +280,7 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 	}
 
 	// send the sources first
-	excerptNumber = 1
+	excerptNumber := 1
 	for _, chunks := range chunksByFilePath {
 		// create a QueueSourceMessage for each file group
 		if len(chunks) == 0 {
