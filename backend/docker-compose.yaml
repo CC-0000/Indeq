@@ -1,18 +1,4 @@
 services:
-  # this docker ollama setup doesn't utilize the GPU
-  ollama:
-    image: ollama/ollama:latest
-    container_name: ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_models:/root/.ollama
-    environment:
-      - OLLAMA_NUM_PARALLEL=4 # Number of threads to utilize
-    mem_limit: 16g
-    networks:
-      - indeq-net
-
   rabbitmq:
     image: rabbitmq:4.0-management
     container_name: rabbitmq
@@ -257,7 +243,6 @@ services:
 
 volumes:
   app_data:
-  ollama_models:
   embedding_data:
   redis_data:
   couch_data:
