@@ -1,18 +1,4 @@
 services:
-  # this docker ollama setup doesn't utilize the GPU
-  ollama:
-    image: ollama/ollama:latest
-    container_name: ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_models:/root/.ollama
-    environment:
-      - OLLAMA_NUM_PARALLEL=4 # Number of threads to utilize
-    mem_limit: 16g
-    networks:
-      - indeq-net
-
   rabbitmq:
     image: rabbitmq:4.0-management
     container_name: rabbitmq
@@ -53,6 +39,8 @@ services:
     restart: "no"
     depends_on:
       kafka:
+        condition: service_healthy
+      couchdb:
         condition: service_healthy
     networks:
       - indeq-net
@@ -133,6 +121,8 @@ services:
         condition: service_healthy
       authentication:
         condition: service_started
+      desktop:
+        condition: service_started
       init:
         condition: service_completed_successfully
     networks:
@@ -160,6 +150,18 @@ services:
       dockerfile: query/Dockerfile
     depends_on:
       rabbitmq:
+        condition: service_healthy
+    networks:
+      - indeq-net
+  crawling:
+    image: crawling-service
+    build:
+      context: .
+      dockerfile: crawling/Dockerfile
+    env_file:
+      - ./common/config/.env
+    depends_on:
+      appDB:
         condition: service_healthy
     networks:
       - indeq-net
@@ -223,12 +225,27 @@ services:
       - app_data:/var/lib/postgresql/data
     networks:
       - indeq-net
+  
+  couchdb:
+    image: couchdb
+    env_file:
+      - ./common/config/.env
+    restart: always
+    volumes:
+      - couch_data:/opt/couchdb/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl --silent --fail http://localhost:5984 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - indeq-net
 
 volumes:
   app_data:
-  ollama_models:
   embedding_data:
   redis_data:
+  couch_data:
 
 networks:
   indeq-net:

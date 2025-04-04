@@ -1,5 +1,5 @@
 <script>
-  import { Button } from '$lib/components/ui/button/index.js';
+  import { Button } from '$lib/components/ui/button';
   export let company = 'Fill';
   export let isIntegrated = false;
 

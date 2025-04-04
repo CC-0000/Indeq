@@ -4,3 +4,4 @@ grpcio
 grpcio-tools
 protobuf
 python-dotenv
+torch

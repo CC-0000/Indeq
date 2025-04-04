@@ -1,74 +1,76 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net"
-	"os"
-	"bytes"
-	"net/url"
-    "encoding/json"
-	"encoding/base64"
-	"errors"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 	"time"
 
 	pb "github.com/cc-0000/indeq/common/api"
 	"github.com/cc-0000/indeq/common/config"
+	"github.com/cc-0000/indeq/common/redis"
 	_ "github.com/lib/pq"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-	"github.com/cc-0000/indeq/common/redis"
 )
 
 type integrationServer struct {
-    pb.UnimplementedIntegrationServiceServer
-    db *sql.DB // integration database
-	redisClient *redis.RedisClient
+	pb.UnimplementedIntegrationServiceServer
+	crawlingConn    *grpc.ClientConn
+	crawlingService pb.CrawlingServiceClient
+	db              *sql.DB // integration database
+	redisClient     *redis.RedisClient
 }
 
 // TokenResponse represents the OAuth token response from our providers
 type TokenResponse struct {
-	AccessToken string `json:"access_token"`
-	RefreshToken string `json:"refresh_token,omitempty"`
-	ExpiresIn int `json:"expires_in"`
-	TokenType string `json:"token_type"`
-	Scope string `json:"scope"`
-	ExpiresAt time.Time `json:"-"`
-	RequiresRefresh bool `json:"-"`
+	AccessToken     string    `json:"access_token"`
+	RefreshToken    string    `json:"refresh_token,omitempty"`
+	ExpiresIn       int       `json:"expires_in"`
+	TokenType       string    `json:"token_type"`
+	Scope           string    `json:"scope"`
+	ExpiresAt       time.Time `json:"-"`
+	RequiresRefresh bool      `json:"-"`
 }
 
 // OAuthProviderConfig represents the token exchange and refresh
 type OAuthProviderConfig struct {
-	TokenURL string
-	ClientID string
+	TokenURL     string
+	ClientID     string
 	ClientSecret string
-	RedirectURI string
+	RedirectURI  string
 }
 
 type OAuthToken struct {
-    UserID               string
-    Provider             string
-    EncryptedRefreshToken string
-    ExpiresAt            time.Time
-    RequiresRefresh      bool
+	UserID                string
+	Provider              string
+	EncryptedRefreshToken string
+	ExpiresAt             time.Time
+	RequiresRefresh       bool
 }
 
 type RefreshedToken struct {
-    UserID          string
-    Provider        string
-    AccessToken     string
-    RefreshToken    string
+	UserID          string
+	Provider        string
+	AccessToken     string
+	RefreshToken    string
 	OldRefreshToken string
-    ExpiresAt       time.Time
-    RequiresRefresh bool
+	ExpiresAt       time.Time
+	RequiresRefresh bool
 }
 
 // OAuth provider configurations
@@ -106,24 +108,24 @@ func ExchangeAuthCodeForToken(provider string, authCode string) (*TokenResponse,
 
 	if provider == "NOTION" {
 		authHeader := "Basic " + base64.StdEncoding.EncodeToString(
-			[]byte(config.ClientID + ":" + config.ClientSecret))
-		
+			[]byte(config.ClientID+":"+config.ClientSecret))
+
 		data := map[string]string{
-			"grant_type": "authorization_code",
-			"code": authCode,
+			"grant_type":   "authorization_code",
+			"code":         authCode,
 			"redirect_uri": config.RedirectURI,
 		}
-		
+
 		jsonData, err := json.Marshal(data)
 		if err != nil {
 			return nil, err
 		}
-		
+
 		req, err = http.NewRequest("POST", config.TokenURL, bytes.NewBuffer(jsonData))
 		if err != nil {
 			return nil, err
 		}
-		
+
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", authHeader)
 	} else {
@@ -144,7 +146,7 @@ func ExchangeAuthCodeForToken(provider string, authCode string) (*TokenResponse,
 		return nil, err
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("failed to exchange auth code: %s", resp.Status)
 	}
@@ -164,7 +166,7 @@ func ExchangeAuthCodeForToken(provider string, authCode string) (*TokenResponse,
 
 func Encrypt(plaintext string) (string, error) {
 	base64Key := os.Getenv("ENCRYPTION_KEY")
-	
+
 	if base64Key == "" {
 		return "", fmt.Errorf("ENCRYPTION_KEY is not set")
 	}
@@ -203,7 +205,7 @@ func Decrypt(ciphertext string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to decode encryption key: %v", err)
 	}
-	
+
 	decodedCiphertext, err := base64.StdEncoding.DecodeString(ciphertext)
 	if err != nil {
 		return "", fmt.Errorf("failed to decode ciphertext: %v", err)
@@ -361,22 +363,22 @@ func refreshAllExpiredTokens(db *sql.DB) error {
 		}
 
 		refreshedTokens = append(refreshedTokens, RefreshedToken{
-			UserID: token.UserID,
-			Provider: token.Provider,
-			AccessToken: encryptedAccessToken,
-			RefreshToken: encryptedRefreshToken,
+			UserID:          token.UserID,
+			Provider:        token.Provider,
+			AccessToken:     encryptedAccessToken,
+			RefreshToken:    encryptedRefreshToken,
 			OldRefreshToken: token.EncryptedRefreshToken,
-			ExpiresAt: tokenData.ExpiresAt,
+			ExpiresAt:       tokenData.ExpiresAt,
 			RequiresRefresh: tokenData.RequiresRefresh,
 		})
 	}
-	
+
 	// perform all updates in one transaction
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %v", err)
 	}
-	
+
 	// commit or rollback in a deferred function
 	defer func() {
 		if p := recover(); p != nil {
@@ -417,7 +419,7 @@ func refreshAllExpiredTokens(db *sql.DB) error {
 		)
 		if err != nil {
 			log.Printf("Error updating token for user %s: %v", token.UserID, err)
-			return fmt.Errorf("error updating token for user %s: %v", token.UserID, err) 
+			return fmt.Errorf("error updating token for user %s: %v", token.UserID, err)
 		}
 
 		if token.RefreshToken != token.OldRefreshToken {
@@ -460,7 +462,7 @@ func (s *integrationServer) GetOAuthURL(ctx context.Context, req *pb.GetOAuthURL
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert provider to string: %v", err)
 	}
-	
+
 	state, err := generateState(providerStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate state: %v", err)
@@ -515,7 +517,7 @@ func (s *integrationServer) GetIntegrations(ctx context.Context, req *pb.GetInte
 		if err := rows.Scan(&provider); err != nil {
 			return nil, fmt.Errorf("failed to scan provider: %v", err)
 		}
-		
+
 		switch provider {
 		case "GOOGLE":
 			providersSet[pb.Provider_GOOGLE] = true
@@ -540,17 +542,17 @@ func (s *integrationServer) ConnectIntegration(ctx context.Context, req *pb.Conn
 	providerStr, err := enumToString(req.Provider)
 	if err != nil {
 		return &pb.ConnectIntegrationResponse{
-			Success: false,
-			Message: fmt.Sprintf("Failed to convert provider to string: %v", err),
+			Success:      false,
+			Message:      fmt.Sprintf("Failed to convert provider to string: %v", err),
 			ErrorDetails: err.Error(),
 		}, nil
 	}
-	
+
 	tokenRes, err := ExchangeAuthCodeForToken(providerStr, req.AuthCode)
 	if err != nil {
 		return &pb.ConnectIntegrationResponse{
-			Success: false,
-			Message: fmt.Sprintf("Failed to exchange auth code: %v", err),
+			Success:      false,
+			Message:      fmt.Sprintf("Failed to exchange auth code: %v", err),
 			ErrorDetails: err.Error(),
 		}, nil
 	}
@@ -558,8 +560,8 @@ func (s *integrationServer) ConnectIntegration(ctx context.Context, req *pb.Conn
 	encryptedAccessToken, err := Encrypt(tokenRes.AccessToken)
 	if err != nil {
 		return &pb.ConnectIntegrationResponse{
-			Success: false,
-			Message: fmt.Sprintf("Failed to encrypt access token: %v", err),
+			Success:      false,
+			Message:      fmt.Sprintf("Failed to encrypt access token: %v", err),
 			ErrorDetails: err.Error(),
 		}, nil
 	}
@@ -567,8 +569,8 @@ func (s *integrationServer) ConnectIntegration(ctx context.Context, req *pb.Conn
 	encryptedRefreshToken, err := Encrypt(tokenRes.RefreshToken)
 	if err != nil {
 		return &pb.ConnectIntegrationResponse{
-			Success: false,
-			Message: fmt.Sprintf("Failed to encrypt refresh token: %v", err),
+			Success:      false,
+			Message:      fmt.Sprintf("Failed to encrypt refresh token: %v", err),
 			ErrorDetails: err.Error(),
 		}, nil
 	}
@@ -594,11 +596,24 @@ func (s *integrationServer) ConnectIntegration(ctx context.Context, req *pb.Conn
 
 	if err != nil {
 		return &pb.ConnectIntegrationResponse{
-			Success: false,
-			Message: fmt.Sprintf("Database error saving token: %v", err),
+			Success:      false,
+			Message:      fmt.Sprintf("Database error saving token: %v", err),
 			ErrorDetails: err.Error(),
 		}, nil
 	}
+
+	go func() {
+		bgCtx := context.Background()
+		crawlerReq := &pb.StartInitalCrawlerRequest{
+			UserId:      req.UserId,
+			Platform:    providerStr,
+			AccessToken: tokenRes.AccessToken,
+		}
+		_, err = s.crawlingService.StartInitialCrawler(bgCtx, crawlerReq)
+		if err != nil {
+			log.Printf("Failed to start initial crawler: %v", err)
+		}
+	}()
 
 	return &pb.ConnectIntegrationResponse{
 		Success: true,
@@ -645,6 +660,14 @@ func (s *integrationServer) DisconnectIntegration(ctx context.Context, req *pb.D
 		}, nil
 	}
 
+	_, err = s.crawlingService.DeleteCrawlerData(ctx, &pb.DeleteCrawlerDataRequest{
+		UserId:   req.UserId,
+		Platform: providerStr,
+	})
+	if err != nil {
+		log.Printf("Failed to delete crawler data: %v", err)
+	}
+
 	return &pb.DisconnectIntegrationResponse{
 		Success: true,
 		Message: "Integration disconnected successfully",
@@ -655,43 +678,115 @@ func (s *integrationServer) ValidateOAuthState(ctx context.Context, req *pb.Vali
 	userId, err := s.redisClient.ValidateOAuthState(ctx, req.State)
 	if err != nil {
 		return &pb.ValidateOAuthStateResponse{
-			Success: false,
+			Success:      false,
 			ErrorDetails: err.Error(),
 		}, nil
 	}
 
 	return &pb.ValidateOAuthStateResponse{
 		Success: true,
-		UserId: userId,
+		UserId:  userId,
+	}, nil
+}
+
+func (s *integrationServer) GetAccessToken(ctx context.Context, req *pb.GetAccessTokenRequest) (*pb.GetAccessTokenResponse, error) {
+	providerStr, err := enumToString(req.Platform)
+	if err != nil {
+		return &pb.GetAccessTokenResponse{
+			Success:      false,
+			Message:      fmt.Sprintf("Failed to convert provider to string: %v", err),
+			ErrorDetails: err.Error(),
+		}, nil
+	}
+
+	// Query the database to get the encrypted access token
+	var encryptedAccessToken string
+	err = s.db.QueryRowContext(ctx, `
+		SELECT access_token
+		FROM oauth_tokens
+		WHERE user_id = $1 AND provider = $2
+	`, req.UserId, providerStr).Scan(&encryptedAccessToken)
+
+	if err == sql.ErrNoRows {
+		return &pb.GetAccessTokenResponse{
+			Success:      false,
+			Message:      "No access token found for the given user and provider",
+			ErrorDetails: "Not found",
+		}, nil
+	} else if err != nil {
+		return &pb.GetAccessTokenResponse{
+			Success:      false,
+			Message:      fmt.Sprintf("Database error retrieving token: %v", err),
+			ErrorDetails: err.Error(),
+		}, nil
+	}
+
+	// Decrypt the access token
+	decryptedAccessToken, err := Decrypt(encryptedAccessToken)
+	if err != nil {
+		return &pb.GetAccessTokenResponse{
+			Success:      false,
+			Message:      fmt.Sprintf("Failed to decrypt access token: %v", err),
+			ErrorDetails: err.Error(),
+		}, nil
+	}
+
+	return &pb.GetAccessTokenResponse{
+		Success:     true,
+		AccessToken: decryptedAccessToken,
+		Message:     "Access token retrieved successfully",
 	}, nil
 }
 
 func main() {
-    log.Println("Starting the integration server...")
-    
-    // Load all environmetal variables
+	log.Println("Starting the integration server...")
 
-    dbURL := os.Getenv("DATABASE_URL")
-    if dbURL == "" {
-        log.Fatalf("DATABASE_URL envionment variable is required")
-    }
+	// Load all environmetal variables
+
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		log.Fatalf("DATABASE_URL envionment variable is required")
+	}
 
 	// Load the TLS configuration values
 	tlsConfig, err := config.LoadServerTLSFromEnv("INTEGRATION_CRT", "INTEGRATION_KEY")
 	if err != nil {
 		log.Fatal("Error loading TLS config for integration service")
 	}
-    
-    // Connect to db
-    db, err := sql.Open("postgres", dbURL)
-    if err != nil {
-        log.Fatalf("Failed to connect to database: %v", err)
-    }
-    defer db.Close()
 
-    ctx, cancel := context.WithTimeout(context.Background(), 10 * time.Second)
-    defer cancel()
-    _, err = db.ExecContext(ctx, `
+	// Load the TLS configuration values for crawling service
+	crawlingTLSConfig, err := config.LoadClientTLSFromEnv("CRAWLING_CRT", "CRAWLING_KEY", "CA_CRT")
+	if err != nil {
+		log.Fatal("Error loading TLS client config for crawling service")
+	}
+
+	// Connect to crawling service
+	crawlingAddress := os.Getenv("CRAWLING_ADDRESS")
+	if crawlingAddress == "" {
+		log.Fatalf("CRAWLING_ADDRESS environment variable is required")
+	}
+
+	crawlingConn, err := grpc.NewClient(
+		crawlingAddress,
+		grpc.WithTransportCredentials(credentials.NewTLS(crawlingTLSConfig)),
+	)
+	if err != nil {
+		log.Fatalf("Failed to connect to crawling service: %v", err)
+	}
+	defer crawlingConn.Close()
+
+	crawlingService := pb.NewCrawlingServiceClient(crawlingConn)
+
+	// Connect to db
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		log.Fatalf("Failed to connect to database: %v", err)
+	}
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, err = db.ExecContext(ctx, `
         CREATE TABLE IF NOT EXISTS oauth_tokens (
             id SERIAL PRIMARY KEY,
             user_id UUID NOT NULL,
@@ -706,9 +801,9 @@ func main() {
         );
     `)
 
-    if err != nil {
-        log.Fatalf("Failed to create oauth_tokens table: %v", err)
-    }
+	if err != nil {
+		log.Fatalf("Failed to create oauth_tokens table: %v", err)
+	}
 
 	_, err = db.ExecContext(ctx, `
 		CREATE INDEX IF NOT EXISTS user_provider_idx ON oauth_tokens (user_id, provider);
@@ -717,22 +812,22 @@ func main() {
 		log.Fatalf("Failed to create user_provider index: %v", err)
 	}
 
-    fmt.Println("Database setup completed: oauth_tokens table is ready.")
+	fmt.Println("Database setup completed: oauth_tokens table is ready.")
 	startTokenRefreshWorker(db)
-    
-    // Pull in GRPC address
-    grpcAddress := os.Getenv("INTEGRATION_PORT")
-    if grpcAddress == "" {
-        log.Fatalf("INTEGRATION_PORT environment variable is required")
-    }
 
-    listener, err := net.Listen("tcp", grpcAddress)
-    if err != nil {
-        log.Fatalf("Failed to listen: %v", err)
-    }
-    defer listener.Close()
+	// Pull in GRPC address
+	grpcAddress := os.Getenv("INTEGRATION_PORT")
+	if grpcAddress == "" {
+		log.Fatalf("INTEGRATION_PORT environment variable is required")
+	}
 
-    log.Println("Creating the integration server")
+	listener, err := net.Listen("tcp", grpcAddress)
+	if err != nil {
+		log.Fatalf("Failed to listen: %v", err)
+	}
+	defer listener.Close()
+
+	log.Println("Creating the integration server")
 
 	opts := []grpc.ServerOption{
 		grpc.Creds(credentials.NewTLS(tlsConfig)),
@@ -745,11 +840,16 @@ func main() {
 	defer redisClient.Client.Close()
 
 	grpcServer := grpc.NewServer(opts...)
-	pb.RegisterIntegrationServiceServer(grpcServer, &integrationServer{db: db, redisClient: redisClient})
-    log.Printf("Integration Service listening on %v\n", listener.Addr())
-    if err := grpcServer.Serve(listener); err != nil {
-        log.Fatalf("Failed to serve: %v", err)
-    } else {
-        log.Printf("Integration Service served on %v\n", listener.Addr())
-    }
+	pb.RegisterIntegrationServiceServer(grpcServer, &integrationServer{
+		db:              db,
+		redisClient:     redisClient,
+		crawlingConn:    crawlingConn,
+		crawlingService: crawlingService,
+	})
+	log.Printf("Integration Service listening on %v\n", listener.Addr())
+	if err := grpcServer.Serve(listener); err != nil {
+		log.Fatalf("Failed to serve: %v", err)
+	} else {
+		log.Printf("Integration Service served on %v\n", listener.Addr())
+	}
 }

@@ -33,7 +33,7 @@ Here you will find all the necessary information for developers to install and s
    - For other software, just search up "_how to add a trusted CA certificate in <software_of_choice>_"
 5. Run `docker-compose up --build` to run the services in docker containers
 6. Run `docker-compose down` to spin down your containers afterwards (optionally use the `-v` flag to clear all databases and data)
-7. Run `docker exec <container_name> ollama pull <model_name>` to download and set up the model (you should only need to do this once). The default should be `docker exec ollama ollama pull deepseek-r1:1.5b` and `docker exec ollama ollama pull nomic-embed-text`
+7. Run `docker exec <container_name> ollama pull <model_name>` to download and set up the model (you should only need to do this once). The default should be `docker exec ollama ollama pull qwen2.5:1.5b` and `docker exec ollama ollama pull nomic-embed-text` (WE ARE CURRENTLY NOT USING OLLAMA IN FAVOR OF FASTER CLOUD APIs)
 
 #### New Services
 

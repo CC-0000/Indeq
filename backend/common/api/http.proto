@@ -4,16 +4,48 @@ option go_package = "github.com/cc-0000/indeq/common/api";
 
 package api;
 
+import "api/query.proto";
+
 message HttpHelloResponse {
   string message = 1;
 }
 
 message HttpQueryRequest {
   string query = 1;
+  string conversation_id = 2; // optional --> this will be blank if the user is creating a new conversation
 }
 
 message HttpQueryResponse {
+  string request_id = 1;
+  string conversation_id = 2;
+}
+
+message HttpQueryDeleteConversationRequest {
   string conversation_id = 1;
+}
+
+message HttpQueryDeleteConversationResponse {
+}
+
+message HttpQueryGetConversationRequest {
+  string conversation_id = 1;
+}
+
+message HttpConversation {
+  string title = 1;
+  string conversation_id = 2;
+  repeated QueryMessage full_messages = 3;
+}
+
+message HttpQueryGetConversationResponse {
+  HttpConversation conversation = 1;
+}
+
+message HttpQueryGetAllConversationsRequest {
+}
+
+message HttpQueryGetAllConversationsResponse {
+  repeated QueryConversationHeader conversation_headers = 1;
 }
 
 message HttpRegisterRequest {
@@ -97,4 +129,14 @@ message HttpAddToWaitlistRequest {
 message HttpAddToWaitlistResponse {
   bool success = 1;
   string message = 2;
+}
+
+message HttpGetDesktopStatsRequest {
+}
+
+message HttpGetDesktopStatsResponse {
+  int32 crawled_files = 1;
+  int32 total_files = 2;
+  bool is_crawling = 3;
+  bool is_online = 4;
 }

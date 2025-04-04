@@ -6,6 +6,7 @@ package embedding;
 
 service EmbeddingService {
   rpc GenerateEmbeddings (EmbeddingRequest) returns (EmbeddingResponse);
+  rpc RerankPassages (RerankingRequest) returns (RerankingResponse) {}
   rpc HealthCheck (HealthCheckRequest) returns (HealthCheckResponse);
 }
 
@@ -15,6 +16,15 @@ message EmbeddingRequest {
 
 message EmbeddingResponse {
   repeated bytes embeddings = 1;
+}
+
+message RerankingRequest {
+  string query = 1;
+  repeated string passages = 2;
+}
+
+message RerankingResponse {
+  repeated float scores = 1;
 }
 
 message HealthCheckRequest {}

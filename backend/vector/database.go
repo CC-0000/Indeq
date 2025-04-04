@@ -29,10 +29,15 @@ func (s *vectorServer) insertRows(ctx context.Context, textChunkMessages []*pb.T
 	var dateModifiedValues []int64
 	var filePaths []string
 	var userIDs []string
+	var resourceTypes []string
 	var starts []int64
 	var ends []int64
+	var chunkIds []string
 	var titles []string
 	var platforms []int8
+	var services []string
+	var fileIds []string
+	var fileUrls []string
 	dimension, err := strconv.Atoi(os.Getenv("VECTOR_DIMENSION"))
 	if err != nil {
 		return err
@@ -52,8 +57,13 @@ func (s *vectorServer) insertRows(ctx context.Context, textChunkMessages []*pb.T
 		userIDs = append(userIDs, textChunkMessage.Metadata.UserId)
 		starts = append(starts, int64(textChunkMessage.Metadata.Start))
 		ends = append(ends, int64(textChunkMessage.Metadata.End))
+		chunkIds = append(chunkIds, textChunkMessage.Metadata.ChunkId)
+		resourceTypes = append(resourceTypes, textChunkMessage.Metadata.ResourceType)
 		titles = append(titles, textChunkMessage.Metadata.Title)
 		platforms = append(platforms, int8(textChunkMessage.Metadata.Platform))
+		services = append(services, textChunkMessage.Metadata.Service)
+		fileIds = append(fileIds, textChunkMessage.Metadata.FileId)
+		fileUrls = append(fileUrls, textChunkMessage.Metadata.FileUrl)
 	}
 
 	_, err = s.milvusClient.Insert(ctx,
@@ -61,12 +71,17 @@ func (s *vectorServer) insertRows(ctx context.Context, textChunkMessages []*pb.T
 		"",
 		entity.NewColumnInt64("date_created", dateCreatedValues),
 		entity.NewColumnInt64("date_modified", dateModifiedValues),
+		entity.NewColumnVarChar("resource_type", resourceTypes),
 		entity.NewColumnVarChar("file_path", filePaths),
 		entity.NewColumnVarChar("user_id", userIDs),
 		entity.NewColumnInt64("start", starts),
 		entity.NewColumnInt64("end", ends),
 		entity.NewColumnVarChar("title", titles),
+		entity.NewColumnVarChar("chunk_id", chunkIds),
 		entity.NewColumnInt8("platform", platforms),
+		entity.NewColumnVarChar("file_id", fileIds),
+		entity.NewColumnVarChar("service", services),
+		entity.NewColumnVarChar("file_url", fileUrls),
 		entity.NewColumnBinaryVector("vector", dimension, embeddings),
 	)
 	if err != nil {
@@ -102,12 +117,17 @@ func (s *vectorServer) setupCollection(ctx context.Context, collectionName strin
 	idField := entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true).WithIsAutoID(true)
 	dateCreatedField := entity.NewField().WithName("date_created").WithDataType(entity.FieldTypeInt64)
 	dateLastModifiedField := entity.NewField().WithName("date_modified").WithDataType(entity.FieldTypeInt64)
+	resourceTypeField := entity.NewField().WithName("resource_type").WithDataType(entity.FieldTypeVarChar).WithTypeParams(entity.TypeParamMaxLength, "255")
 	userIdField := entity.NewField().WithName("user_id").WithDataType(entity.FieldTypeVarChar).WithTypeParams(entity.TypeParamMaxLength, "255")
 	filePathField := entity.NewField().WithName("file_path").WithDataType(entity.FieldTypeVarChar).WithTypeParams(entity.TypeParamMaxLength, "255")
 	chunkStartField := entity.NewField().WithName("start").WithDataType(entity.FieldTypeInt64)
 	chunkEndField := entity.NewField().WithName("end").WithDataType(entity.FieldTypeInt64)
+	chunkIdField := entity.NewField().WithName("chunk_id").WithDataType(entity.FieldTypeVarChar).WithTypeParams(entity.TypeParamMaxLength, "255")
 	titleField := entity.NewField().WithName("title").WithDataType(entity.FieldTypeVarChar).WithTypeParams(entity.TypeParamMaxLength, "255")
+	serviceField := entity.NewField().WithName("service").WithDataType(entity.FieldTypeVarChar).WithTypeParams(entity.TypeParamMaxLength, "255")
 	platformField := entity.NewField().WithName("platform").WithDataType(entity.FieldTypeInt8)
+	fileIdField := entity.NewField().WithName("file_id").WithDataType(entity.FieldTypeVarChar).WithTypeParams(entity.TypeParamMaxLength, "255")
+	fileUrlField := entity.NewField().WithName("file_url").WithDataType(entity.FieldTypeVarChar).WithTypeParams(entity.TypeParamMaxLength, "255")
 	// create a binary vector field
 	vector := entity.NewField().WithName("vector").WithDataType(entity.FieldTypeBinaryVector).WithDim(int64(dimension))
 
@@ -117,10 +137,15 @@ func (s *vectorServer) setupCollection(ctx context.Context, collectionName strin
 		WithField(dateLastModifiedField).
 		WithField(userIdField).
 		WithField(filePathField).
+		WithField(resourceTypeField).
 		WithField(chunkStartField).
 		WithField(chunkEndField).
+		WithField(chunkIdField).
 		WithField(titleField).
 		WithField(platformField).
+		WithField(fileIdField).
+		WithField(serviceField).
+		WithField(fileUrlField).
 		WithField(vector)
 
 	// create the collection
