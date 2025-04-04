@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"sort"
 	"strconv"
+	"sync"
 	"syscall"
 
 	pb "github.com/cc-0000/indeq/common/api"
@@ -64,36 +65,66 @@ func (s *retrievalServer) RetrieveTopKChunks(ctx context.Context, req *pb.Retrie
 			topKNotionResults = append(topKNotionResults, metadata)
 		}
 	}
+
+	// Get Desktop chunks and Google chunks concurrently
 	var desktopChunkResponse *pb.GetChunksFromUserResponse
-	// Only try to get desktop chunks if we have results and connection is ready
-	if len(topKDesktopResults) > 0 {
-		desktopChunkResponse, err = s.desktopClient.GetChunksFromUser(ctx, &pb.GetChunksFromUserRequest{
-			UserId:    req.UserId,
-			Metadatas: topKDesktopResults,
-			Ttl:       req.Ttl,
-		})
-		if err != nil {
-			// Continue with empty desktop results instead of failing completely
+	var googleChunkResponse *pb.GetChunksFromGoogleResponse
+
+	// Create a WaitGroup to synchronize the goroutines
+	var wg sync.WaitGroup
+
+	// Start both operations in separate goroutines
+	wg.Add(2)
+
+	// Desktop chunks goroutine
+	go func() {
+		defer wg.Done()
+		if len(topKDesktopResults) > 0 {
+			// only get desktop chunks if we have results and the user is online
+			var localErr error
+			crawlStats, localErr := s.desktopClient.GetCrawlStats(ctx, &pb.GetCrawlStatsRequest{
+				UserId: req.UserId,
+			})
+			if localErr != nil {
+				desktopChunkResponse = &pb.GetChunksFromUserResponse{Chunks: []*pb.TextChunkMessage{}}
+			} else if crawlStats.IsOnline {
+				desktopChunkResponse, localErr = s.desktopClient.GetChunksFromUser(ctx, &pb.GetChunksFromUserRequest{
+					UserId:    req.UserId,
+					Metadatas: topKDesktopResults,
+					Ttl:       req.Ttl,
+				})
+				if localErr != nil {
+					// Continue with empty desktop results instead of failing completely
+					desktopChunkResponse = &pb.GetChunksFromUserResponse{Chunks: []*pb.TextChunkMessage{}}
+				}
+			} else {
+				desktopChunkResponse = &pb.GetChunksFromUserResponse{Chunks: []*pb.TextChunkMessage{}}
+			}
+		} else {
 			desktopChunkResponse = &pb.GetChunksFromUserResponse{Chunks: []*pb.TextChunkMessage{}}
 		}
-	} else {
-		desktopChunkResponse = &pb.GetChunksFromUserResponse{Chunks: []*pb.TextChunkMessage{}}
-	}
+	}()
 
-	// Get Google chunks
-	var googleChunkResponse *pb.GetChunksFromGoogleResponse
-	if len(topKGoogleResults) > 0 {
-		googleChunkResponse, err = s.crawlingClient.GetChunksFromGoogle(ctx, &pb.GetChunksFromGoogleRequest{
-			UserId:    req.UserId,
-			Metadatas: topKGoogleResults,
-			Ttl:       req.Ttl,
-		})
-		if err != nil {
+	// Google chunks goroutine
+	go func() {
+		defer wg.Done()
+		if len(topKGoogleResults) > 0 {
+			var localErr error
+			googleChunkResponse, localErr = s.crawlingClient.GetChunksFromGoogle(ctx, &pb.GetChunksFromGoogleRequest{
+				UserId:    req.UserId,
+				Metadatas: topKGoogleResults,
+				Ttl:       req.Ttl,
+			})
+			if localErr != nil {
+				googleChunkResponse = &pb.GetChunksFromGoogleResponse{Chunks: []*pb.TextChunkMessage{}}
+			}
+		} else {
 			googleChunkResponse = &pb.GetChunksFromGoogleResponse{Chunks: []*pb.TextChunkMessage{}}
 		}
-	} else {
-		googleChunkResponse = &pb.GetChunksFromGoogleResponse{Chunks: []*pb.TextChunkMessage{}}
-	}
+	}()
+
+	// Wait for both operations to complete
+	wg.Wait()
 
 	var notionChunkResponse *pb.GetChunksFromNotionResponse
 	if len(topKGoogleResults) > 0 {
@@ -121,8 +152,13 @@ func (s *retrievalServer) RetrieveTopKChunks(ctx context.Context, req *pb.Retrie
 	}
 
 	// rerank the results by first getting the scores
+	if len(topKChunks) == 0 {
+		return &pb.RetrieveTopKChunksResponse{
+			TopKChunks: []*pb.TextChunkMessage{},
+		}, nil
+	}
 	scores, err := s.embeddingClient.RerankPassages(ctx, &pb.RerankingRequest{
-		Query: req.Prompt,
+		Query: req.ExpandedPrompt,
 		Passages: func() []string {
 			var passages []string
 			for _, chunk := range topKChunks {

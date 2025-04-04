@@ -6,6 +6,7 @@ replace github.com/cc-0000/indeq/common => ../common
 
 require (
 	github.com/cc-0000/indeq/common v0.0.0-00010101000000-000000000000
+	github.com/go-kivik/kivik/v4 v4.3.3
 	github.com/google/generative-ai-go v0.19.0
 	github.com/rabbitmq/amqp091-go v1.10.0
 	google.golang.org/api v0.228.0
@@ -34,7 +35,7 @@ require (
 	go.opentelemetry.io/otel/metric v1.34.0 // indirect
 	go.opentelemetry.io/otel/trace v1.34.0 // indirect
 	golang.org/x/crypto v0.36.0 // indirect
-	golang.org/x/net v0.37.0 // indirect
+	golang.org/x/net v0.38.0 // indirect
 	golang.org/x/oauth2 v0.28.0 // indirect
 	golang.org/x/sync v0.12.0 // indirect
 	golang.org/x/sys v0.31.0 // indirect

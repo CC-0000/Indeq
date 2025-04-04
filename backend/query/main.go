@@ -3,18 +3,14 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net"
+	"syscall"
 
 	"os"
 	"os/signal"
-	"path/filepath"
-	"sort"
 	"strconv"
-	"strings"
-	"syscall"
 
 	pb "github.com/cc-0000/indeq/common/api"
 	"github.com/cc-0000/indeq/common/config"
@@ -23,313 +19,27 @@ import (
 	"google.golang.org/grpc/credentials"
 
 	"github.com/google/generative-ai-go/genai"
-	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
+
+	kivik "github.com/go-kivik/kivik/v4"
+	_ "github.com/go-kivik/kivik/v4/couchdb"
 )
 
 type queryServer struct {
 	pb.UnimplementedQueryServiceServer
-	rabbitMQConn           *amqp.Connection
-	retrievalConn          *grpc.ClientConn
-	retrievalService       pb.RetrievalServiceClient
-	queueTTL               int
-	geminiClient           *genai.Client
-	geminiFlash2ModelHeavy *genai.GenerativeModel
-	geminiFlash2ModelLight *genai.GenerativeModel
-}
-
-type QueueTokenMessage struct {
-	Type  string `json:"type"`
-	Token string `json:"token"`
-}
-
-type QueueSourceMessage struct {
-	Type          string `json:"type"`
-	ExcerptNumber int    `json:"excerpt_number"`
-	Title         string `json:"title"`
-	Extension     string `json:"extension"`
-	FilePath      string `json:"file_path"`
-}
-
-// func(context, rabbitmq channel, queue to send message to, byte encoded message of some json)
-//   - sends the byte message to the given queue name
-//   - assumes: the rabbitmq channel is open and the byte encoded message is from json
-func (s *queryServer) sendToQueue(ctx context.Context, channel *amqp.Channel, queueName string, byteMessage []byte) error {
-	err := channel.PublishWithContext(
-		ctx,
-		"",        // exchange
-		queueName, // routing key
-		false,     // mandatory
-		false,     // immediate
-		amqp.Publishing{
-			ContentType: "application/json",
-			Body:        byteMessage,
-		},
-	)
-	if err != nil {
-		return fmt.Errorf("failed to publish message: %w", err)
-	}
-	return nil
-}
-
-// func(context, query to expand)
-//   - takes in a query and returns the expanded query that ideally contains better keywords for search
-//   - can be set to return the original query if the env variable QUERY_EXPANSION is set to false
-func (s *queryServer) expandQuery(ctx context.Context, query string) (string, error) {
-	if os.Getenv("QUERY_EXPANSION") == "false" {
-		return query, nil
-	}
-
-	fullprompt := "IMPORTANT: Do NOT answer the query directly. Your task is ONLY to expand and rephrase the query into search terms.\n\n" +
-		"Instructions:\n" +
-		"1. Analyze the user query below\n" +
-		"2. Generate 3-5 alternative phrasings, related concepts, and key terms that would be useful for searching documents\n" +
-		"3. Format your response ONLY as a list of search terms and phrases\n" +
-		"4. Do NOT provide explanations or direct answers to the query\n\n" +
-		"User Query: {" + query + "}\n\n" +
-		"Search Terms:"
-
-	session := s.geminiFlash2ModelHeavy.StartChat()
-	session.History = []*genai.Content{}
-
-	resp, err := session.SendMessage(ctx, genai.Text(fullprompt))
-	if err != nil {
-		return query, fmt.Errorf("failed to send message to google gemini: %w", err)
-	}
-	var messageText string
-	if len(resp.Candidates) > 0 && len(resp.Candidates[0].Content.Parts) > 0 {
-		if textPart, ok := resp.Candidates[0].Content.Parts[0].(genai.Text); ok {
-			messageText = string(textPart)
-		}
-	}
-
-	return messageText, nil
-}
-
-// rpc(context, query request)
-//   - takes in a query for a given user
-//   - fetches the top k chunks relevant to the query and passes that context to the llm
-//   - streams the response back to a rabbitMQ queue {conversation_id}
-//   - assumes: you have set the variable s.queueTTL
-func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.QueryResponse, error) {
-	// get the number of sources and ttl from env
-	kVal, err := strconv.ParseInt(os.Getenv("QUERY_NUMBER_OF_SOURCES"), 10, 32)
-	if err != nil {
-		return &pb.QueryResponse{}, fmt.Errorf("failed to retrieve the number_of_sources env variable: %w", err)
-	}
-	ttlVal, err := strconv.ParseUint(os.Getenv("QUERY_TTL"), 10, 32)
-	if err != nil {
-		return &pb.QueryResponse{}, fmt.Errorf("failed to retrieve the ttl env variable: %w", err)
-	}
-
-	// TODO: implement function calling for better filtering (dates, titles, etc.)
-	// TODO: implement query conversion for better searching
-
-	expandedQuery, err := s.expandQuery(ctx, req.Query)
-	if err != nil {
-		return &pb.QueryResponse{}, fmt.Errorf("failed to expand query: %w", err)
-	}
-	log.Print("got the expanded query: ", expandedQuery)
-
-	// fetch context associated with the query
-	topKChunksResponse, err := s.retrievalService.RetrieveTopKChunks(ctx, &pb.RetrieveTopKChunksRequest{
-		UserId:         req.UserId,
-		Prompt:         req.Query,
-		ExpandedPrompt: expandedQuery,
-		K:              int32(kVal),
-		Ttl:            uint32(ttlVal),
-	})
-	if err != nil {
-		// TODO: don't error out and instead let the llm know that you were unable to find information
-		topKChunksResponse = &pb.RetrieveTopKChunksResponse{
-			TopKChunks: []*pb.TextChunkMessage{},
-		}
-	}
-
-	// Group chunks by file path
-	chunksByFilePath := make(map[string][]*pb.TextChunkMessage)
-	for _, chunk := range topKChunksResponse.TopKChunks {
-		filePath := chunk.Metadata.FilePath
-		chunksByFilePath[filePath] = append(chunksByFilePath[filePath], chunk)
-	}
-
-	for filePath, chunks := range chunksByFilePath {
-		sort.Slice(chunks, func(i, j int) bool {
-			return chunks[i].Metadata.Start < chunks[j].Metadata.Start
-		})
-		chunksByFilePath[filePath] = chunks
-	}
-
-	// assemble the full prompt from the chunks and the query
-	var fullprompt string = "Below are relevant excerpts from user documents. Use this information to answer the question that follows. If the information provided is not sufficient, use your general knowledge but prioritize the given context. Always cite sources when using specific information from the excerpts.\n\n"
-
-	excerptNumber := 1
-	for _, chunks := range chunksByFilePath {
-		fullprompt += fmt.Sprintf("Excerpt %d:\n", excerptNumber)
-		fullprompt += fmt.Sprintf("Title: %s\n", chunks[0].Metadata.Title)
-		fullprompt += fmt.Sprintf("Folder: %s\n", filepath.Dir(chunks[0].Metadata.FilePath))
-		fullprompt += fmt.Sprintf("Date Modified: %s\n\n", chunks[0].Metadata.DateLastModified.AsTime().Format("2006-01-02 15:04:05"))
-
-		for _, chunk := range chunks {
-			content := chunk.Content
-			fullprompt += fmt.Sprintf("Content: %s\n\n", content)
-		}
-		excerptNumber++
-	}
-
-	fullprompt += "Question: " + req.Query + "\n\n"
-	fullprompt += "Instructions: Provide a comprehensive answer to the question above, using the given excerpts as your primary source of information. Cite sources using the title of the document. If the excerpts don't contain relevant information, state this and provide an answer based on your general knowledge."
-
-	// use the following to debug quality and size of context retrieved:
-	// log.Print("the number of characters in the full prompt is: ", len(fullprompt))
-	// log.Print(fullprompt)
-
-	// TODO: add the option to use more than 1 model
-
-	// start a gemini session
-	session := s.geminiFlash2ModelHeavy.StartChat()
-	session.History = []*genai.Content{} // TODO: implement chat history
-
-	// count the number of tokens in the prompt
-	resp, err := s.geminiFlash2ModelHeavy.CountTokens(ctx, genai.Text(fullprompt))
-	if err != nil {
-		log.Fatalf("Error counting tokens for the prompt: %v", err)
-	}
-	log.Printf("Number of tokens for the prompt: %d\n", resp.TotalTokens)
-
-	// send the message to the llm
-	iter := session.SendMessageStream(ctx, genai.Text(fullprompt))
-
-	// Create a rabbitmq channel to stream the response
-	channel, err := s.rabbitMQConn.Channel()
-	if err != nil {
-		return &pb.QueryResponse{}, fmt.Errorf("failed to create rabbitmq channel: %w", err)
-	}
-	defer channel.Close()
-
-	// Create notification channels for when the client closes the channel --> cancel the context
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	notifyClose := channel.NotifyClose(make(chan *amqp.Error, 1))
-	notifyCancel := channel.NotifyCancel(make(chan string, 1))
-	go func(cancel context.CancelFunc) {
-		select {
-		case <-notifyClose:
-			cancel()
-		case <-notifyCancel:
-			cancel()
-		case <-ctx.Done():
-			return
-		}
-	}(cancel)
-
-	// create a rabbitmq queue to stream tokens to
-	queue, err := channel.QueueDeclare(
-		req.ConversationId, // queue name
-		false,              // durable
-		true,               // delete when unused
-		false,              // exclusive
-		false,              // no-wait
-		amqp.Table{ // arguments
-			"x-expires": s.queueTTL,
-		},
-	)
-	if err != nil {
-		return &pb.QueryResponse{}, fmt.Errorf("failed to create queue: %w", err)
-	}
-
-	// send the sources first
-	excerptNumber = 1
-	for _, chunks := range chunksByFilePath {
-		// create a QueueSourceMessage for each file group
-		if len(chunks) == 0 {
-			continue
-		}
-		queueSourceMessage := QueueSourceMessage{
-			Type:          "source",
-			ExcerptNumber: excerptNumber,
-			Title:         chunks[0].Metadata.Title[:len(chunks[0].Metadata.Title)-len(filepath.Ext(chunks[0].Metadata.FilePath))],
-			Extension:     strings.TrimPrefix(filepath.Ext(chunks[0].Metadata.FilePath), "."),
-			FilePath:      chunks[0].Metadata.FilePath,
-		}
-		byteMessage, err := json.Marshal(queueSourceMessage)
-		if err != nil {
-			return &pb.QueryResponse{}, fmt.Errorf("failed to marshal source message: %w", err)
-		}
-
-		if err = s.sendToQueue(ctx, channel, queue.Name, byteMessage); err != nil {
-			return &pb.QueryResponse{}, fmt.Errorf("failed to publish message: %w", err)
-		}
-		excerptNumber++
-	}
-
-	// send the tokens
-	for {
-		resp, err := iter.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return &pb.QueryResponse{}, fmt.Errorf("error streaming response from gemini: %w", err)
-		}
-
-		// Print each chunk as it arrives
-		for _, candidate := range resp.Candidates {
-			for _, part := range candidate.Content.Parts {
-				select {
-				case <-ctx.Done():
-					return &pb.QueryResponse{}, fmt.Errorf("early abort due to context cancellation")
-				default:
-					// check if the queue still exists
-					_, err := channel.QueueDeclarePassive(
-						req.ConversationId, // queue name
-						false,              // durable
-						true,               // delete when unused
-						false,              // exclusive
-						false,              // no-wait
-						amqp.Table{ // arguments
-							"x-expires": s.queueTTL, // 5 minutes in milliseconds
-						},
-					)
-					if err != nil {
-						break // stop processing
-					}
-
-					// create our token type
-					queueTokenMessage := QueueTokenMessage{
-						Type:  "token",
-						Token: fmt.Sprintf("%v", part),
-					}
-					byteMessage, err := json.Marshal(queueTokenMessage)
-					if err != nil {
-						log.Printf("Error marshalling token message: %v", err)
-						continue
-					}
-
-					err = s.sendToQueue(ctx, channel, queue.Name, byteMessage)
-					if err != nil {
-						log.Printf("Error publishing message: %v", err)
-						continue
-					}
-				}
-			}
-		}
-	}
-
-	// send the end token
-	endMessage := &QueueTokenMessage{
-		Type:  "end",
-		Token: "",
-	}
-	byteMessage, err := json.Marshal(endMessage)
-	if err != nil {
-		return &pb.QueryResponse{}, fmt.Errorf("error marshalling token message: %w", err)
-	}
-	if err = s.sendToQueue(ctx, channel, queue.Name, byteMessage); err != nil {
-		return &pb.QueryResponse{}, fmt.Errorf("error publishing message: %w", err)
-	}
-
-	return &pb.QueryResponse{}, nil
+	rabbitMQConn                   *amqp.Connection
+	retrievalConn                  *grpc.ClientConn
+	retrievalService               pb.RetrievalServiceClient
+	queueTTL                       int
+	summaryUpperBound              int
+	summaryLowerBound              int
+	geminiClient                   *genai.Client
+	geminiFlash2ModelHeavy         *genai.GenerativeModel
+	geminiFlash2ModelLight         *genai.GenerativeModel
+	geminiFlash2ModelSummarization *genai.GenerativeModel
+	couchdbClient                  *kivik.Client
+	conversationsDB                *kivik.DB
+	ownershipDB                    *kivik.DB
 }
 
 // func(client TLS config)
@@ -423,6 +133,18 @@ func (s *queryServer) connectToGoogleGemini() {
 		log.Fatalf("failed to retrieve the gemini api key")
 	}
 
+	summaryUpperBound, err := strconv.ParseInt(os.Getenv("QUERY_SUMMARY_UPPER_BOUND"), 10, 64)
+	if err != nil {
+		log.Fatalf("failed to retrieve the query summary upper bound: %v", err)
+	}
+	s.summaryUpperBound = int(summaryUpperBound)
+
+	summaryLowerBound, err := strconv.ParseInt(os.Getenv("QUERY_SUMMARY_LOWER_BOUND"), 10, 64)
+	if err != nil {
+		log.Fatalf("failed to retrieve the query summary lower bound: %v", err)
+	}
+	s.summaryLowerBound = int(summaryLowerBound)
+
 	client, err := genai.NewClient(ctx, option.WithAPIKey(geminiApikey))
 	if err != nil {
 		log.Fatalf("Error creating client: %v", err)
@@ -433,23 +155,123 @@ func (s *queryServer) connectToGoogleGemini() {
 	heavyModel.SetTemperature(1)
 	heavyModel.SetTopK(1)
 	heavyModel.SetTopP(0.95)
-	heavyModel.SetMaxOutputTokens(8000)
+	heavyModel.SetMaxOutputTokens(8196)
 	heavyModel.ResponseMIMEType = "text/plain"
+	systemPrompt := "You are a very helpful assistant called Indeq with knowledge on virtually every single topic. You will ALWAYS find the best answer to the user's query, even if you're missing information from excerpts. Use the conversation history, and any provided excerpts to augment your general knowledge and then answer the question that follows. Always cite sources using the <number_of_excerpt_in_question> (with angle brackets!) when using specific information from the excerpts.\n\n"
+	heavyModel.SystemInstruction = &genai.Content{
+		Parts: []genai.Part{
+			genai.Text(systemPrompt),
+		},
+	}
 	s.geminiFlash2ModelHeavy = heavyModel
 
 	lightModel := client.GenerativeModel("gemini-2.0-flash-lite")
 	lightModel.SetTemperature(1)
 	lightModel.SetTopK(1)
 	lightModel.SetTopP(0.95)
-	lightModel.SetMaxOutputTokens(100)
+	lightModel.SetMaxOutputTokens(200)
 	lightModel.ResponseMIMEType = "text/plain"
+	systemPrompt = "IMPORTANT: Do NOT answer the query directly. Your task is ONLY to expand and rephrase the query into search terms.\n\n" +
+		"Instructions:\n" +
+		"1. Analyze the user query\n" +
+		"2. Generate 3-5 alternative phrasings, related concepts, and key terms that would be useful for searching documents\n" +
+		"3. Format your response ONLY as a list of search terms and phrases\n" +
+		"4. Do NOT provide explanations or direct answers to the query\n\n"
+
+	lightModel.SystemInstruction = &genai.Content{
+		Parts: []genai.Part{
+			genai.Text(systemPrompt),
+		},
+	}
 	s.geminiFlash2ModelLight = lightModel
+
+	summarizationModel := client.GenerativeModel("gemini-2.0-flash-lite")
+	summarizationModel.SetTemperature(0.3)
+	summarizationModel.SetTopK(1)
+	summarizationModel.SetTopP(0.95)
+	summarizationModel.SetMaxOutputTokens(1024)
+	summarizationModel.ResponseMIMEType = "text/plain"
+	systemPrompt = "You are an expert at creating concise summaries of conversations between a human (referred to as the user) and an AI assistant called Indeq.\n\n" +
+		"When told to summarize, follow these guidelines:\n" +
+		"1. Focus on capturing the key points, questions, and information exchanged.\n" +
+		"2. Extract the main topics, questions, and information from the conversation.\n" +
+		"3. Identify any decisions made or conclusions reached.\n" +
+		"4. Maintain factual accuracy while condensing the exchange.\n" +
+		"5. Summarize in third person (e.g., 'The user asked about X, and Indeq explained Y').\n" +
+		"6. Be brief but comprehensive, highlighting the most important information.\n" +
+		"7. Exclude pleasantries, acknowledgments, and other non-essential dialogue.\n" +
+		"8. The summary should be significantly shorter than the original conversation while preserving the essential context needed for understanding the interaction.\n\n"
+
+	summarizationModel.SystemInstruction = &genai.Content{
+		Parts: []genai.Part{
+			genai.Text(systemPrompt),
+		},
+	}
+	s.geminiFlash2ModelSummarization = summarizationModel
+}
+
+// func()
+//   - connects to the couchdb database
+//   - assumes: you will call couchdbClient.Close() in the parent function at some point
+//   - assumes: you will call conversationsDB.Close() in the parent function at some point
+func (s *queryServer) connectToCouchDB(ctx context.Context) {
+	// retrieve env credentials
+	couchdbUser, ok := os.LookupEnv("COUCHDB_USER")
+	if !ok {
+		log.Fatalf("failed to retrieve the couchdb user")
+	}
+	couchdbPassword, ok := os.LookupEnv("COUCHDB_PASSWORD")
+	if !ok {
+		log.Fatalf("failed to retrieve the couchdb password")
+	}
+	couchdbAddress, ok := os.LookupEnv("COUCHDB_ADDRESS")
+	if !ok {
+		log.Fatalf("failed to retrieve the couchdb address")
+	}
+	conversationDBName := "conversations"
+	ownershipDBName := "ownership"
+
+	// connect to couchdb
+	client, err := kivik.New("couch", fmt.Sprintf("http://%s:%s@%s/", couchdbUser, couchdbPassword, couchdbAddress))
+	if err != nil {
+		log.Fatalf("failed to connect to couchdb: %v", err)
+	}
+	s.couchdbClient = client
+
+	// Create or get a database
+	exists, err := client.DBExists(ctx, conversationDBName)
+	if err != nil {
+		log.Fatalf("failed to check if database exists: %v", err)
+	} else if !exists {
+		// Database doesn't exist, create it
+		if err := client.CreateDB(ctx, conversationDBName); err != nil {
+			log.Fatalf("failed to create couchdb database: %v", err)
+		}
+	}
+
+	s.conversationsDB = client.DB(conversationDBName)
+
+	// Create or get a database
+	exists, err = client.DBExists(ctx, ownershipDBName)
+	if err != nil {
+		log.Fatalf("failed to check if database exists: %v", err)
+	} else if !exists {
+		// Database doesn't exist, create it
+		if err := client.CreateDB(ctx, ownershipDBName); err != nil {
+			log.Fatalf("failed to create couchdb database: %v", err)
+		}
+	}
+
+	s.ownershipDB = client.DB(ownershipDBName)
 }
 
 func main() {
 	// graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	// Load the .env file
 	err := config.LoadSharedConfig()
@@ -482,6 +304,11 @@ func main() {
 	// Connect to google gemini
 	server.connectToGoogleGemini()
 	defer server.geminiClient.Close()
+
+	// Connect to couchdb
+	server.connectToCouchDB(ctx)
+	defer server.couchdbClient.Close()
+	defer server.conversationsDB.Close()
 
 	// listen for shutdown signal
 	<-sigChan // TODO: implement worker groups

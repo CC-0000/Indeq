@@ -9,6 +9,7 @@
     import type { DesktopIntegration } from "$lib/types/desktopIntegration";
 
   let userQuery = '';
+  let requestId: string | null = null;
   let conversationId: string | null = null;
   let isLoading = false;
   const truncateLength = 80;
@@ -39,10 +40,11 @@
   async function query() {
     try {
       isLoading = true;
+
       const res = await fetch('/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: userQuery })
+        body: JSON.stringify({ query: userQuery, conversation_id: conversationId ?? '' })
       });
 
       if (!res.ok) {
@@ -52,9 +54,11 @@
         return;
       }
 
+
         messages = [...messages, { text: userQuery, sender: "user", reasoning: [], reasoningSectionCollapsed: false, sources: [] }];
 
       const data = await res.json();
+      requestId = data.request_id;
       conversationId = data.conversation_id;
 
         messages = [...messages, { text: "", sender: "bot", reasoning: [], reasoningSectionCollapsed: false, sources: [] }];
@@ -77,8 +81,8 @@
   }
 
   function streamResponse() {
-    if (!conversationId) {
-      console.error('No conversationId to stream');
+    if (!requestId) {
+      console.error('No requestId to stream');
       isLoading = false;
       return;
     }
@@ -89,7 +93,7 @@
         isFullscreen = true;
         isReasoning = false;
 
-        const url = `/chat?conversationId=${encodeURIComponent(conversationId)}`;
+        const url = `/chat?requestId=${encodeURIComponent(requestId)}`;
         eventSource = new EventSource(url);
         let botMessage : BotMessage = { 
             text: "", 
