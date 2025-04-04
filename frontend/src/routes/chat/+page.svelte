@@ -54,12 +54,10 @@
         return;
       }
 
-      console.log(res);
 
         messages = [...messages, { text: userQuery, sender: "user", reasoning: [], reasoningSectionCollapsed: false, sources: [] }];
 
       const data = await res.json();
-      console.log(data);
       requestId = data.request_id;
       conversationId = data.conversation_id;
 
