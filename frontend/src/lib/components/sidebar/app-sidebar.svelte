@@ -1,7 +1,7 @@
 <script lang="ts">
     import { Button } from "$lib/components/ui/button";
     import * as Tooltip from "$lib/components/ui/tooltip";
-    import {ChevronsLeftIcon, ChevronsRightIcon} from 'svelte-feather-icons';
+    import {ChevronsLeftIcon, ChevronsRightIcon, SidebarIcon} from 'svelte-feather-icons';
     import SidebarMain from "./sidebar-main.svelte";
     import SidebarSecondary from "./sidebar-secondary.svelte";
     import SidebarFooter from "$lib/components/sidebar/sidebar-footer.svelte";
@@ -32,6 +32,27 @@
                     </div>
                 </a>
             </div>
+            {#if $sidebarExpanded}
+            <div class="pr-3">
+                <Tooltip.Root>
+                    <Tooltip.Trigger asChild let:builder>
+                        <Button
+                            variant="ghost" 
+                            size="icon"
+                            on:click={toggleSidebar}
+                            class="rounded-lg" 
+                            aria-label={$sidebarExpanded ? "Collapse sidebar" : "Expand sidebar"}
+                            builders={[builder]}
+                        >
+                            <SidebarIcon class="size-4"/>
+                        </Button>
+                    </Tooltip.Trigger>
+                    <Tooltip.Content side="right" sideOffset={5}>
+                        {$sidebarExpanded ? "Collapse" : "Expand"}
+                    </Tooltip.Content>
+                </Tooltip.Root>
+            </div>
+            {/if}
         </div>
         <hr class="border-t border-gray-300 mx-3"/>
         <!-- Main navigation -->
@@ -63,7 +84,7 @@
         </nav>
         <!-- Secondary navigation -->
         <SidebarSecondary/>
-        <hr class="border-t border-gray-300 mx-3 mt-1"/>
+        <hr class="border-t border-gray-300 mx-3 mt-2"/>
         <SidebarFooter/>
     </aside>
     <!--Menubar-->
