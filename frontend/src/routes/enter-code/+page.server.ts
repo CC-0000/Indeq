@@ -35,12 +35,17 @@ export const actions: Actions = {
       return fail(400, { error: 'Missing or invalid type' });
     }
 
+    const email = type === 'register' ? cookies.get('pendingRegister') : cookies.get('pendingReset');
+
+    if (!email) {
+      return fail(400, { error: 'Missing or invalid email' });
+    }
 
     if (resend === 'true') {
       const resendRes = await fetch(`${GO_BACKEND_URL}/api/resend-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type })
+        body: JSON.stringify({ type, email })
       });
 
       if (!resendRes.ok) {
@@ -54,7 +59,7 @@ export const actions: Actions = {
     const verifyRes = await fetch(`${GO_BACKEND_URL}/api/verify-otp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code, type })
+      body: JSON.stringify({ code, type, email })
     });
 
     if (!verifyRes.ok) {

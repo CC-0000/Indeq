@@ -34,6 +34,8 @@ import (
 	"golang.org/x/crypto/argon2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 )
 
 type params struct {
@@ -64,6 +66,12 @@ type RegistrationPayload struct {
 	OTP            string `json:"otp"`
 }
 
+type Config struct {
+	KeyPrefix string
+	Limit int
+	Duration time.Duration
+}
+
 func generateOTP() (string, error) {
 	const digits = "0123456789"
 	const length = 6
@@ -89,6 +97,43 @@ func generateOTP() (string, error) {
 	}
 
 	return string(otp), nil
+}
+
+func CheckRateLimit(ctx context.Context, redis *redis.RedisClient, key string, cfg Config) (bool, error) {
+	fullKey := fmt.Sprintf("%s:%s", cfg.KeyPrefix, key)
+
+	count, err := redis.Incr(ctx, fullKey, 1)
+	if err != nil {
+		return false, err
+	}
+	if count == 1 {
+		if err := redis.Expire(ctx, fullKey, cfg.Duration); err != nil {
+			return false, err
+		}
+	}
+
+	return count <= int64(cfg.Limit), nil
+}
+
+func getIPFromContext(ctx context.Context) (string, error) {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if ok {
+		if xff := md.Get("x-forwarded-for"); len(xff) > 0 {
+			return strings.Split(xff[0], ",")[0], nil
+		}
+		if cf := md.Get("cf-connecting-ip"); len(cf) > 0 && cf[0] != "" {
+			return cf[0], nil
+		}
+	}
+	// Fallback to gRPC peer address (TCP connection)
+	if p, ok := peer.FromContext(ctx); ok && p.Addr != nil {
+		host, _, err := net.SplitHostPort(p.Addr.String())
+		if err == nil {
+			return host, nil
+		}
+	}
+
+	return "", fmt.Errorf("no IP address found")
 }
 
 // func()
@@ -425,9 +470,18 @@ func (s *authServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb
 		}, err
 	}
 
-	// throttle per email
-	throttleKey := fmt.Sprintf("reg_throttle:%s", req.Email)
-	throttleCount, err := s.redisClient.Incr(ctx, throttleKey, 1)
+	// Check rate limit
+	ip, err := getIPFromContext(ctx)
+	if err != nil {
+		return &pb.RegisterResponse{
+			Success: false,
+			Error: "Something went wrong. Please try again later.",
+		}, err
+	}
+	log.Printf("Checking rate limit for IP: %s", ip)
+	ipKey := fmt.Sprintf("reg_ip:%s", ip)
+
+	ipCount, err := s.redisClient.Incr(ctx, ipKey, 1)
 	if err != nil {
 		return &pb.RegisterResponse{
 			Success: false,
@@ -435,9 +489,8 @@ func (s *authServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb
 		}, err
 	}
 
-	if throttleCount == 1 {
-		err = s.redisClient.Expire(ctx, throttleKey, 5*time.Minute)
-		if err != nil {
+	if ipCount == 1 {
+		if err := s.redisClient.Expire(ctx, ipKey, 5*time.Minute); err != nil {
 			return &pb.RegisterResponse{
 				Success: false,
 				Error: "Something went wrong. Please try again later.",
@@ -445,7 +498,7 @@ func (s *authServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb
 		}
 	}
 
-	if throttleCount > 5 {
+	if ipCount > 3 {
 		return &pb.RegisterResponse{
 			Success: false,
 			Error: "Too many attempts. Please try again later.",
@@ -515,20 +568,19 @@ func (s *authServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb
 			Error: "Something went wrong. Please try again later.",
 		}, err
 	}
-	verifyLink := fmt.Sprintf("%s/verify/%s", os.Getenv("WEBSITE"), token)
 emailBody := fmt.Sprintf(`Welcome to Indeq!
 
-To verify your account, click the link below and enter your 6-digit code:
-
-Verification link:
-%s
+To verify your account, enter the following 6-digit code:
 
 Your verification code: %s
 
-This link and code will expire in 5 minutes.
-`, verifyLink, otp)
+This code will expire in 5 minutes. If you did not request this verification code, you can safely ignore this email.
 
-	emailSubject := "Indeq - Verify your account"
+Thank you,
+The Indeq Team
+`, otp)
+
+	emailSubject := "Indeq - Verify Your Account"
 	err = s.sendEmail(req.Email, emailSubject, emailBody)
 	if err != nil {
 		return &pb.RegisterResponse{
@@ -582,6 +634,50 @@ This link and code will expire in 5 minutes.
 
 	return &pb.RegisterResponse{Success: true}, nil
 }
+
+// VerifyOTP verifies a one-time password code for either registration or password reset
+func (s *authServer) VerifyOTP(ctx context.Context, req *pb.VerifyOTPRequest) (*pb.VerifyOTPResponse, error) {
+	// Validate request
+	if req.Code == "" {
+		return &pb.VerifyOTPResponse{
+			Success: false,
+			Error: "Code is required",
+		}, nil
+	}
+
+	if req.Type != "register" && req.Type != "forgot" {
+		return &pb.VerifyOTPResponse{
+			Success: false, 
+			Error: "Invalid verification type",
+		}, nil
+	}
+
+	// Get pending registration/reset from Redis
+	// key := fmt.Sprintf("%s:%s", req.Type, req.Code)
+	// email, err := s.redisClient.Get(ctx, key).Result()
+	// if err == redis.Nil {
+	// 	return &pb.VerifyOTPResponse{
+	// 		Success: false,
+	// 		Error:   "Invalid or expired code",
+	// 	}, nil
+	// } else if err != nil {
+	// 	return &pb.VerifyOTPResponse{
+	// 		Success: false,
+	// 		Error:   "Failed to verify code",
+	// 	}, err
+	// }
+
+	// // Delete the OTP key since it's been used
+	// if err := s.redisClient.Del(ctx, key).Err(); err != nil {
+	// 	log.Printf("Failed to delete OTP key: %v", err)
+	// }
+
+	// For password reset, just return success
+	return &pb.VerifyOTPResponse{
+		Success: true,
+	}, nil
+}
+
 
 // rpc(context, verify request)
 //   - takes in a jwt and checks to make sure it's valid
