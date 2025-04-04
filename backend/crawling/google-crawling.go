@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	pb "github.com/cc-0000/indeq/common/api"
+	"golang.org/x/oauth2"
 )
 
 // GoogleCrawler crawls Google services (Drive, Gmail) based on provided scopes.
@@ -218,4 +219,10 @@ func RetrieveGoogleCrawler(ctx context.Context, client *http.Client, metadata Me
 	}
 
 	return TextChunkMessage{}, fmt.Errorf("unsupported service: %s", metadata.Service)
+}
+
+// createOAuthClient creates an OAuth client from an access token
+func createGoogleOAuthClient(ctx context.Context, accessToken string) *http.Client {
+	tokenSource := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: accessToken})
+	return oauth2.NewClient(ctx, tokenSource)
 }

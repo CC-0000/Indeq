@@ -52,6 +52,7 @@ func (s *retrievalServer) RetrieveTopKChunks(ctx context.Context, req *pb.Retrie
 
 	var topKDesktopResults []*pb.Metadata
 	var topKGoogleResults []*pb.Metadata
+	var topKNotionResults []*pb.Metadata
 
 	// Separate chunks by platform
 	for _, metadata := range topKMetadatas.TopKMetadatas {
@@ -59,6 +60,8 @@ func (s *retrievalServer) RetrieveTopKChunks(ctx context.Context, req *pb.Retrie
 			topKDesktopResults = append(topKDesktopResults, metadata)
 		} else if metadata.Platform == pb.Platform_PLATFORM_GOOGLE {
 			topKGoogleResults = append(topKGoogleResults, metadata)
+		} else if metadata.Platform == pb.Platform_PLATFORM_NOTION {
+			topKNotionResults = append(topKNotionResults, metadata)
 		}
 	}
 	var desktopChunkResponse *pb.GetChunksFromUserResponse
@@ -92,12 +95,29 @@ func (s *retrievalServer) RetrieveTopKChunks(ctx context.Context, req *pb.Retrie
 		googleChunkResponse = &pb.GetChunksFromGoogleResponse{Chunks: []*pb.TextChunkMessage{}}
 	}
 
+	var notionChunkResponse *pb.GetChunksFromNotionResponse
+	if len(topKGoogleResults) > 0 {
+		notionChunkResponse, err = s.crawlingClient.GetChunksFromNotion(ctx, &pb.GetChunksFromNotionRequest{
+			UserId:    req.UserId,
+			Metadatas: topKNotionResults,
+			Ttl:       req.Ttl,
+		})
+		if err != nil {
+			notionChunkResponse = &pb.GetChunksFromNotionResponse{Chunks: []*pb.TextChunkMessage{}}
+		}
+	} else {
+		notionChunkResponse = &pb.GetChunksFromNotionResponse{Chunks: []*pb.TextChunkMessage{}}
+	}
+
 	var topKChunks []*pb.TextChunkMessage
 	if desktopChunkResponse.Chunks != nil {
 		topKChunks = append(topKChunks, desktopChunkResponse.Chunks...)
 	}
 	if googleChunkResponse.Chunks != nil {
 		topKChunks = append(topKChunks, googleChunkResponse.Chunks...)
+	}
+	if notionChunkResponse.Chunks != nil {
+		topKChunks = append(topKChunks, notionChunkResponse.Chunks...)
 	}
 
 	// rerank the results by first getting the scores

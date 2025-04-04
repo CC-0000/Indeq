@@ -4,11 +4,9 @@ import (
 	"context"
 	"crypto/tls"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net"
-	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -17,7 +15,6 @@ import (
 	"github.com/cc-0000/indeq/common/config"
 	_ "github.com/lib/pq"
 	"github.com/segmentio/kafka-go"
-	"golang.org/x/oauth2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/proto"
@@ -59,70 +56,6 @@ type File struct {
 
 type ListofFiles struct {
 	Files []File
-}
-
-type TokenInfo struct {
-	Scope     string `json:"scope"`
-	Error     string `json:"error"`
-	ErrorDesc string `json:"error_description"`
-}
-
-// ValidateAccessToken validates an access token for a specific platform
-func ValidateAccessToken(accessToken, platform string) ([]string, error) {
-	if platform == "GOOGLE" {
-		tokenInfo, err := validateGoogleAccessToken(accessToken)
-		if err != nil {
-			fmt.Printf("Error validating Google access token: %v\n", err)
-			return nil, err
-		}
-		scopes := strings.Split(tokenInfo.Scope, " ")
-		return scopes, nil
-	}
-
-	return nil, fmt.Errorf("unsupported platform: %s", platform)
-}
-
-// validateGoogleAccessToken validates a Google access token
-func validateGoogleAccessToken(accessToken string) (*TokenInfo, error) {
-	url := fmt.Sprintf("https://oauth2.googleapis.com/tokeninfo?access_token=%s", accessToken)
-
-	// Create custom HTTP client with increased timeouts
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-		Transport: &http.Transport{
-			TLSHandshakeTimeout: 20 * time.Second,
-			IdleConnTimeout:     90 * time.Second,
-		},
-	}
-
-	maxRetries := 3
-	var lastErr error
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		if attempt > 0 {
-			time.Sleep(time.Duration(attempt) * 2 * time.Second)
-		}
-
-		resp, err := client.Get(url)
-		if err != nil {
-			lastErr = fmt.Errorf("attempt %d failed to make request: %v", attempt+1, err)
-			continue
-		}
-		defer resp.Body.Close()
-
-		var tokenInfo TokenInfo
-		if err := json.NewDecoder(resp.Body).Decode(&tokenInfo); err != nil {
-			lastErr = fmt.Errorf("attempt %d failed to decode response: %v", attempt+1, err)
-			continue
-		}
-
-		if tokenInfo.Error != "" {
-			return &tokenInfo, fmt.Errorf("invalid token: %s - %s", tokenInfo.Error, tokenInfo.ErrorDesc)
-		}
-
-		return &tokenInfo, nil
-	}
-
-	return nil, fmt.Errorf("all attempts failed, last error: %v", lastErr)
 }
 
 // Helper function to convert platform string to Provider enum
@@ -212,6 +145,15 @@ func (s *crawlingServer) NewCrawler(ctx context.Context, userID string, accessTo
 			log.Printf("GoogleCrawler completed successfully for user %s", userID)
 		}
 		return files, err
+	case "NOTION":
+		client := createNotionOAuthClient(ctx, accessToken)
+		files, err := s.NotionCrawler(ctx, client, userID, scopes)
+		if err != nil {
+			log.Printf("Error in NotionCrawler for user %s: %v", userID, err)
+		} else {
+			log.Printf("NotionCrawler completed successfully for user %s", userID)
+		}
+		return files, err
 	default:
 		return ListofFiles{}, fmt.Errorf("unsupported platform: %s", platform)
 	}
@@ -243,6 +185,13 @@ func RetrieveCrawler(ctx context.Context, accessToken string, metadataList []Met
 			textChunks = append(textChunks, textChunk)
 			if err != nil {
 				return File{}, fmt.Errorf("error retrieving Google Doc chunk: %w", err)
+			}
+		case "NOTION":
+			client := createNotionOAuthClient(ctx, accessToken)
+			textChunk, err := RetrieveNotionCrawler(ctx, client, metadata)
+			textChunks = append(textChunks, textChunk)
+			if err != nil {
+				return File{}, fmt.Errorf("error retrieving Notion Doc chunk: %w", err)
 			}
 		default:
 			return File{}, fmt.Errorf("unsupported platform: %s", metadata.Platform)
@@ -324,12 +273,6 @@ func (s *crawlingServer) startPeriodicCrawlerWorker(ctx context.Context) {
 			}
 		}
 	}()
-}
-
-// createOAuthClient creates an OAuth client from an access token
-func createGoogleOAuthClient(ctx context.Context, accessToken string) *http.Client {
-	tokenSource := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: accessToken})
-	return oauth2.NewClient(ctx, tokenSource)
 }
 
 // updateCrawlerWithToken updates the crawler with a new access token
@@ -572,25 +515,54 @@ func (s *crawlingServer) startCrawlingSignalReading(ctx context.Context) error {
 		return fmt.Errorf("failed to retrieve kafka broker address")
 	}
 
-	reader := kafka.NewReader(kafka.ReaderConfig{
+	// Create readers for both Google and Notion signals
+	googleReader := kafka.NewReader(kafka.ReaderConfig{
 		Brokers:  []string{broker},
 		GroupID:  "google-crawling-signal-readers",
 		Topic:    "google-crawling-signals",
 		MaxBytes: 10e6,
 	})
-	defer reader.Close()
+	defer googleReader.Close()
 
+	notionReader := kafka.NewReader(kafka.ReaderConfig{
+		Brokers:  []string{broker},
+		GroupID:  "notion-crawling-signal-readers",
+		Topic:    "notion-crawling-signals",
+		MaxBytes: 10e6,
+	})
+	defer notionReader.Close()
+
+	// Create channels for messages and errors
 	messageCh := make(chan kafka.Message)
 	errorCh := make(chan error)
 
+	// Start goroutine for Google signals
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
-				log.Print("Shutting down crawling signal consumer channeler")
+				log.Print("Shutting down Google crawling signal consumer channeler")
 				return
 			default:
-				msg, err := reader.ReadMessage(ctx)
+				msg, err := googleReader.ReadMessage(ctx)
+				if err != nil {
+					errorCh <- err
+				} else {
+					messageCh <- msg
+				}
+			}
+		}
+	}()
+
+	// Start goroutine for Notion signals
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				log.Print("Shutting down Notion crawling signal consumer channeler")
+				return
+			default:
+				msg, err := notionReader.ReadMessage(ctx)
 				if err != nil {
 					errorCh <- err
 				} else {
