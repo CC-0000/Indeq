@@ -38,7 +38,7 @@
 	<h2 class="text-sm font-medium text-gray-700 mr-2 mt-2">
 		Shortcuts	
 	</h2>
-	<div class="flex my-1 gap-1 transition-all duration-300 ease-in-out">
+	<div class="flex my-1 mb-2 gap-1 transition-all duration-300 ease-in-out">
 		<!-- Chat -->
 		<Tooltip.Root>
 			<Tooltip.Trigger asChild let:builder>
@@ -49,7 +49,7 @@
 					class="rounded-lg hover:bg-[#e6e4e3] {$page.url.pathname === '/chat' ? 'bg-[#e6e4e3]' : ''}"
 					builders={[builder]}
 				>
-					<MessageCircleIcon class="size-5 stroke-1.5 {$page.url.pathname === '/chat' ? 'stroke-gray-900' : 'stroke-gray-700'}" />
+					<MessageCircleIcon class="size-5 stroke-1.5 {$page.url.pathname === '/chat' ? 'stroke-gray-700' : 'stroke-gray-500'}" />
 				</Button>
 			</Tooltip.Trigger>
 			<Tooltip.Content side="bottom" class="bg-gray-800 text-white" sideOffset={5}>Chat</Tooltip.Content>
@@ -64,7 +64,7 @@
 					class="rounded-lg hover:bg-[#e6e4e3] {$page.url.pathname === '/profile/integration' ? 'bg-[#e6e4e3]' : ''}"
 					builders={[builder]}
 				>
-					<GitBranchIcon class="size-5 stroke-1.5 {$page.url.pathname === '/profile/integration' ? 'stroke-gray-900' : 'stroke-gray-700'}" />
+					<GitBranchIcon class="size-5 stroke-1.5 {$page.url.pathname === '/profile/integration' ? 'stroke-gray-700' : 'stroke-gray-500'}" />
 				</Button>
 			</Tooltip.Trigger>
 			<Tooltip.Content side="bottom" class="bg-gray-800 text-white" sideOffset={5}>Integrations</Tooltip.Content>
@@ -79,7 +79,7 @@
 					class="rounded-lg hover:bg-[#e6e4e3] {$page.url.pathname === '/profile/account' ? 'bg-[#e6e4e3]' : ''}"
 					builders={[builder]}
 				>
-					<UserIcon class="size-5 stroke-1.5 {$page.url.pathname === '/profile/account' ? 'stroke-gray-900' : 'stroke-gray-700'}" />
+					<UserIcon class="size-5 stroke-1.5 {$page.url.pathname === '/profile/account' ? 'stroke-gray-700' : 'stroke-gray-500'}" />
 				</Button>
 			</Tooltip.Trigger>
 			<Tooltip.Content side="bottom" class="bg-gray-800 text-white" sideOffset={5}>Profile</Tooltip.Content>

@@ -13,7 +13,7 @@
  <Button
    variant="ghost"
    href={`/chat/${item.id}`}
-   class="w-full inline-flex justify-start p-0 text-xs text-gray-500 hover:bg-[#e6e4e3] {url === `/chat/${item.id}` ? 'bg-[#e6e4e3]' : ''} px-2"
+   class="w-full inline-flex justify-start p-0 text-sm hover:bg-[#e6e4e3] {url === `/chat/${item.id}` ? 'bg-[#e6e4e3] text-gray-700' : 'text-gray-500'} px-2"
    aria-label={item.id}
    style=
    "overflow: hidden; white-space: nowrap; text-overflow: ellipsis;"
