@@ -9,6 +9,7 @@ service AuthenticationService {
     rpc Register(RegisterRequest) returns (RegisterResponse);
     rpc Verify(VerifyRequest) returns (VerifyResponse);
     rpc SignCSR(SignCSRRequest) returns (SignCSRResponse);
+    rpc CreateOrUpdateGoogleUser(CreateOrUpdateGoogleUserRequest) returns (CreateOrUpdateGoogleUserResponse);
 }
 
 message LoginRequest {
@@ -50,5 +51,16 @@ message SignCSRRequest {
 
 message SignCSRResponse {
     string certificate_base64 = 1;
+}
+
+message CreateOrUpdateGoogleUserRequest {
+    string google_id = 1;
+    string name = 2;
+    string email = 3;  // optional
+}
+
+message CreateOrUpdateGoogleUserResponse {
+    string user_id = 1;
+    string token = 2;    // JWT token for authentication
 }
 

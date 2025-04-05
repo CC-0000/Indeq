@@ -401,7 +401,6 @@ func (s *authServer) Verify(ctx context.Context, req *pb.VerifyRequest) (*pb.Ver
 
 	// check if token was able to be parsed
 	if err != nil {
-		log.Printf("Failed to parse token: %v", err)
 		return &pb.VerifyResponse{Valid: false, Error: "invalid token"}, nil
 	}
 
@@ -601,13 +600,23 @@ func (s *authServer) connectToDatabase(ctx context.Context, contextDuration time
 	defer tx.Rollback()
 
 	if _, err = tx.ExecContext(ctx, `
+	
 		CREATE TABLE IF NOT EXISTS users (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            email VARCHAR(255) UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
+            email VARCHAR(255) UNIQUE,
+            password_hash TEXT,
             name VARCHAR(255) NOT NULL,
+            google_id VARCHAR(255) UNIQUE,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT password_required_if_no_google CHECK (
+                (google_id IS NOT NULL) OR
+                (google_id IS NULL AND password_hash IS NOT NULL)
+            ),
+			CONSTRAINT email_required_if_google CHECK (
+                (google_id IS NOT NULL) OR
+                (google_id IS NULL AND email IS NOT NULL)
+            )
         );
 	`); err != nil {
 		log.Fatalf("failed to create tables: %v", err)
@@ -680,6 +689,153 @@ func (s *authServer) startGRPCServer(grpcServer *grpc.Server) {
 	if err := grpcServer.Serve(listener); err != nil {
 		log.Fatalf("Failed to serve: %v", err)
 	}
+}
+
+// rpc(context, create or update google user request)
+//   - takes in a google id, name, and optional email
+//   - if email is provided, looks for matching user and updates google id/name if needed
+//   - if email is not provided, looks for user with matching google_id, creates new if none found
+//   - sets userstats on desktop
+//   - returns the user id, jwt on success
+func (s *authServer) CreateOrUpdateGoogleUser(ctx context.Context, req *pb.CreateOrUpdateGoogleUserRequest) (*pb.CreateOrUpdateGoogleUserResponse, error) {
+	
+	// Start a transaction
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %v", err)
+	}
+	defer tx.Rollback()
+
+	// First, check if user exists by email or google_id
+	var userId string
+	var existingEmail sql.NullString
+	var existingName sql.NullString
+	var existingGoogleId sql.NullString
+	var userExists bool
+
+	// Try to find user by email if provided and not empty
+	if req.Email != "" {
+		err = tx.QueryRowContext(ctx,
+			"SELECT id, email, name, google_id FROM users WHERE email = $1",
+			strings.ToLower(req.Email),
+		).Scan(&userId, &existingEmail, &existingName, &existingGoogleId)
+		
+		if err == nil {
+			userExists = true
+		} else if err != sql.ErrNoRows {
+			return nil, fmt.Errorf("database error when checking email: %v", err)
+		} 
+	}
+	
+	// If user not found by email or email not provided, try to find by google_id
+	if !userExists {
+		err = tx.QueryRowContext(ctx,
+			"SELECT id, email, name, google_id FROM users WHERE google_id = $1",
+			req.GoogleId,
+		).Scan(&userId, &existingEmail, &existingName, &existingGoogleId)
+		
+		if err == nil {
+			userExists = true
+		} else if err != sql.ErrNoRows {
+			return nil, fmt.Errorf("database error when checking google_id: %v", err)
+		} 
+	}
+
+	if userExists {
+		// User exists, determine what fields to update
+		updates := []string{}
+		args := []interface{}{}
+		argCount := 1
+
+		// Update google_id if it's empty and we have a new one
+		if !existingGoogleId.Valid || existingGoogleId.String == "" {
+			updates = append(updates, fmt.Sprintf("google_id = $%d", argCount))
+			args = append(args, req.GoogleId)
+			argCount++
+		}
+
+		// Update name if it's empty
+		if !existingName.Valid || existingName.String == "" {
+			updates = append(updates, fmt.Sprintf("name = $%d", argCount))
+			args = append(args, req.Name)
+			argCount++
+		}
+
+		// Update email if it's empty and we have a new one
+		if req.Email != "" && (!existingEmail.Valid || existingEmail.String == "") {
+			updates = append(updates, fmt.Sprintf("email = $%d", argCount))
+			args = append(args, strings.ToLower(req.Email))
+			argCount++
+		}
+
+		// If we have fields to update, perform the update
+		if len(updates) > 0 {
+			args = append(args, userId)
+			query := fmt.Sprintf("UPDATE users SET %s WHERE id = $%d RETURNING id",
+				strings.Join(updates, ", "),
+				argCount)
+			
+			err = tx.QueryRowContext(ctx, query, args...).Scan(&userId)
+			if err != nil {
+				return nil, fmt.Errorf("failed to update user: %v", err)
+			}
+		} 
+	} else {
+		// User doesn't exist, create a new one
+		if req.Email != "" {
+			// Create with email, name, and google_id
+			err = tx.QueryRowContext(ctx,
+				"INSERT INTO users (email, name, google_id) VALUES ($1, $2, $3) RETURNING id",
+				strings.ToLower(req.Email),
+				req.Name,
+				req.GoogleId,
+			).Scan(&userId)
+		} else {
+			// Create with just name and google_id
+			err = tx.QueryRowContext(ctx,
+				"INSERT INTO users (name, google_id) VALUES ($1, $2) RETURNING id",
+				req.Name,
+				req.GoogleId,
+			).Scan(&userId)
+		}
+		
+		if err != nil {
+			return nil, fmt.Errorf("failed to create user: %v", err)
+		}
+
+		// Try to create a corresponding entry in the desktop tracking collection
+		dRes, err := s.desktopClient.SetupUserStats(ctx, &pb.SetupUserStatsRequest{
+			UserId: userId,
+		})
+		if err != nil || !dRes.Success {
+			log.Printf("Failed to set up userstore")
+		}
+	
+	}
+
+	// Commit the transaction
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %v", err)
+	}
+
+	// Create JWT token
+	currentTime := time.Now()
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub": userId,
+		"exp": currentTime.Add(24 * time.Hour).Unix(), // 1 day expiration
+		"iat": currentTime.Unix(),
+		"nbf": currentTime.Unix(),
+	})
+
+	tokenString, err := token.SignedString(s.jwtSecret)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create token: %v", err)
+	}
+
+	return &pb.CreateOrUpdateGoogleUserResponse{
+		UserId: userId,
+		Token:  tokenString,
+	}, nil
 }
 
 func main() {
