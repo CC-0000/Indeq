@@ -14,7 +14,9 @@ export const handle: Handle = async ({ event, resolve }) => {
     '/terms',
     '/privacy',
     '/api/waitlist',
-    '/sitemap.xml'
+    '/sitemap.xml',
+    '/sso/GOOGLE',
+    '/sso/GOOGLE/callback'
   ];
   const productionRoutes = ['/', '/terms', '/privacy', '/api/waitlist', '/sitemap.xml'];
 

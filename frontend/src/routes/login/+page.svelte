@@ -18,6 +18,23 @@
   }
 
   export let form;
+  
+  let isGoogleLoading = false;
+
+  async function handleGoogleLogin() {
+    try {
+      isGoogleLoading = true;
+      
+      // Redirect to Google's consent screen
+      window.location.href = '/sso/GOOGLE';
+
+      
+    } catch (error) {
+      console.error('Google login error:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to initiate Google login');
+      isGoogleLoading = false;
+    }
+  }
 </script>
 
 <svelte:head>
@@ -37,10 +54,16 @@
           <Button
             variant="outline"
             type="button"
-            on:click={() => toast.loading('In development...')}
+            on:click={handleGoogleLogin}
+            disabled={isGoogleLoading}
           >
-            <img src="/google.svg" alt="Google logo" class="mr-2 h-6 w-6" />
-            Login with Google
+            {#if isGoogleLoading}
+              <span class="mr-2 h-6 w-6 animate-spin">⌛</span>
+              Connecting...
+            {:else}
+              <img src="/google.svg" alt="Google logo" class="mr-2 h-6 w-6" />
+              Login with Google
+            {/if}
           </Button>
           <div class="relative">
             <div class="absolute inset-0 flex items-center">
