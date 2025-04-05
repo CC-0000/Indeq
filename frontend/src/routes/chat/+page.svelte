@@ -7,6 +7,8 @@
     import { renderLatex, renderContent } from '$lib/utils/katex';
 	  import type { BotMessage, ChatState, Source } from "$lib/types/chat";
     import type { DesktopIntegration } from "$lib/types/desktopIntegration";
+    import type { Conversation } from "$lib/types/conversation";
+    import { page } from '$app/stores';
 
   let userQuery = '';
   let requestId: string | null = null;
@@ -20,7 +22,11 @@
   let isReasoning = false;
   let conversationContainer: HTMLElement | null = null;
 
-  export let data: { integrations: string[], desktopInfo: DesktopIntegration };
+  export let data: { 
+    integrations: string[], 
+    desktopInfo: DesktopIntegration,
+    conversation: Conversation | null 
+  };
 
   const isIntegrated = (provider: string): boolean => {
     return data.integrations.includes(provider.toUpperCase());
@@ -30,6 +36,25 @@
     initialize(data.desktopInfo);
     if (data.desktopInfo.isCrawling) {
       startPolling();
+    }
+
+    if (data.conversation) {
+      conversationId = data.conversation.conversationId;
+      
+      const convertedMessages: BotMessage[] = [];
+      for (const msg of data.conversation.fullMessages) {
+        convertedMessages.push({
+          text: msg.text,
+          sender: msg.sender,
+          reasoning: [],
+          reasoningSectionCollapsed: false,
+          sources: [],
+          sourcesScrollAtEnd: false,
+          isScrollable: false
+        });
+      }
+      
+      messages = convertedMessages;
     }
   });
   

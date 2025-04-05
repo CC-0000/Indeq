@@ -8,6 +8,8 @@
     import { isValidRoute } from '$lib/config/sidebar-routes';
     import { browser } from '$app/environment';
     import { PUBLIC_APP_ENV } from '$env/static/public';
+    import { conversationStore } from '$lib/stores/conversationStore';
+    import { onMount } from 'svelte';
   let { children } = $props();
 
   const siteUrl = 'https://indeq.app';
@@ -20,6 +22,13 @@
       mode: 'production'
     });
   }
+
+  // Preload conversation history when the app loads
+  onMount(() => {
+    if (browser) {
+      conversationStore.fetchConversations();
+    }
+  });
 </script>
 
 <svelte:head>

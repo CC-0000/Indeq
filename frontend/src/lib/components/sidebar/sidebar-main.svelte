@@ -6,12 +6,20 @@
 	import * as Tooltip from "$lib/components/ui/tooltip";
 	import { page } from '$app/stores';
 	import { fade } from 'svelte/transition';
-	//TODO: Temporary static history data (replace with a historyStore)
-	const tempHistory = [
-	  { id: "chat-1", title: "This is a temporary search history test to see how it would look"},
-	  { id: "chat-2", title: "This is just a visual to see what it will look like once chat history is up"},
-	  { id: "chat-3", title: "I dont know what this typing is doing but did you see the double the the" },
-	];
+	import { conversationStore } from '../../stores/conversationStore';
+	import { onMount } from 'svelte';
+
+	let loading = true;
+
+	// Fetch conversation history when component mounts
+	onMount(async () => {
+		await conversationStore.fetchConversations();
+		loading = false;
+	});
+
+	$: conversations = $conversationStore.headers;
+	$: error = $conversationStore.error;
+	$: loading = $conversationStore.loading;
 </script>
 
 <nav class={`flex flex-col gap-1 pt-2  ${$sidebarExpanded ? "px-3" : ""}`}>
@@ -115,10 +123,20 @@
 				History	
 			</h2>
 		</div>
+		<div class="flex flex-col">
+			{#if loading}
+				<div class=""></div>
+			{:else if error}
+				<div class="text-center py-2 text-sm text-red-500">Failed to load history</div>
+			{:else if conversations.length === 0}
+				<div class="text-center py-2 text-sm text-gray-500">No conversations yet</div>
+			{:else}
+				{#each conversations as conversation}
+					<div>
+						<NavHistory item={{ id: conversation.conversationId, title: conversation.title }} expanded={$sidebarExpanded} />
+					</div>
+				{/each}
+			{/if}
+		</div>
 	{/if}
-</nav>
-<nav class="grid gap-0 pl-6 pr-2 p-0 transition-all duration-300 ease-in-out">
-    {#each tempHistory as item}
-        <NavHistory {item} expanded={$sidebarExpanded} />
-    {/each}
 </nav>
