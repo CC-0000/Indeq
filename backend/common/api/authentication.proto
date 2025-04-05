@@ -12,6 +12,7 @@ service AuthenticationService {
     rpc VerifyOTP(VerifyOTPRequest) returns (VerifyOTPResponse);
     rpc ForgotPassword(ForgotPasswordRequest) returns (ForgotPasswordResponse);
     rpc ResetPassword(ResetPasswordRequest) returns (ResetPasswordResponse);
+    rpc ResendOTP(ResendOTPRequest) returns (ResendOTPResponse);
 }
 
 message LoginRequest {
@@ -67,6 +68,16 @@ message VerifyOTPResponse {
     string error = 2;
     string token = 3;
     string user_id = 4;
+}
+
+message ResendOTPRequest {
+    string type = 1;
+    string token = 2;
+}
+
+message ResendOTPResponse {
+    bool success = 1;
+    string error = 2;
 }
 
 message ForgotPasswordRequest {

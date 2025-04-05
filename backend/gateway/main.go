@@ -741,6 +741,46 @@ func handleVerifyGenerator(clients *ServiceClients) http.HandlerFunc {
 	}
 }
 
+func handleResendOTPGenerator(clients *ServiceClients) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log.Println("Received resend otp request")
+		
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var resendOTPRequest pb.HttpResendOTPRequest
+		if err := json.NewDecoder(r.Body).Decode(&resendOTPRequest); err != nil {
+			log.Printf("Error: %v", err)
+			http.Error(w, "Bad Request", http.StatusBadRequest)
+			return
+		}
+		
+		if resendOTPRequest.Type != "register" && resendOTPRequest.Type != "forgot" {
+			http.Error(w, "Invalid verification type", http.StatusBadRequest)
+			return
+		}
+
+		res, err := clients.authClient.ResendOTP(r.Context(), &pb.ResendOTPRequest{
+			Type: resendOTPRequest.Type,
+			Token: resendOTPRequest.Token,
+		})
+
+		if err != nil {
+			http.Error(w, "Failed to resend otp", http.StatusInternalServerError)
+			return
+		}
+
+		httpResponse := &pb.HttpResendOTPResponse{
+			Success: res.Success,
+			Message: res.Error,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(httpResponse)
+	}
+}
 func handleVerifyOTPGenerator(clients *ServiceClients) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		log.Println("Received verify otp request")
@@ -1001,7 +1041,7 @@ func main() {
 	mux.HandleFunc("GET /api/desktop_stats", authMiddleware(handleGetDesktopStatsGenerator(serviceClients), serviceClients))
 	mux.HandleFunc("POST /api/manualcrawl", authMiddleware(handleManualCrawlGenerator(serviceClients), serviceClients))
 	mux.HandleFunc("POST /api/verify-otp", handleVerifyOTPGenerator(serviceClients))
-	// mux.HandleFunc("POST /api/resend-otp", handleResendOTPGenerator(serviceClients))
+	mux.HandleFunc("POST /api/resend-otp", handleResendOTPGenerator(serviceClients))
 	// mux.HandleFunc("POST /api/forgot-password", handleForgotPasswordGenerator(serviceClients))
 	// mux.HandleFunc("POST /api/reset-password", handleResetPasswordGenerator(serviceClients))
 

@@ -1,10 +1,26 @@
 import type { Actions } from "@sveltejs/kit";
 import type { PageServerLoad } from "./$types";
-import { fail } from "@sveltejs/kit";
+import { redirect, fail } from "@sveltejs/kit";
 import { GO_BACKEND_URL } from "$env/static/private";
 
 export const load: PageServerLoad = async ({ url, cookies }) => {
   const type = url.searchParams.get('type');
+  if (!type || (type !== 'register' && type !== 'forgot')) {
+    throw redirect(303, '/register');
+  }
+  if (type === 'register') {
+    const pendingToken = cookies.get('pendingRegisterToken');
+    const jwt = cookies.get('jwt');
+    if (!pendingToken && !jwt) {
+      throw redirect(303, '/register');
+    }
+    return { context: type };
+  } else if (type === 'forgot') {
+    const pendingToken = cookies.get('pendingForgotToken');
+    if (!pendingToken) {
+      throw redirect(303, '/forgot-password');
+    }
+  }
   return { context: type };
 };
 
@@ -39,7 +55,12 @@ export const actions: Actions = {
         return fail(resendRes.status, { error: msg });
       }
 
-      return { success: true };
+      const response = await resendRes.json();
+      if (!response.success) {
+        return fail(400, { error: response.message });
+      }
+
+      return { success: true, message: 'A new verification code has been sent to your email.'};
     }
     else {
       const verifyRes = await fetch(`${GO_BACKEND_URL}/api/verify-otp`, {

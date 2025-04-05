@@ -155,6 +155,16 @@ message HttpVerifyOTPResponse {
   string user_id = 4;
 }
 
+message HttpResendOTPRequest {
+  string type = 1;
+  string token = 2;
+}
+
+message HttpResendOTPResponse {
+  bool success = 1;
+  string message = 2;
+}
+
 message HttpForgotPasswordRequest {
   string email = 1;
 }

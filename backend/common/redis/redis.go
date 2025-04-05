@@ -103,3 +103,11 @@ func (c *RedisClient) Del(ctx context.Context, key string) error {
 	}
 	return nil
 }
+
+func (c *RedisClient) SetNX(ctx context.Context, key string, value interface{}, expiration time.Duration) (bool, error) {
+	success, err := c.Client.SetNX(ctx, key, value, expiration).Result()
+	if err != nil {
+		return false, fmt.Errorf("failed to setnx key: %w", err)
+	}
+	return success, nil
+}

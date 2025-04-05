@@ -73,8 +73,8 @@ type ForgotPayload struct {
 
 type Config struct {
 	KeyPrefix string
-	Limit int
-	Duration time.Duration
+	Limit     int
+	Duration  time.Duration
 }
 
 func generateOTP() (string, error) {
@@ -84,7 +84,7 @@ func generateOTP() (string, error) {
 	// Use 250 as the maximum to avoid modulo bias
 	max := byte(250)
 	// buffer to read random bytes in batches
-	buf := make([]byte, 16) 
+	buf := make([]byte, 16)
 	for len(otp) < length {
 		_, err := rand.Read(buf)
 		if err != nil {
@@ -437,7 +437,6 @@ func (s *authServer) sendEmail(to string, subject string, body string) error {
 		return fmt.Errorf("failed to close data writer: %w", err)
 	}
 
-
 	if err := client.Quit(); err != nil {
 		return fmt.Errorf("failed to quit SMTP client: %w", err)
 	}
@@ -481,14 +480,14 @@ func (s *authServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb
 	if err != nil && err != sql.ErrNoRows {
 		return &pb.RegisterResponse{
 			Success: false,
-			Error: "Something went wrong. Please try again later.",
+			Error:   "Something went wrong. Please try again later.",
 		}, nil
 	}
 
 	if existingUser != "" {
 		return &pb.RegisterResponse{
 			Success: false,
-			Error: "Email already exists!",
+			Error:   "Email already exists!",
 		}, nil
 	}
 	// Check rate limit
@@ -496,7 +495,7 @@ func (s *authServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb
 	if err != nil {
 		return &pb.RegisterResponse{
 			Success: false,
-			Error: "Something went wrong. Please try again later.",
+			Error:   "Something went wrong. Please try again later.",
 		}, err
 	}
 	log.Printf("Checking rate limit for IP: %s", ip)
@@ -506,7 +505,7 @@ func (s *authServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb
 	if err != nil {
 		return &pb.RegisterResponse{
 			Success: false,
-			Error: "Something went wrong. Please try again later.",
+			Error:   "Something went wrong. Please try again later.",
 		}, err
 	}
 
@@ -514,7 +513,7 @@ func (s *authServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb
 		if err := s.redisClient.Expire(ctx, ipKey, 5*time.Minute); err != nil {
 			return &pb.RegisterResponse{
 				Success: false,
-				Error: "Something went wrong. Please try again later.",
+				Error:   "Something went wrong. Please try again later.",
 			}, err
 		}
 	}
@@ -522,7 +521,7 @@ func (s *authServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb
 	if ipCount > 3 {
 		return &pb.RegisterResponse{
 			Success: false,
-			Error: "Too many attempts. Please try again later.",
+			Error:   "Too many attempts. Please try again later.",
 		}, nil
 	}
 
@@ -560,7 +559,7 @@ func (s *authServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb
 	if err != nil {
 		return &pb.RegisterResponse{
 			Success: false,
-			Error: "Something went wrong. Please try again later.",
+			Error:   "Something went wrong. Please try again later.",
 		}, err
 	}
 
@@ -568,17 +567,17 @@ func (s *authServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb
 	redisKey := fmt.Sprintf("reg:%s", token)
 
 	payload := RegistrationPayload{
-		Email: req.Email,
+		Email:          req.Email,
 		HashedPassword: encodedHash,
-		Name: req.Name,
-		OTP: otp,
+		Name:           req.Name,
+		OTP:            otp,
 	}
 
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return &pb.RegisterResponse{
 			Success: false,
-			Error: "Something went wrong. Please try again later.",
+			Error:   "Something went wrong. Please try again later.",
 		}, err
 	}
 
@@ -586,10 +585,10 @@ func (s *authServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb
 	if err != nil {
 		return &pb.RegisterResponse{
 			Success: false,
-			Error: "Something went wrong. Please try again later.",
+			Error:   "Something went wrong. Please try again later.",
 		}, err
 	}
-emailBody := fmt.Sprintf(`Welcome to Indeq!
+	emailBody := fmt.Sprintf(`Welcome to Indeq!
 
 To verify your account, enter the following 6-digit code:
 
@@ -612,7 +611,7 @@ The Indeq Team
 
 	return &pb.RegisterResponse{
 		Success: true,
-		Token: token,
+		Token:   token,
 	}, nil
 
 	// Store in the database
@@ -657,26 +656,33 @@ The Indeq Team
 	// }
 }
 
-// VerifyOTP verifies a one-time password code for either registration or password reset
-func (s *authServer) VerifyOTP(ctx context.Context, req *pb.VerifyOTPRequest) (*pb.VerifyOTPResponse, error) {
-	if req.Code == "" {
-		return &pb.VerifyOTPResponse{
-			Success: false,
-			Error: "Code is required",
-		}, nil
-	}
-
+// rpc(context, resend otp request)
+//   - takes in a token and a type and resends the otp
+//   - returns a success boolean and a user id on success
+//   - returns an error on failure
+//   - if the type is register, it will resend the verification email
+//   - if the type is forgot, it will resend the password reset email
+func (s *authServer) ResendOTP(ctx context.Context, req *pb.ResendOTPRequest) (*pb.ResendOTPResponse, error) {
 	if req.Type != "register" && req.Type != "forgot" {
-		return &pb.VerifyOTPResponse{
+		return &pb.ResendOTPResponse{
 			Success: false,
-			Error: "Invalid verification type",
+			Error:   "Invalid verification type",
 		}, nil
 	}
 
-	if req.Token == "" {
-		return &pb.VerifyOTPResponse{
+	rateLimitKey := fmt.Sprintf("otp_resend:%s", req.Token)
+	allowed, err := s.redisClient.SetNX(ctx, rateLimitKey, "1", 30*time.Second)
+	log.Printf("allowed: %t", allowed)
+	if err != nil {
+		return &pb.ResendOTPResponse{
 			Success: false,
-			Error: "No token found",
+			Error:   "Internal error during rate limiting",
+		}, err
+	}
+	if !allowed {
+		return &pb.ResendOTPResponse{
+			Success: false,
+			Error:   "Too many resend attempts.",
 		}, nil
 	}
 
@@ -686,13 +692,161 @@ func (s *authServer) VerifyOTP(ctx context.Context, req *pb.VerifyOTPRequest) (*
 	} else if req.Type == "forgot" {
 		redisKey = fmt.Sprintf("forgot:%s", req.Token)
 	}
-	log.Printf("redisKey: %s", redisKey)
+
 	data, err := s.redisClient.Get(ctx, redisKey)
-	log.Printf("data: %s", data)
+	if err != nil {
+		return &pb.ResendOTPResponse{
+			Success: false,
+			Error:   "Something went wrong. Please try again later.",
+		}, err
+	}
+
+	newOTP, err := generateOTP()
+	if err != nil {
+		return &pb.ResendOTPResponse{
+			Success: false,
+			Error: "Something went wrong. Please try again later.",
+		}, err
+	}
+
+	if req.Type == "register" {
+		var payload RegistrationPayload
+		if err := json.Unmarshal([]byte(data), &payload); err != nil {
+			return &pb.ResendOTPResponse{
+				Success: false,
+				Error:   "Invalid data",
+			}, nil
+		}
+
+		payload.OTP = newOTP
+
+		updatedPayload, err := json.Marshal(payload)
+		if err != nil {
+			return &pb.ResendOTPResponse{
+				Success: false,
+				Error:   "Something went wrong. Please try again later.",
+			}, err
+		}
+
+		err = s.redisClient.Set(ctx, redisKey, updatedPayload, 5*time.Minute)
+		if err != nil {
+			return &pb.ResendOTPResponse{
+				Success: false,
+				Error:   "Something went wrong. Please try again later.",
+			}, err
+		}
+		emailBody := fmt.Sprintf(`Welcome to Indeq!
+
+To verify your account, enter the following 6-digit code:
+
+Your verification code: %s
+
+This code will expire in 5 minutes. If you did not request this verification code, please ignore this email.
+
+Thank you,
+The Indeq Team
+`, newOTP)
+		emailSubject := "Indeq - Verify Your Account"
+
+		if err := s.sendEmail(payload.Email, emailSubject, emailBody); err != nil {
+			return &pb.ResendOTPResponse{
+				Success: false,
+				Error:   "Failed to send verification email",
+			}, err
+		}
+	} else if req.Type == "forgot" {
+		var payload ForgotPayload
+		if err := json.Unmarshal([]byte(data), &payload); err != nil {
+			return &pb.ResendOTPResponse{
+				Success: false,
+				Error:   "Invalid data",
+			}, nil
+		}
+
+		payload.OTP = newOTP
+
+		updatedPayload, err := json.Marshal(payload)
+		if err != nil {
+			return &pb.ResendOTPResponse{
+				Success: false,
+				Error:   "Something went wrong. Please try again later.",
+			}, err
+		}
+
+		err = s.redisClient.Set(ctx, redisKey, updatedPayload, 5*time.Minute)
+		if err != nil {
+			return &pb.ResendOTPResponse{
+				Success: false,
+				Error:   "Something went wrong. Please try again later.",
+			}, err
+		}
+		
+		// Compose the email body for password reset.
+		emailBody := fmt.Sprintf(`You requested a password reset.
+
+Please use the following OTP to reset your password:
+
+Your verification code: %s
+
+This code will expire in 5 minutes. If you did not request a password reset, please ignore this email.
+`, newOTP)
+		emailSubject := "Indeq - Reset Your Password"
+
+		// Send the email.
+		if err := s.sendEmail(payload.Email, emailSubject, emailBody); err != nil {
+			return &pb.ResendOTPResponse{
+				Success: false,
+				Error:   "Failed to send verification email",
+			}, err
+		}
+	}
+
+	return &pb.ResendOTPResponse{
+		Success: true,
+	}, nil
+}
+
+// rpc(context, verify otp request)
+//   - takes in a token and a code and verifies the code
+//   - returns a success boolean and a user id on success
+//   - returns an error on failure
+//   - if the type is register, it will store the user in the database
+//   - if the type is forgot, it will update the user's password
+//
+// VerifyOTP verifies a one-time password code for either registration or password reset
+func (s *authServer) VerifyOTP(ctx context.Context, req *pb.VerifyOTPRequest) (*pb.VerifyOTPResponse, error) {
+	if req.Code == "" {
+		return &pb.VerifyOTPResponse{
+			Success: false,
+			Error:   "Code is required",
+		}, nil
+	}
+
+	if req.Type != "register" && req.Type != "forgot" {
+		return &pb.VerifyOTPResponse{
+			Success: false,
+			Error:   "Invalid verification type",
+		}, nil
+	}
+
+	if req.Token == "" {
+		return &pb.VerifyOTPResponse{
+			Success: false,
+			Error:   "No token found",
+		}, nil
+	}
+
+	var redisKey string
+	if req.Type == "register" {
+		redisKey = fmt.Sprintf("reg:%s", req.Token)
+	} else if req.Type == "forgot" {
+		redisKey = fmt.Sprintf("forgot:%s", req.Token)
+	}
+	data, err := s.redisClient.Get(ctx, redisKey)
 	if err != nil {
 		return &pb.VerifyOTPResponse{
 			Success: false,
-			Error: "No data found",
+			Error:   "No data found",
 		}, nil
 	}
 
@@ -701,14 +855,14 @@ func (s *authServer) VerifyOTP(ctx context.Context, req *pb.VerifyOTPRequest) (*
 		if err := json.Unmarshal([]byte(data), &payload); err != nil {
 			return &pb.VerifyOTPResponse{
 				Success: false,
-				Error: "Invalid data",
+				Error:   "Invalid data",
 			}, nil
 		}
 
 		if payload.OTP != req.Code {
 			return &pb.VerifyOTPResponse{
 				Success: false,
-				Error: "Invalid code",
+				Error:   "Invalid code",
 			}, nil
 		}
 
@@ -775,22 +929,22 @@ func (s *authServer) VerifyOTP(ctx context.Context, req *pb.VerifyOTPRequest) (*
 		s.redisClient.Del(ctx, redisKey)
 		return &pb.VerifyOTPResponse{
 			Success: true,
-			Token: tokenString,
-			UserId: userId,
+			Token:   tokenString,
+			UserId:  userId,
 		}, nil
 	} else if req.Type == "forgot" {
 		var payload ForgotPayload
 		if err := json.Unmarshal([]byte(data), &payload); err != nil {
 			return &pb.VerifyOTPResponse{
 				Success: false,
-				Error: "Invalid data",
+				Error:   "Invalid data",
 			}, nil
 		}
 
 		if payload.OTP != req.Code {
 			return &pb.VerifyOTPResponse{
 				Success: false,
-				Error: "Invalid code",
+				Error:   "Invalid code",
 			}, nil
 		}
 
@@ -803,7 +957,7 @@ func (s *authServer) VerifyOTP(ctx context.Context, req *pb.VerifyOTPRequest) (*
 
 	return &pb.VerifyOTPResponse{
 		Success: false,
-		Error: "Invalid verification type",
+		Error:   "Invalid verification type",
 	}, nil
 }
 

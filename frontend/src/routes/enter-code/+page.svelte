@@ -6,11 +6,36 @@
   import { enhance } from '$app/forms';
   import { toast } from 'svelte-sonner';
   import { goto } from '$app/navigation';
+  import { onMount } from 'svelte';
 
   export let form;
   export let data: { context: string };
 
-  $: if (form?.success) {
+  let countdown = 0;
+  let countdownInterval: NodeJS.Timeout;
+
+  function startCountdown() {
+    countdown = 30;
+    countdownInterval = setInterval(() => {
+      countdown--;
+      if (countdown <= 0) {
+        clearInterval(countdownInterval);
+      }
+    }, 1000);
+  }
+
+  onMount(() => {
+    return () => {
+      if (countdownInterval) clearInterval(countdownInterval);
+    };
+  });
+
+  $: if (form?.message) {
+    toast.success(form.message);
+    startCountdown();
+  }
+
+  $: if (form?.success && form.verifiedType) {
     if (form.verifiedType === 'register') {
       toast.success('Welcome aboard! 🎉');
       goto('/chat');
@@ -61,7 +86,7 @@
             <p class="text-destructive text-sm">{form.error}</p>
           {/if}
         </Card.Content>
-        <Card.Footer class="flex flex-col gap-4">
+        <Card.Footer class="flex flex-col gap-4 pb-2">
           <Button type="submit" class="w-full">Submit Code</Button>
         </Card.Footer>
       </form>
@@ -70,7 +95,13 @@
       <form method="POST" use:enhance class="px-6 pt-0 pb-6 flex flex-col gap-4">
         <input type="hidden" name="resend" value="true" />
         <input type="hidden" name="type" value={data.context} />
-        <Button type="submit" variant="outline" class="w-full">Resend Code</Button>
+        <Button type="submit" variant="outline" class="w-full" disabled={countdown > 0}>
+          {#if countdown > 0}
+            Resend Code ({countdown}s)
+          {:else}
+            Resend Code
+          {/if}
+        </Button>
         <Card.Description class="text-center text-sm text-muted-foreground">
           Didn't receive it? Check your spam folder.
         </Card.Description>
