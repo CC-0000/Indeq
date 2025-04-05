@@ -9,6 +9,7 @@
     import type { DesktopIntegration } from "$lib/types/desktopIntegration";
 
   let userQuery = '';
+  let requestId: string | null = null;
   let conversationId: string | null = null;
   let isLoading = false;
   const truncateLength = 80;
@@ -39,10 +40,11 @@
   async function query() {
     try {
       isLoading = true;
+
       const res = await fetch('/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: userQuery })
+        body: JSON.stringify({ query: userQuery, conversation_id: conversationId ?? '' })
       });
 
       if (!res.ok) {
@@ -52,9 +54,11 @@
         return;
       }
 
+
         messages = [...messages, { text: userQuery, sender: "user", reasoning: [], reasoningSectionCollapsed: false, sources: [] }];
 
       const data = await res.json();
+      requestId = data.request_id;
       conversationId = data.conversation_id;
 
         messages = [...messages, { text: "", sender: "bot", reasoning: [], reasoningSectionCollapsed: false, sources: [] }];
@@ -77,8 +81,8 @@
   }
 
   function streamResponse() {
-    if (!conversationId) {
-      console.error('No conversationId to stream');
+    if (!requestId) {
+      console.error('No requestId to stream');
       isLoading = false;
       return;
     }
@@ -89,7 +93,7 @@
         isFullscreen = true;
         isReasoning = false;
 
-        const url = `/chat?conversationId=${encodeURIComponent(conversationId)}`;
+        const url = `/chat?requestId=${encodeURIComponent(requestId)}`;
         eventSource = new EventSource(url);
         let botMessage : BotMessage = { 
             text: "", 
@@ -294,7 +298,7 @@
       </p>
 
       <!-- Search Input -->
-      <div class="flex flex-col gap-3 p-3 bg-gray-50 rounded-lg relative">
+      <div class="flex flex-col gap-3 p-3 bg-white rounded-lg relative">
         <textarea
           bind:value={userQuery}
           placeholder="Ask me anything..."
@@ -398,7 +402,7 @@
       </div>
     </div>
   {:else}
-    <div class="flex-1 flex flex-col bg-white w-full max-w-3xl">
+    <div class="flex-1 flex flex-col w-full max-w-3xl">
       <div
         class="conversation-container flex-1 overflow-y-auto p-4 space-y-6 pb-32"
         bind:this={conversationContainer}
@@ -465,7 +469,7 @@
                                           </div>
                                           
                                           <!-- Source tooltip that appears on hover -->
-                                          <div class="tooltip fixed opacity-0 pointer-events-none bg-white text-gray-800 p-3 rounded shadow-md text-sm z-20 max-w-full whitespace-normal border border-gray-100" 
+                                          <div class="tooltip fixed opacity-0 pointer-events-none text-gray-800 p-3 rounded shadow-md text-sm z-20 max-w-full whitespace-normal border border-gray-100" 
                                                id={`tooltip-${messageIndex}-${sourceIndex}`}
                                                role="tooltip"
                                                aria-hidden="true">
@@ -570,9 +574,9 @@
         {/each}
       </div>
       <!-- Chat Input -->
-      <div class="fixed bottom-0 left-0 right-0 flex justify-center bg-white z-10 opacity-95">
+      <div class="bottom-0 left-0 right-0 flex justify-center z-10 opacity-95">
         <div class="w-full max-w-3xl p-4 pt-0">
-          <div class="relative rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+          <div class="relative bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
             <textarea
               bind:value={userQuery}
               placeholder="Ask me anything..."
