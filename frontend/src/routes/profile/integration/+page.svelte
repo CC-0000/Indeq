@@ -1,5 +1,5 @@
 <script lang="ts">
-  import Integration_Button from '../../../components/integration-card.svelte';
+  import Integration_Button from '$lib/components/integration/integration-card.svelte';
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
   import { toast } from 'svelte-sonner';
