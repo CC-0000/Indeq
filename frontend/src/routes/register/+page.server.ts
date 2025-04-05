@@ -99,20 +99,13 @@ export const actions = {
       return fail(400, { error: response.error });
     }
 
-    cookies.set(
-      'pendingRegister',
-      JSON.stringify({
-        email: email.toString()
-      }),
-      {
-        httpOnly: true,
-        secure: true,
-        path: '/',
-        sameSite: 'lax',
-        maxAge: 60 * 5 // 5 minutes
-      }
-    );
-
-    throw redirect(303, '/enter-code?type=register');
+    cookies.set('pendingRegisterToken', response.token, {
+      path: '/',
+      httpOnly: true,
+      secure: true,
+      sameSite: 'lax',
+      maxAge: 300, // 5 minutes
+    });
+    return { success: true };
   }
 } satisfies Actions;

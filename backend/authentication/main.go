@@ -66,6 +66,11 @@ type RegistrationPayload struct {
 	OTP            string `json:"otp"`
 }
 
+type ForgotPayload struct {
+	Email string `json:"email"`
+	OTP   string `json:"otp"`
+}
+
 type Config struct {
 	KeyPrefix string
 	Limit int
@@ -470,6 +475,22 @@ func (s *authServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb
 		}, err
 	}
 
+	// Check if user already exists
+	var existingUser string
+	err := s.db.QueryRowContext(ctx, "SELECT id FROM users WHERE email = $1", req.Email).Scan(&existingUser)
+	if err != nil && err != sql.ErrNoRows {
+		return &pb.RegisterResponse{
+			Success: false,
+			Error: "Something went wrong. Please try again later.",
+		}, nil
+	}
+
+	if existingUser != "" {
+		return &pb.RegisterResponse{
+			Success: false,
+			Error: "Email already exists!",
+		}, nil
+	}
 	// Check rate limit
 	ip, err := getIPFromContext(ctx)
 	if err != nil {
@@ -589,7 +610,10 @@ The Indeq Team
 		}, err
 	}
 
-
+	return &pb.RegisterResponse{
+		Success: true,
+		Token: token,
+	}, nil
 
 	// Store in the database
 	// tx, err := s.db.BeginTx(ctx, nil)
@@ -631,13 +655,10 @@ The Indeq Team
 	// if err := tx.Commit(); err != nil {
 	// 	return nil, fmt.Errorf("failed to commit transaction: %v", err)
 	// }
-
-	return &pb.RegisterResponse{Success: true}, nil
 }
 
 // VerifyOTP verifies a one-time password code for either registration or password reset
 func (s *authServer) VerifyOTP(ctx context.Context, req *pb.VerifyOTPRequest) (*pb.VerifyOTPResponse, error) {
-	// Validate request
 	if req.Code == "" {
 		return &pb.VerifyOTPResponse{
 			Success: false,
@@ -647,37 +668,144 @@ func (s *authServer) VerifyOTP(ctx context.Context, req *pb.VerifyOTPRequest) (*
 
 	if req.Type != "register" && req.Type != "forgot" {
 		return &pb.VerifyOTPResponse{
-			Success: false, 
+			Success: false,
 			Error: "Invalid verification type",
 		}, nil
 	}
 
-	// Get pending registration/reset from Redis
-	// key := fmt.Sprintf("%s:%s", req.Type, req.Code)
-	// email, err := s.redisClient.Get(ctx, key).Result()
-	// if err == redis.Nil {
-	// 	return &pb.VerifyOTPResponse{
-	// 		Success: false,
-	// 		Error:   "Invalid or expired code",
-	// 	}, nil
-	// } else if err != nil {
-	// 	return &pb.VerifyOTPResponse{
-	// 		Success: false,
-	// 		Error:   "Failed to verify code",
-	// 	}, err
-	// }
+	if req.Token == "" {
+		return &pb.VerifyOTPResponse{
+			Success: false,
+			Error: "No token found",
+		}, nil
+	}
 
-	// // Delete the OTP key since it's been used
-	// if err := s.redisClient.Del(ctx, key).Err(); err != nil {
-	// 	log.Printf("Failed to delete OTP key: %v", err)
-	// }
+	var redisKey string
+	if req.Type == "register" {
+		redisKey = fmt.Sprintf("reg:%s", req.Token)
+	} else if req.Type == "forgot" {
+		redisKey = fmt.Sprintf("forgot:%s", req.Token)
+	}
+	log.Printf("redisKey: %s", redisKey)
+	data, err := s.redisClient.Get(ctx, redisKey)
+	log.Printf("data: %s", data)
+	if err != nil {
+		return &pb.VerifyOTPResponse{
+			Success: false,
+			Error: "No data found",
+		}, nil
+	}
 
-	// For password reset, just return success
+	if req.Type == "register" {
+		var payload RegistrationPayload
+		if err := json.Unmarshal([]byte(data), &payload); err != nil {
+			return &pb.VerifyOTPResponse{
+				Success: false,
+				Error: "Invalid data",
+			}, nil
+		}
+
+		if payload.OTP != req.Code {
+			return &pb.VerifyOTPResponse{
+				Success: false,
+				Error: "Invalid code",
+			}, nil
+		}
+
+		// Store in the database
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			return &pb.VerifyOTPResponse{
+				Success: false,
+				Error:   err.Error(),
+			}, fmt.Errorf("failed to begin transaction: %v", err)
+		}
+		defer tx.Rollback()
+
+		var userId string
+		err = tx.QueryRowContext(
+			ctx,
+			"INSERT INTO users (email, password_hash, name) VALUES ($1, $2, $3) RETURNING id",
+			strings.ToLower(payload.Email), // Normalize email
+			payload.HashedPassword,
+			payload.Name,
+		).Scan(&userId)
+
+		if err != nil {
+			return &pb.VerifyOTPResponse{
+				Success: false,
+				Error:   "email already exists",
+			}, err
+		}
+
+		// Try to create a corresponding entry in the desktop tracking collection
+		dRes, err := s.desktopClient.SetupUserStats(ctx, &pb.SetupUserStatsRequest{
+			UserId: userId,
+		})
+		if err != nil || !dRes.Success {
+			return &pb.VerifyOTPResponse{
+				Success: false,
+				Error:   "failed to setup user datastores",
+			}, err
+		}
+
+		if err := tx.Commit(); err != nil {
+			return &pb.VerifyOTPResponse{
+				Success: false,
+				Error:   "failed to commit transaction",
+			}, err
+		}
+
+		currentTime := time.Now()
+		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+			"sub": userId,
+			"exp": currentTime.Add(24 * time.Hour).Unix(), // current 1 day expiration
+			"iat": currentTime.Unix(),
+			"nbf": currentTime.Unix(),
+		})
+
+		tokenString, err := token.SignedString(s.jwtSecret)
+		if err != nil {
+			return &pb.VerifyOTPResponse{
+				Success: false,
+				Error:   "failed to create token",
+			}, err
+		}
+
+		s.redisClient.Del(ctx, redisKey)
+		return &pb.VerifyOTPResponse{
+			Success: true,
+			Token: tokenString,
+			UserId: userId,
+		}, nil
+	} else if req.Type == "forgot" {
+		var payload ForgotPayload
+		if err := json.Unmarshal([]byte(data), &payload); err != nil {
+			return &pb.VerifyOTPResponse{
+				Success: false,
+				Error: "Invalid data",
+			}, nil
+		}
+
+		if payload.OTP != req.Code {
+			return &pb.VerifyOTPResponse{
+				Success: false,
+				Error: "Invalid code",
+			}, nil
+		}
+
+		s.redisClient.Del(ctx, redisKey)
+
+		return &pb.VerifyOTPResponse{
+			Success: true,
+		}, nil
+	}
+
 	return &pb.VerifyOTPResponse{
-		Success: true,
+		Success: false,
+		Error: "Invalid verification type",
 	}, nil
 }
-
 
 // rpc(context, verify request)
 //   - takes in a jwt and checks to make sure it's valid

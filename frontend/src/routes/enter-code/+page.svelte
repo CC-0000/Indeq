@@ -11,8 +11,8 @@
   export let data: { context: string };
 
   $: if (form?.success) {
-    toast.success('Verification successful');
     if (form.verifiedType === 'register') {
+      toast.success('Welcome aboard! 🎉');
       goto('/chat');
     } else if (form.verifiedType === 'forgot') {
       goto('/reset-password');

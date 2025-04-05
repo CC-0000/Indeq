@@ -4,19 +4,18 @@
   import { Input } from '$lib/components/ui/input/index.js';
   import { Button } from '$lib/components/ui/button/index.js';
   import { toast } from 'svelte-sonner';
-
+  import { goto } from '$app/navigation';
   import { enhance } from '$app/forms';
+  
+  export let form;
 
-  // Check for success or error in the server response
-  // $: if (form?.success) {
-  //   toast.success('Welcome aboard! 🎉');
-  // }
+  $: if (form?.success) {
+    goto('/enter-code?type=register');
+  }
 
   $: if (form?.error) {
     toast.error(form.error);
   }
-
-  export let form;
 </script>
 
 <svelte:head>

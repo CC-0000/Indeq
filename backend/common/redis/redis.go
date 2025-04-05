@@ -87,3 +87,19 @@ func (c *RedisClient) Set(ctx context.Context, key string, value interface{}, ex
 	}
 	return nil
 }
+
+func (c *RedisClient) Get(ctx context.Context, key string) (string, error) {
+	value, err := c.Client.Get(ctx, key).Result()
+	if err != nil {
+		return "", fmt.Errorf("failed to get key: %w", err)
+	}
+	return value, nil
+}
+
+func (c *RedisClient) Del(ctx context.Context, key string) error {
+	err := c.Client.Del(ctx, key).Err()
+	if err != nil {
+		return fmt.Errorf("failed to delete key: %w", err)
+	}
+	return nil
+}

@@ -1,26 +1,10 @@
 import type { Actions } from "@sveltejs/kit";
 import type { PageServerLoad } from "./$types";
-import { fail, redirect } from "@sveltejs/kit";
+import { fail } from "@sveltejs/kit";
 import { GO_BACKEND_URL } from "$env/static/private";
 
 export const load: PageServerLoad = async ({ url, cookies }) => {
   const type = url.searchParams.get('type');
-
-  if (!type || !['register', 'forgot'].includes(type)) {
-    throw redirect(303, '/register');
-  }
-
-  const pendingRegister = cookies.get('pendingRegister');
-  const pendingReset = cookies.get('pendingReset');
-
-  if (type === 'register' && !pendingRegister) {
-    throw redirect(303, '/register');
-  }
-
-  if (type === 'forgot' && !pendingReset) {
-    throw redirect(303, '/forgot-password');
-  }
-
   return { context: type };
 };
 
@@ -32,20 +16,22 @@ export const actions: Actions = {
     const resend = data.get('resend');
 
     if (!type || typeof type !== 'string') {
-      return fail(400, { error: 'Missing or invalid type' });
+      return fail(400, { error: 'Invalid type' });
     }
 
-    const email = type === 'register' ? cookies.get('pendingRegister') : cookies.get('pendingReset');
+    const token = cookies.get('pendingRegisterToken');
 
-    if (!email) {
-      return fail(400, { error: 'Missing or invalid email' });
+    if (!token) {
+      return fail(400, { error: 'Something went wrong. Please try again.' });
     }
 
     if (resend === 'true') {
       const resendRes = await fetch(`${GO_BACKEND_URL}/api/resend-otp`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type, email })
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ type, token })
       });
 
       if (!resendRes.ok) {
@@ -55,42 +41,37 @@ export const actions: Actions = {
 
       return { success: true };
     }
-
-    const verifyRes = await fetch(`${GO_BACKEND_URL}/api/verify-otp`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code, type, email })
+    else {
+      const verifyRes = await fetch(`${GO_BACKEND_URL}/api/verify-otp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ type, code, token })
     });
 
     if (!verifyRes.ok) {
       const msg = await verifyRes.text();
       return fail(verifyRes.status, { error: msg });
     }
-
+    
     const response = await verifyRes.json();
-
     if (!response.success) {
       return fail(400, { error: response.error });
     }
 
     if (type === 'register') {
-      // Set the JWT
-      if (response.token) {
-        cookies.set('jwt', response.token, {
-          httpOnly: true,
-          secure: true,
-          sameSite: 'lax',
-          path: '/',
-          maxAge: 60 * 60 * 24 // 1 day
-        });
-      }
-
-      cookies.delete('pendingRegister', { path: '/' });
+      cookies.set('jwt', response.token, {
+        path: '/',
+        httpOnly: true,
+        secure: true,
+        sameSite: 'lax',
+        maxAge: 60 * 60 * 24 // 1 day
+      });
+      cookies.delete('pendingRegisterToken', { path: '/' });
     }
 
-    return {
-      success: true,
-      verifiedType: type
-    };
+    return { success: true, verifiedType: type };
+    }
   }
-};
+} satisfies Actions;

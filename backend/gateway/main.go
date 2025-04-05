@@ -678,6 +678,7 @@ func handleRegisterGenerator(clients *ServiceClients) http.HandlerFunc {
 		httpResponse := &pb.HttpRegisterResponse{
 			Success: res.GetSuccess(),
 			Error:   res.GetError(),
+			Token:   res.GetToken(),
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(httpResponse)
@@ -733,6 +734,55 @@ func handleVerifyGenerator(clients *ServiceClients) http.HandlerFunc {
 
 		httpResponse := &pb.HttpVerifyResponse{
 			Valid: valid,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(httpResponse)
+	}
+}
+
+func handleVerifyOTPGenerator(clients *ServiceClients) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log.Println("Received verify otp request")
+
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var verifyOTPRequest pb.HttpVerifyOTPRequest
+		if err := json.NewDecoder(r.Body).Decode(&verifyOTPRequest); err != nil {
+			log.Printf("Error: %v", err)
+			http.Error(w, "Bad Request", http.StatusBadRequest)
+			return
+		}
+		
+		if verifyOTPRequest.Type != "register" && verifyOTPRequest.Type != "forgot" {
+			http.Error(w, "Invalid verification type", http.StatusBadRequest)
+			return
+		}
+
+		if verifyOTPRequest.Code == "" {
+			http.Error(w, "Code is required", http.StatusBadRequest)
+			return
+		}
+
+		res, err := clients.authClient.VerifyOTP(r.Context(), &pb.VerifyOTPRequest{
+			Type: verifyOTPRequest.Type,
+			Code: verifyOTPRequest.Code,
+			Token: verifyOTPRequest.Token,
+		})
+
+		if err != nil {
+			http.Error(w, "Something went wrong. Please try again.", http.StatusInternalServerError)
+			return
+		}
+
+		httpResponse := &pb.HttpVerifyOTPResponse{
+			Success: res.Success,
+			Error:   res.Error,
+			Token:   res.Token,
+			UserId:  res.UserId,
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -950,6 +1000,10 @@ func main() {
 	mux.HandleFunc("POST /api/waitlist", handleAddToWaitlist(serviceClients))
 	mux.HandleFunc("GET /api/desktop_stats", authMiddleware(handleGetDesktopStatsGenerator(serviceClients), serviceClients))
 	mux.HandleFunc("POST /api/manualcrawl", authMiddleware(handleManualCrawlGenerator(serviceClients), serviceClients))
+	mux.HandleFunc("POST /api/verify-otp", handleVerifyOTPGenerator(serviceClients))
+	// mux.HandleFunc("POST /api/resend-otp", handleResendOTPGenerator(serviceClients))
+	// mux.HandleFunc("POST /api/forgot-password", handleForgotPasswordGenerator(serviceClients))
+	// mux.HandleFunc("POST /api/reset-password", handleResetPasswordGenerator(serviceClients))
 
 	httpPort := os.Getenv("GATEWAY_ADDRESS")
 	server := &http.Server{
