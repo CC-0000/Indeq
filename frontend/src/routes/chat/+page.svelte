@@ -4,11 +4,11 @@
     import "katex/dist/katex.min.css";
     import { initialize, startPolling, stopPolling, desktopIntegration } from '$lib/stores/desktopIntegration';
     import { processReasoningMessage, processOutputMessage, toggleReasoning, processSource } from '$lib/utils/chat';
+    import { handleScroll, scrollToPosition, initScrollCheck, positionTooltip, hideTooltip } from '$lib/utils/sources';
     import { renderLatex, renderContent } from '$lib/utils/katex';
 	  import type { BotMessage, ChatState, Source } from "$lib/types/chat";
     import type { DesktopIntegration } from "$lib/types/desktopIntegration";
     import type { Conversation } from "$lib/types/conversation";
-    import { page } from '$app/stores';
 
   let userQuery = '';
   let requestId: string | null = null;
@@ -186,125 +186,9 @@
     });
   }
 
-    onDestroy(() => {
-        eventSource?.close();
-    });
-
-    function handleScroll(e: Event, messageIndex: number) {
-        const container = e.target as HTMLElement;
-        const atEnd = container.scrollLeft + container.clientWidth >= container.scrollWidth - 10;
-        const isScrollable = container.scrollWidth > container.clientWidth;
-        
-        // Hide tooltips - more thoroughly by targeting both aria attribute and style properties
-        const tooltips = document.querySelectorAll('.tooltip');
-        tooltips.forEach(tooltip => {
-            tooltip.setAttribute('aria-hidden', 'true');
-            (tooltip as HTMLElement).style.opacity = '0';
-            (tooltip as HTMLElement).style.visibility = 'hidden';
-        });
-        
-        messages = messages.map((msg, idx) => 
-            idx === messageIndex 
-                ? {...msg, sourcesScrollAtEnd: atEnd, isScrollable}
-                : msg
-        );
-    }
-
-    function checkScrollable(container: HTMLElement, messageIndex: number) {
-        const isScrollable = container.scrollWidth > container.clientWidth;
-        messages = messages.map((msg, idx) => 
-            idx === messageIndex 
-                ? {...msg, isScrollable}
-                : msg
-        );
-    }
-
-    function scrollToPosition(element: HTMLElement, messageIndex: number) {
-        const message = messages[messageIndex];
-        if (message.sourcesScrollAtEnd) {
-            element.scrollTo({ left: 0, behavior: 'smooth' });
-            // Wait for scroll animation to complete before updating state
-            element.addEventListener('scrollend', () => {
-                messages = messages.map((msg, idx) => 
-                    idx === messageIndex 
-                        ? {...msg, sourcesScrollAtEnd: false}
-                        : msg
-                );
-            }, { once: true });
-        } else {
-            element.scrollTo({ left: element.scrollWidth, behavior: 'smooth' }); // Add smooth scrolling
-            // Wait for scroll animation to complete before updating state
-            element.addEventListener('scrollend', () => {
-                messages = messages.map((msg, idx) => 
-                    idx === messageIndex 
-                        ? {...msg, sourcesScrollAtEnd: true}
-                        : msg
-                );
-            }, { once: true });
-        }
-    }
-
-    // Add the action to check scrollability on mount
-    function initScrollCheck(node: HTMLElement, messageIndex: number) {
-        checkScrollable(node, messageIndex);
-        
-        const resizeObserver = new ResizeObserver(() => {
-            checkScrollable(node, messageIndex);
-        });
-        
-        resizeObserver.observe(node);
-        
-        return {
-            destroy() {
-                resizeObserver.disconnect();
-            }
-        };
-    }
-
-    // Function to position tooltips
-    function positionTooltip(event: MouseEvent | FocusEvent) {
-        const container = event.currentTarget as HTMLElement;
-        const tooltipId = container.getAttribute('data-tooltip-id');
-        if (!tooltipId) return;
-        const tooltip = document.getElementById(tooltipId);
-        if (!tooltip) return;
-        
-        const rect = container.getBoundingClientRect();
-        const viewportHeight = window.innerHeight;
-        
-        // Check if tooltip would go off the bottom of the viewport
-        const tooltipHeight = 80; // Approximate height - you may want to calculate this dynamically
-        const spaceBelow = viewportHeight - rect.bottom;
-        
-        if (spaceBelow < tooltipHeight + 10) {
-            // If not enough space below, show tooltip above
-            tooltip.style.left = `${rect.left}px`;
-            tooltip.style.top = `${rect.top - tooltipHeight - 8}px`;
-            tooltip.style.transformOrigin = 'bottom center';
-        } else {
-            // Show tooltip below as usual
-            tooltip.style.left = `${rect.left}px`;
-            tooltip.style.top = `${rect.bottom + 8}px`;
-            tooltip.style.transformOrigin = 'top center';
-        }
-        
-        tooltip.setAttribute('aria-hidden', 'false');
-        (tooltip as HTMLElement).style.opacity = '1';
-        (tooltip as HTMLElement).style.visibility = 'visible';
-    }
-    
-    // Function to hide tooltip
-    function hideTooltip(event: MouseEvent | FocusEvent) {
-        const container = event.currentTarget as HTMLElement;
-        const tooltipId = container.getAttribute('data-tooltip-id');
-        if (!tooltipId) return;
-        
-        const tooltip = document.getElementById(tooltipId);
-        if (!tooltip) return;
-        tooltip.setAttribute('aria-hidden', 'true');
-        (tooltip as HTMLElement).style.opacity = '0';
-        (tooltip as HTMLElement).style.visibility = 'hidden';
-    }
+  onDestroy(() => {
+      eventSource?.close();
+  });
 
 </script>
 
@@ -449,7 +333,9 @@
                                   const target = e.target as HTMLElement;
                                   const scrollContainer = target.closest('.mb-6')?.querySelector('.scroll-container');
                                   if (scrollContainer) {
-                                      scrollToPosition(scrollContainer as HTMLElement, messageIndex);
+                                      scrollToPosition(messages, scrollContainer as HTMLElement, messageIndex, (msgs) => {
+                                          messages = msgs;
+                                      });
                                   }
                               }}
                           >
@@ -462,13 +348,22 @@
                       <div class="relative">
                           <div 
                               class="flex overflow-x-auto overflow-y-hidden pb-4 gap-3 scrollbar-thin scroll-container"
-                              on:scroll={(e) => handleScroll(e, messageIndex)}
-                              use:initScrollCheck={messageIndex}
+                              on:scroll={(e) => {
+                                  messages = handleScroll(messages, e, messageIndex);
+                              }}
+                              use:initScrollCheck={{
+                                node: conversationContainer, 
+                                messages, 
+                                messageIndex,
+                                setMessages: (msgs) => {
+                                    messages = msgs;
+                                }
+                              }}
                           >
                               {#each message.sources as source, sourceIndex}
                                   <div class="flex-none w-[325px]">
                                       <div 
-                                          class="bg-gray-50 rounded-md p-3 hover:bg-gray-100 transition-colors duration-200 shadow-sm border border-gray-100 relative tooltip-container"
+                                          class="bg-white rounded-md p-3 hover:bg-gray-100 transition-colors duration-200 shadow-sm border border-gray-100 relative tooltip-container"
                                           on:mouseenter={positionTooltip}
                                           on:mouseleave={hideTooltip}
                                           data-tooltip-id={`tooltip-${messageIndex}-${sourceIndex}`}
@@ -494,7 +389,7 @@
                                           </div>
                                           
                                           <!-- Source tooltip that appears on hover -->
-                                          <div class="tooltip fixed opacity-0 pointer-events-none text-gray-800 p-3 rounded shadow-md text-sm z-20 max-w-full whitespace-normal border border-gray-100" 
+                                          <div class="tooltip fixed bg-white opacity-0 pointer-events-none text-gray-800 p-3 rounded shadow-md text-sm z-20 max-w-full whitespace-normal border border-gray-100" 
                                                id={`tooltip-${messageIndex}-${sourceIndex}`}
                                                role="tooltip"
                                                aria-hidden="true">
