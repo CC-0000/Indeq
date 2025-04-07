@@ -19,7 +19,7 @@
         <div class="flex items-center justify-between">
             <div class="flex items-center gap-2 w-full h-full">
                 <a href="/chat" 
-                   class="w-full h-full rounded-md flex items-center"
+                   class="w-full h-full flex items-center"
                    aria-label="Home"
                 >
                     <div class="flex items-center gap-2 py-2 pl-4">
@@ -41,7 +41,7 @@
                             variant="ghost" 
                             size="icon"
                             on:click={toggleSidebar}
-                            class="rounded-lg" 
+                            class="rounded-xl" 
                             aria-label={$sidebarExpanded ? "Collapse sidebar" : "Expand sidebar"}
                             builders={[builder]}
                         >
@@ -66,7 +66,7 @@
                             variant="ghost" 
                             size="icon"
                             on:click={toggleSidebar}
-                            class="rounded-lg bg-[#eeefec] border shadow-sm" 
+                            class="rounded-xl bg-[#eeefec] border shadow-sm" 
                             aria-label={$sidebarExpanded ? "Collapse sidebar" : "Expand sidebar"}
                             builders={[builder]}
                         >

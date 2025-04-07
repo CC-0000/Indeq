@@ -1,14 +1,14 @@
 <script lang="ts">
-    import { ChevronDownIcon, CheckIcon, FileIcon, FileTextIcon, HardDriveIcon, SendIcon } from "svelte-feather-icons";
-    import { onDestroy, onMount } from 'svelte';
-    import "katex/dist/katex.min.css";
-    import { initialize, startPolling, stopPolling, desktopIntegration } from '$lib/stores/desktopIntegration';
-    import { processReasoningMessage, processOutputMessage, toggleReasoning, processSource } from '$lib/utils/chat';
-    import { handleScroll, scrollToPosition, initScrollCheck, positionTooltip, hideTooltip } from '$lib/utils/sources';
-    import { renderLatex, renderContent } from '$lib/utils/katex';
-	  import type { BotMessage, ChatState, Source } from "$lib/types/chat";
-    import type { DesktopIntegration } from "$lib/types/desktopIntegration";
-    import type { Conversation } from "$lib/types/conversation";
+  import { ChevronDownIcon, CheckIcon, FileIcon, FileTextIcon, HardDriveIcon, SendIcon } from "svelte-feather-icons";
+  import { onDestroy, onMount } from 'svelte';
+  import "katex/dist/katex.min.css";
+  import { initialize, startPolling, stopPolling, desktopIntegration } from '$lib/stores/desktopIntegration';
+  import { processReasoningMessage, processOutputMessage, toggleReasoning, processSource } from '$lib/utils/chat';
+  import { handleScroll, scrollToPosition, initScrollCheck, positionTooltip, hideTooltip } from '$lib/utils/sources';
+  import { renderLatex, renderContent } from '$lib/utils/katex';
+  import type { BotMessage, ChatState, Source } from "$lib/types/chat";
+  import type { DesktopIntegration } from "$lib/types/desktopIntegration";
+  import type { Conversation } from "$lib/types/conversation";
 
   let userQuery = '';
   let requestId: string | null = null;
@@ -197,119 +197,124 @@
   <meta name="description" content="Chat with Indeq" />
 </svelte:head>
 
-<main class="min-h-screen flex flex-col items-center justify-center p-6">
+<main class="min-h-screen flex flex-col items-center p-6">
   {#if !isFullscreen}
-    <!-- Centered Search Box -->
-    <div class="w-full max-w-3xl p-8 text-center">
-      <h1 class="text-4xl text-gray-900 mb-3">Indeq</h1>
-      <p class="text-gray-600 mb-6">
-        Crawl your content in seconds, so you can spend more time on what matters.
-      </p>
-
-      <!-- Search Input -->
-      <div class="flex flex-col gap-3 p-3 bg-white rounded-lg relative">
-        <textarea
-          bind:value={userQuery}
-          placeholder="Ask me anything..."
-          class="w-full p-2 bg-transparent focus:outline-none prose prose-lg resize-none overflow-y-auto textarea-scrollbar pr-12"
-          rows="1"
-          on:input={(e) => {
-            const target = e.target as HTMLTextAreaElement;
-            target.style.height = 'auto';
-            const newHeight = target.scrollHeight;
-            const maxHeight = 150;
-            target.style.height = Math.min(newHeight, maxHeight) + 'px';
-            target.style.overflowY = newHeight > maxHeight ? 'auto' : 'hidden';
-            
-            const sendButton = target.parentElement?.querySelector('.send-button-dynamic') as HTMLElement;
-            if (sendButton) {
-              const singleLineHeight = 36;
-              // If height is close to a single line, center it
-              if (newHeight <= singleLineHeight * 1.5) {
-                sendButton.classList.remove('bottom-3');
-                sendButton.classList.add('top-1/2', '-translate-y-1/2');
-              } else {
-                sendButton.classList.remove('top-1/2', '-translate-y-1/2');
-                sendButton.classList.add('bottom-3');
-              }
-            }
-          }}
-          on:keydown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              query();
-            }
-          }}
-        ></textarea>
-        <button
-          class="p-2 rounded-lg bg-primary text-white hover:bg-blue-600 transition-colors absolute right-3 z-10 top-1/2 -translate-y-1/2 send-button-dynamic flex items-center justify-center"
-          on:click={query}
-          disabled={isLoading}
-        >
-            <SendIcon size="20" />
-        </button>
+  <div class="flex-1 flex flex-col w-full max-w-3xl items-center mt-[calc(33vh)]">
+    <div class="w-full p-4 mb-3 text-center">
+      <div class="flex items-center justify-center gap-3">
+        <p class="text-3xl text-gray-700 font-light">How will you be productive today, Patrick?</p>
       </div>
-
-      <!-- Integration Badges -->
-      <div class="flex gap-4 mt-4 justify-center">
-        <!-- Desktop Integration -->
-        <div class="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-full">
-          <div class="relative">
-            <div
-              class="w-2 h-2 rounded-full"
-              style="background-color: {$desktopIntegration && $desktopIntegration.isCrawling && $desktopIntegration.crawledFiles != $desktopIntegration.totalFiles ? 'orange' : $desktopIntegration && $desktopIntegration.isOnline ? 'green' : 'red'}"
-            ></div>
-            <div
-              class="w-2 h-2 rounded-full absolute top-0 animate-ping"
-              style="background-color: {$desktopIntegration && $desktopIntegration.isCrawling && $desktopIntegration.crawledFiles != $desktopIntegration.totalFiles ? 'orange' : $desktopIntegration && $desktopIntegration.isOnline ? 'green' : 'red'}"
-            ></div>
+    </div>
+    
+    <!-- Chat Input -->
+    <div class="w-full flex justify-center z-10 opacity-95">
+      <div class="w-full max-w-3xl p-4 pt-0">
+        <div class="relative bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+          <textarea
+            bind:value={userQuery}
+            placeholder="Ask me anything..."
+            class="w-full px-4 py-3 pb-14 focus:outline-none prose prose-lg resize-none overflow-y-auto textarea-scrollbar border-none"
+            rows="1"
+            on:input={(e) => {
+              const target = e.target as HTMLTextAreaElement;
+              target.style.height = 'auto';
+              const newHeight = target.scrollHeight;
+              const maxHeight = 150;
+              target.style.height = Math.min(newHeight, maxHeight) + 'px';
+              target.style.overflowY = newHeight > maxHeight ? 'auto' : 'hidden';
+            }}
+            on:keydown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                query();
+              }
+            }}
+          ></textarea>
+          
+          <div class="absolute pr-2 bottom-0 left-0 right-0 bg-white p-2 px-4 flex items-center justify-between">
+            <!-- Integration Badges -->
+            <div class="flex gap-2">
+              <!-- Desktop Integration -->
+              <div class="flex items-center gap-1 bg-gray-50 px-2 py-1 rounded-full">
+                <div class="relative">
+                  <div
+                    class="w-2 h-2 rounded-full"
+                    style="background-color: {$desktopIntegration && $desktopIntegration.isCrawling && $desktopIntegration.crawledFiles != $desktopIntegration.totalFiles ? 'orange' : $desktopIntegration && $desktopIntegration.isOnline ? 'green' : 'red'}" 
+                  ></div>
+                  <div
+                    class="w-2 h-2 rounded-full absolute top-0 animate-ping"
+                    style="background-color: {$desktopIntegration && $desktopIntegration.isCrawling && $desktopIntegration.crawledFiles != $desktopIntegration.totalFiles ? 'orange' : $desktopIntegration && $desktopIntegration.isOnline ? 'green' : 'red'}"
+                  ></div>
+                </div>
+                <span class="text-xs text-gray-600 ml-1">Desktop {$desktopIntegration && $desktopIntegration.isCrawling && $desktopIntegration.crawledFiles != $desktopIntegration.totalFiles ? $desktopIntegration.crawledFiles + ' / ' + $desktopIntegration.totalFiles + ' files' : ""}</span>
+              </div>
+              
+              <!-- Google -->
+              <div class="flex items-center gap-1 bg-gray-50 px-2 py-1 rounded-full">
+                <div class="relative">
+                  <div
+                    class="w-2 h-2 rounded-full"
+                    style="background-color: {isIntegrated('GOOGLE') ? 'green' : 'red'}"
+                  ></div>
+                  <div
+                    class="w-2 h-2 rounded-full absolute top-0 animate-ping"
+                    style="background-color: {isIntegrated('GOOGLE') ? 'green' : 'red'}"
+                  ></div>
+                </div>
+                <span class="text-xs text-gray-600 ml-1">Google</span>
+              </div>
+              <!-- Microsoft -->
+              <div class="flex items-center gap-1 bg-gray-50 px-2 py-1 rounded-full">
+                <div class="relative">
+                  <div
+                    class="w-2 h-2 rounded-full"
+                    style="background-color: {isIntegrated('MICROSOFT') ? 'green' : 'red'}"
+                  ></div>
+                  <div
+                    class="w-2 h-2 rounded-full absolute top-0 animate-ping"
+                    style="background-color: {isIntegrated('MICROSOFT') ? 'green' : 'red'}"
+                  ></div>
+                </div>
+                <span class="text-xs text-gray-600 ml-1">Microsoft</span>
+              </div>
+              <!-- Notion -->
+              <div class="flex items-center gap-1 bg-gray-50 px-2 py-1 rounded-full">
+                <div class="relative">
+                  <div
+                    class="w-2 h-2 rounded-full"
+                    style="background-color: {isIntegrated('NOTION') ? 'green' : 'red'}"
+                  ></div>
+                  <div
+                    class="w-2 h-2 rounded-full absolute top-0 animate-ping"
+                    style="background-color: {isIntegrated('NOTION') ? 'green' : 'red'}"
+                  ></div>
+                </div>
+                <span class="text-xs text-gray-600 ml-1">Notion</span>
+              </div>
+            </div>
+            
+            <!-- Send Button -->
+            <button
+              class="p-1.5 rounded-lg bg-primary text-white hover:bg-blue-600 transition-colors flex items-center justify-center"
+              style="width: 32px; height: 32px;"
+              on:click={query}
+              disabled={isLoading}
+            >
+              {#if isLoading}
+                <div class="pulse-loader">
+                  <div class="bar"></div>
+                  <div class="bar"></div>
+                  <div class="bar"></div>
+                </div>
+              {:else}
+                <SendIcon size="18" />
+              {/if}
+            </button>
           </div>
-          <span class="text-sm text-gray-600">Desktop {$desktopIntegration && $desktopIntegration.isCrawling && $desktopIntegration.crawledFiles != $desktopIntegration.totalFiles ? $desktopIntegration.crawledFiles + ' / ' + $desktopIntegration.totalFiles + ' files' : ""}</span>
-        </div>
-        <!-- Google -->
-        <div class="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-full">
-          <div class="relative">
-            <div
-              class="w-2 h-2 rounded-full"
-              style="background-color: {isIntegrated('GOOGLE') ? 'green' : 'red'}"
-            ></div>
-            <div
-              class="w-2 h-2 rounded-full absolute top-0 animate-ping"
-              style="background-color: {isIntegrated('GOOGLE') ? 'green' : 'red'}"
-            ></div>
-          </div>
-          <span class="text-sm text-gray-600">Google</span>
-        </div>
-        <!-- Microsoft -->
-        <div class="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-full">
-          <div class="relative">
-            <div
-              class="w-2 h-2 rounded-full"
-              style="background-color: {isIntegrated('MICROSOFT') ? 'green' : 'red'}"
-            ></div>
-            <div
-              class="w-2 h-2 rounded-full absolute top-0 animate-ping"
-              style="background-color: {isIntegrated('MICROSOFT') ? 'green' : 'red'}"
-            ></div>
-          </div>
-          <span class="text-sm text-gray-600">Microsoft</span>
-        </div>
-        <!-- Notion -->
-        <div class="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-full">
-          <div class="relative">
-            <div
-              class="w-2 h-2 rounded-full"
-              style="background-color: {isIntegrated('NOTION') ? 'green' : 'red'}"
-            ></div>
-            <div
-              class="w-2 h-2 rounded-full absolute top-0 animate-ping"
-              style="background-color: {isIntegrated('NOTION') ? 'green' : 'red'}"
-            ></div>
-          </div>
-          <span class="text-sm text-gray-600">Notion</span>
         </div>
       </div>
     </div>
+  </div>
   {:else}
     <div class="flex-1 flex flex-col w-full max-w-3xl">
       <div
@@ -344,7 +349,7 @@
                           {/if}
                       </div>
 
-                      <!-- Scroll container -->
+                      <!-- Sources -->
                       <div class="relative">
                           <div 
                               class="flex overflow-x-auto overflow-y-hidden pb-4 gap-3 scrollbar-thin scroll-container"
@@ -363,7 +368,7 @@
                               {#each message.sources as source, sourceIndex}
                                   <div class="flex-none w-[325px]">
                                       <div 
-                                          class="bg-white rounded-md p-3 hover:bg-gray-100 transition-colors duration-200 shadow-sm border border-gray-100 relative tooltip-container"
+                                          class="bg-white rounded-xl p-3 hover:bg-gray-100 transition-colors duration-200 shadow-sm border border-gray-100 relative tooltip-container"
                                           on:mouseenter={positionTooltip}
                                           on:mouseleave={hideTooltip}
                                           data-tooltip-id={`tooltip-${messageIndex}-${sourceIndex}`}
@@ -389,7 +394,7 @@
                                           </div>
                                           
                                           <!-- Source tooltip that appears on hover -->
-                                          <div class="tooltip fixed bg-white opacity-0 pointer-events-none text-gray-800 p-3 rounded shadow-md text-sm z-20 max-w-full whitespace-normal border border-gray-100" 
+                                          <div class="tooltip fixed bg-white opacity-0 pointer-events-none text-gray-800 p-3 rounded-xl shadow-md text-sm z-20 max-w-full whitespace-normal border border-gray-100" 
                                                id={`tooltip-${messageIndex}-${sourceIndex}`}
                                                role="tooltip"
                                                aria-hidden="true">
@@ -496,10 +501,10 @@
       <!-- Chat Input -->
       <div class="bottom-0 left-0 right-0 flex justify-center z-10 opacity-95">
         <div class="w-full max-w-3xl p-4 pt-0">
-          <div class="relative bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+          <div class="relative bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
             <textarea
               bind:value={userQuery}
-              placeholder="Ask me anything..."
+              placeholder="How can I help you today?"
               class="w-full px-4 py-3 pb-14 focus:outline-none prose prose-lg resize-none overflow-y-auto textarea-scrollbar border-none"
               rows="1"
               on:input={(e) => {

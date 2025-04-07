@@ -46,7 +46,7 @@
 					href="/chat"
 					variant="ghost" 
 					size="icon" 
-					class="rounded-lg hover:bg-[#e6e4e3] {$page.url.pathname === '/chat' ? 'bg-[#e6e4e3]' : ''}"
+					class="rounded-xl hover:bg-[#e6e4e3] {$page.url.pathname === '/chat' ? 'bg-[#e6e4e3]' : ''}"
 					builders={[builder]}
 				>
 					<MessageCircleIcon class="size-5 stroke-1.5 {$page.url.pathname === '/chat' ? 'stroke-gray-700' : 'stroke-gray-500'}" />
@@ -61,7 +61,7 @@
 					href="/profile/integration"
 					variant="ghost" 
 					size="icon" 
-					class="rounded-lg hover:bg-[#e6e4e3] {$page.url.pathname === '/profile/integration' ? 'bg-[#e6e4e3]' : ''}"
+					class="rounded-xl hover:bg-[#e6e4e3] {$page.url.pathname === '/profile/integration' ? 'bg-[#e6e4e3]' : ''}"
 					builders={[builder]}
 				>
 					<GitBranchIcon class="size-5 stroke-1.5 {$page.url.pathname === '/profile/integration' ? 'stroke-gray-700' : 'stroke-gray-500'}" />
@@ -76,7 +76,7 @@
 					href="/profile/account"
 					variant="ghost" 
 					size="icon" 
-					class="rounded-lg hover:bg-[#e6e4e3] {$page.url.pathname === '/profile/account' ? 'bg-[#e6e4e3]' : ''}"
+					class="rounded-xl hover:bg-[#e6e4e3] {$page.url.pathname === '/profile/account' ? 'bg-[#e6e4e3]' : ''}"
 					builders={[builder]}
 				>
 					<UserIcon class="size-5 stroke-1.5 {$page.url.pathname === '/profile/account' ? 'stroke-gray-700' : 'stroke-gray-500'}" />
@@ -93,7 +93,7 @@
 					href="/chat"
 					variant="ghost" 
 					size="icon" 
-					class="rounded-lg hover:bg-[#e6e4e3] {$page.url.pathname === '/chat' ? 'bg-[#e6e4e3]' : ''}"
+					class="rounded-xl hover:bg-[#e6e4e3] {$page.url.pathname === '/chat' ? 'bg-[#e6e4e3]' : ''}"
 					builders={[builder]}
 				>
 					<MessageCircleIcon class="size-5 {$page.url.pathname === '/chat' ? 'stroke-gray-900' : 'stroke-gray-700'}" />
@@ -107,7 +107,7 @@
 					href="/profile/integration"
 					variant="ghost" 
 					size="icon" 
-					class="rounded-lg hover:bg-[#e6e4e3] {$page.url.pathname === '/profile/integration' ? 'bg-[#e6e4e3]' : ''}"
+					class="rounded-xl hover:bg-[#e6e4e3] {$page.url.pathname === '/profile/integration' ? 'bg-[#e6e4e3]' : ''}"
 					builders={[builder]}
 				>
 					<GitBranchIcon class="size-5 {$page.url.pathname === '/profile/integration' ? 'stroke-gray-900' : 'stroke-gray-700'}" />
