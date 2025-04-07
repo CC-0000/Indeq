@@ -9,6 +9,7 @@
   import type { BotMessage, ChatState, Source } from "$lib/types/chat";
   import type { DesktopIntegration } from "$lib/types/desktopIntegration";
   import type { Conversation } from "$lib/types/conversation";
+  import ModelSelector from "$lib/components/sidebar/model-selector.svelte";
 
   let userQuery = '';
   let requestId: string | null = null;
@@ -197,6 +198,11 @@
   <meta name="description" content="Chat with Indeq" />
 </svelte:head>
 
+<!-- Model Selector -->
+<div class="py-2 ml-3">
+  <ModelSelector />
+</div>
+
 <main class="min-h-screen flex flex-col items-center p-6">
   {#if !isFullscreen}
   <div class="flex-1 flex flex-col w-full max-w-3xl items-center mt-[calc(33vh)]">
@@ -209,7 +215,7 @@
     <!-- Chat Input -->
     <div class="w-full flex justify-center z-10 opacity-95">
       <div class="w-full max-w-3xl p-4 pt-0">
-        <div class="relative bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+        <div class="relative bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
           <textarea
             bind:value={userQuery}
             placeholder="Ask me anything..."

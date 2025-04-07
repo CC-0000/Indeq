@@ -92,8 +92,8 @@
     <MenubarNav/>
     <!-- Main content -->
     <div class="flex flex-col transition-all duration-300 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60"
-        class:md:pl-56={$sidebarExpanded} 
-        class:md:pl-14={!$sidebarExpanded}>
+        class:md:pl-[76px]={!$sidebarExpanded}
+        class:md:pl-[288px]={$sidebarExpanded}>
         <div class="flex flex-col transition-all duration-300 pb-16 md:pb-0">
             <slot/>
         </div>

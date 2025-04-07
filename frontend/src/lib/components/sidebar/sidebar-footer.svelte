@@ -9,8 +9,8 @@
 
     //TODO: Will pull from userStore
     $: user = $userStore.user || {
-        username: "Guest",
-        email: "",
+        username: "Patrick",
+        email: "dev@indeq.app",
         avatar: ""
     };
 
