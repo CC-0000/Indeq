@@ -11,6 +11,7 @@
   let isLoading = false;
   let conversationId = '';
   let requestId = '';
+  let chatInput: HTMLTextAreaElement;
 
   export let data: { 
     integrations: string[],
@@ -22,6 +23,8 @@
     if (data.desktopInfo.isCrawling) {
       startPolling();
     }
+    // Focus the chat input when the component mounts
+    chatInput?.focus();
   });
 
   const handleQuery = async () => {
@@ -79,6 +82,7 @@
       <div class="w-full max-w-3xl p-4 pt-0 pb-0">
         <div class="relative bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
           <textarea
+            bind:this={chatInput}
             bind:value={userQuery}
             placeholder="Ask me anything..."
             class="w-full px-4 py-3 pb-14 focus:outline-none prose prose-lg resize-none overflow-y-auto textarea-scrollbar border-none"

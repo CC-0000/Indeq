@@ -10,11 +10,13 @@
 	import { onMount } from 'svelte';
 
 	let loading = true;
+	let isMac = false;
 
 	// Fetch conversation history when component mounts
 	onMount(async () => {
 		await conversationStore.fetchConversations();
 		loading = false;
+		isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
 	});
 
 	$: conversations = $conversationStore.headers;
@@ -46,11 +48,16 @@
 	<Button 
 		href="/chat" 
 		variant="outline"
-		class="w-full justify-center gap-2 mt-1 rounded-lg bg-primary text-white transition-all duration-300 ease-in-out shrink-0"
+		class="w-full justify-between gap-2 mt-1 rounded-lg bg-primary text-white transition-all duration-300 ease-in-out shrink-0"
 	>
-		<MessageCircleIcon class="size-5" />
+		<div class="flex items-center gap-2">
+			<MessageCircleIcon class="size-5" />
+			{#if $sidebarExpanded}
+				<span class="transition-all duration-300 ease-in-out" in:fade={{ delay: 150 }}>New Chat</span>
+			{/if}
+		</div>
 		{#if $sidebarExpanded}
-			<span class="transition-all duration-300 ease-in-out" in:fade={{ delay: 150 }}>New Chat</span>
+			<span class="transition-all duration-300 ease-in-out" in:fade={{ delay: 150 }}>{isMac ? '⌘K' : 'Ctrl+K'}</span>
 		{/if}
 	</Button>
 	<h2 class="text-sm font-medium text-gray-700 mr-2 mt-2 shrink-0">
