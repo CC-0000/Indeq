@@ -32,14 +32,17 @@ const createConversationStore = () => {
         }
         
         const data = await response.json();
-        update(state => ({ 
-          ...state, 
-          headers: data.conversation_headers.map((header: ConversationPayload) => ({
-            conversationId: header.conversation_id,
-            title: header.title
-          })) || [],
-          loading: false 
-        }));
+        if(data.conversation_headers){
+            update(state => ({ 
+                ...state, 
+                headers: data.conversation_headers.map((header: ConversationPayload) => ({
+                  conversationId: header.conversation_id,
+                  title: header.title
+                })) || [],
+                loading: false 
+              }));
+        }
+        
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Failed to fetch conversations';
         update(state => ({ ...state, loading: false, error: errorMessage }));

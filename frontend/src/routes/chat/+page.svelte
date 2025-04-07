@@ -202,11 +202,11 @@
 </svelte:head>
 
 <!-- Model Selector -->
-<div class="sticky top-0 py-2 ml-3">
+<div class="sticky top-0 pt-2 ml-3">
   <ModelSelector />
 </div>
 
-<main class="min-h-[calc(100vh-36px)] flex flex-col items-center px-6">
+<main class="min-h-[calc(100vh-60px)] flex flex-col items-center px-6">
   {#if !isFullscreen}
   <div class="flex-1 flex flex-col w-full max-w-3xl items-center mt-[calc(33vh)]">
     <div class="w-full p-4 mb-3 text-center">
