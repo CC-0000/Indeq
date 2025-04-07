@@ -1,6 +1,6 @@
 <script lang="ts">
 	import NavHistory from "./nav-history.svelte";
-	import { sidebarExpanded } from '../../stores/sidbarStore';
+	import { sidebarExpanded, toggleSidebar } from '../../stores/sidbarStore';
 	import { Button } from "$lib/components/ui/button";
 	import { GitBranchIcon, MessageCircleIcon, SettingsIcon, UserIcon } from 'svelte-feather-icons';
 	import * as Tooltip from "$lib/components/ui/tooltip";
@@ -12,23 +12,36 @@
 	let loading = true;
 	let isMac = false;
 
-	// Fetch conversation history when component mounts
-	onMount(async () => {
-		await conversationStore.fetchConversations();
-		loading = false;
-		isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+	onMount(() => {
+		// Add keyboard shortcut listener
+		const handleKeyDown = (e: KeyboardEvent) => {
+			if ((e.metaKey || e.ctrlKey) && e.key === '\\') {
+				e.preventDefault();
+				toggleSidebar();
+			}
+		};
+
+		window.addEventListener('keydown', handleKeyDown);
+		
+		// Initialize async data
+		(async () => {
+			await conversationStore.fetchConversations();
+			loading = false;
+			isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+		})();
+
+		return () => {
+			window.removeEventListener('keydown', handleKeyDown);
+		};
 	});
 
 	$: conversations = $conversationStore.headers;
 	$: error = $conversationStore.error;
 	$: loading = $conversationStore.loading;
 	
-	// Completely prevent scroll events from propagating to the parent
 	function handleWheel(event: WheelEvent) {
-		// Always stop propagation and prevent default for wheel events
 		event.stopPropagation();
 		
-		// Check if we need to manually scroll the element
 		const element = event.currentTarget as HTMLElement;
 		const { scrollTop, scrollHeight, clientHeight } = element;
 		

@@ -58,6 +58,7 @@
                     </Tooltip.Trigger>
                     <Tooltip.Content side="right" sideOffset={5}>
                         {$sidebarExpanded ? "Collapse" : "Expand"}
+                        <span class="text-xs">- ⌘\</span>
                     </Tooltip.Content>
                 </Tooltip.Root>
             </div>
@@ -89,6 +90,7 @@
                     </Tooltip.Trigger>
                     <Tooltip.Content side="right" sideOffset={5}>
                         {$sidebarExpanded ? "Collapse" : "Expand"}
+                        <span class="text-xs">- ⌘\</span>
                     </Tooltip.Content>
                 </Tooltip.Root>
             </div>

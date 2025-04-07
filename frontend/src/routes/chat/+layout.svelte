@@ -12,8 +12,6 @@ onNavigate((navigation) => {
 		});
 	});
 });
-
-
 </script>
 
 <div>
@@ -23,7 +21,6 @@ onNavigate((navigation) => {
       
     <slot />
 </div>
-
 
 <style>
     @keyframes move-up {
