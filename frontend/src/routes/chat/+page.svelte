@@ -15,6 +15,7 @@
   let requestId: string | null = null;
   let conversationId: string | null = null;
   let isLoading = false;
+  let sourcesLoading = false;
   const truncateLength = 80;
 
   let eventSource: EventSource | null = null;
@@ -144,7 +145,8 @@
                 return;
             case "source":
                 processSource(payload, botMessage);
-                setTimeout(() => {
+                sourcesLoading = true;
+                setTimeout(async () => {
                     const scrollContainer = document.querySelector(`.scroll-container:last-child`) as HTMLElement;
                     if (scrollContainer) {
                         const isScrollable = scrollContainer.scrollWidth > scrollContainer.clientWidth;
@@ -154,7 +156,8 @@
                                 : msg
                         );
                     }
-                }, 0);
+                    sourcesLoading = false;
+                }, 50);
                 return;
             case "end":
                 if (eventSource) {
@@ -199,13 +202,13 @@
 </svelte:head>
 
 <!-- Model Selector -->
-<div class="py-2 ml-3">
+<div class="sticky top-0 py-2 ml-3">
   <ModelSelector />
 </div>
 
-<main class="min-h-screen flex flex-col items-center p-6">
+<main class="min-h-[calc(100vh-36px)] flex flex-col items-center px-6">
   {#if !isFullscreen}
-  <div class="flex-1 flex flex-col w-full max-w-3xl items-center mt-[calc(33vh)]">
+  <div class="flex-1 flex flex-col w-full max-w-3xl items-center mt-[calc(30vh)]">
     <div class="w-full p-4 mb-3 text-center">
       <div class="flex items-center justify-center gap-3">
         <p class="text-3xl text-gray-700 font-light">How will you be productive today, Patrick?</p>
@@ -214,7 +217,7 @@
     
     <!-- Chat Input -->
     <div class="w-full flex justify-center z-10 opacity-95">
-      <div class="w-full max-w-3xl p-4 pt-0">
+      <div class="w-full max-w-3xl p-4 pt-0 pb-0">
         <div class="relative bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
           <textarea
             bind:value={userQuery}
@@ -322,14 +325,15 @@
     </div>
   </div>
   {:else}
-    <div class="flex-1 flex flex-col w-full max-w-3xl">
-      <div
-        class="conversation-container flex-1 overflow-y-auto p-4 space-y-6 pb-32"
+    <div class="flex-1 flex flex-col w-full max-w-3xl h-screen">
+      <div 
+        class="conversation-container flex-1 overflow-y-auto !overflow-x-hidden p-4 space-y-6 pb-32 max-w-full"
         bind:this={conversationContainer}
+        style="height: calc(100vh - 100px);"
       >
         {#each messages as message, messageIndex}
           <div class="space-y-4">
-            <div class="prose max-w-3xl mx-auto prose-lg">
+            <div class="prose max-w-3xl mx-auto prose-lg w-full overflow-x-hidden">
               {#if message.sender === 'user'}
                 <div class="font-bold prose-xl break-words whitespace-normal overflow-hidden w-full">{message.text}</div>
               {:else}
@@ -356,9 +360,9 @@
                       </div>
 
                       <!-- Sources -->
-                      <div class="relative">
+                      <div class="relative !overflow-hidden w-full">
                           <div 
-                              class="flex overflow-x-auto overflow-y-hidden pb-4 gap-3 scrollbar-thin scroll-container"
+                              class="flex overflow-x-auto overflow-y-hidden pb-4 gap-3 scrollbar-thin scroll-container max-w-full"
                               on:scroll={(e) => {
                                   messages = handleScroll(messages, e, messageIndex);
                               }}
@@ -505,12 +509,12 @@
         {/each}
       </div>
       <!-- Chat Input -->
-      <div class="bottom-0 left-0 right-0 flex justify-center z-10 opacity-95">
+      <div class="sticky bottom-0 left-0 right-0 flex justify-center z-10 opacity-95 focus-within:opacity-100">
         <div class="w-full max-w-3xl p-4 pt-0">
-          <div class="relative bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+          <div class="relative bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
             <textarea
               bind:value={userQuery}
-              placeholder="How can I help you today?"
+              placeholder="Ask me anything..."
               class="w-full px-4 py-3 pb-14 focus:outline-none prose prose-lg resize-none overflow-y-auto textarea-scrollbar border-none"
               rows="1"
               on:input={(e) => {
@@ -617,6 +621,12 @@
 </main>
 
 <style>
+  :global(html, body) {
+    overflow-x: hidden;
+    position: relative;
+    width: 100%;
+  }
+  
   .reasoning-container {
     position: relative;
     width: 100%;
@@ -662,6 +672,16 @@
 
   .scrollbar-thin::-webkit-scrollbar-thumb:hover {
       background: #666;
+  }
+  
+  /* No scrollbar class to hide scrollbars but maintain functionality */
+  .no-scrollbar {
+      -ms-overflow-style: none;  /* IE and Edge */
+      scrollbar-width: none;  /* Firefox */
+  }
+  
+  .no-scrollbar::-webkit-scrollbar {
+      display: none;  /* Chrome, Safari and Opera */
   }
 
   .group {

@@ -73,7 +73,7 @@
             
             {#if isDropdownOpen}
                 <div class="absolute z-50 mt-1 min-w-[180px] bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
-                    <ul class="py-1">
+                    <ul>
                         {#each modelStore.availableModels as model}
                             <li>
                                 <button

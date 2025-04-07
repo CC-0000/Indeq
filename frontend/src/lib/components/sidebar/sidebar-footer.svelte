@@ -16,7 +16,7 @@
 
 </script>
   
-<div class="py-2" class:px-3={$sidebarExpanded} class:px-2={!$sidebarExpanded}>
+<div class="py-2 shrink-0" class:px-3={$sidebarExpanded} class:px-2={!$sidebarExpanded}>
     <Popover.Root>
         <Popover.Trigger asChild let:builder>
             <Button
