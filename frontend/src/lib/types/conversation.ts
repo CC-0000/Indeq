@@ -1,15 +1,26 @@
+
 export interface ConversationHeader {
-  conversationId: string;
+  conversation_id: string;
   title: string;
+}
+
+export interface ConversationSources {
+  type: string;
+  excerpt_number: number;
+  title: string;
+  file_path: string;
+  file_url: string;
+  extension: string;
 }
 
 export interface ConversationMessage {
   sender: 'user' | 'model';
   text: string;
+  sources?: ConversationSources[];
 }
 
 export interface Conversation {
-  conversationId: string;
+  conversation_id: string;
   title: string;
-  fullMessages: ConversationMessage[];
+  full_messages: ConversationMessage[];
 } 

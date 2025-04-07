@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { BotMessage, ChatState, Source } from "$lib/types/chat";
+  import type { ChatMessage, ChatState, ChatSource } from "$lib/types/chat";
   import { scrollToPosition, handleScroll, initScrollCheck, positionTooltip, hideTooltip } from "$lib/utils/sources";
   import { processReasoningMessage, processOutputMessage, toggleReasoning, processSource } from '$lib/utils/chat';
   import { desktopIntegration } from '$lib/stores/desktopIntegration';
@@ -7,11 +7,11 @@
   
   import { isIntegrated } from "$lib/utils/integration";
   import { CheckIcon, ChevronDownIcon, FileIcon, FileTextIcon, HardDriveIcon, SendIcon } from "svelte-feather-icons";
-  import type { Conversation } from "$lib/types/conversation";
+  import { onMount } from "svelte";
 
-  export let data: { id: string, conversation: Conversation, integrations: string[] };
+  export let data: { id: string, title: string, conversation: ChatMessage[], integrations: string[], requestId: string };
   
-  let messages: BotMessage[] = [];
+  let messages: ChatMessage[] = [];
   let userQuery: string = '';
   let conversationContainer: HTMLDivElement;
   let isReasoning = false;
@@ -19,6 +19,44 @@
   let isLoading = false;
   let requestId: string | null = null;
   let eventSource: EventSource | null = null;
+  let currentConversationId: string | null = null;
+
+  // Add reactive statement to update messages when data changes
+  $: {
+    if (data.id) {
+      if (currentConversationId !== data.id) {
+        currentConversationId = data.id;
+        
+        eventSource?.close();
+        
+        messages = [];
+        
+        if (data.requestId) {
+          requestId = data.requestId;
+          messages = [{ text: data.title, sender: "user", reasoning: [], reasoningSectionCollapsed: false, sources: [] }];
+          messages = [...messages, { text: "", sender: "bot", reasoning: [], reasoningSectionCollapsed: false, sources: [] }];
+          streamResponse();
+        } else {
+          messages = data.conversation;
+        }
+      }
+    }
+  }
+
+  onMount(() => {
+    if (data.id) {
+      currentConversationId = data.id;
+      
+      if (data.requestId) {
+        requestId = data.requestId;
+        messages = [{ text: data.title, sender: "user", reasoning: [], reasoningSectionCollapsed: false, sources: [] }];
+        messages = [...messages, { text: "", sender: "bot", reasoning: [], reasoningSectionCollapsed: false, sources: [] }];
+        streamResponse();
+      } else {
+        messages = data.conversation;
+      }
+    }
+  });
   
   async function query() {
     try {
@@ -27,7 +65,7 @@
       const res = await fetch('/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: userQuery, conversation_id: data.conversation.conversationId ?? '' })
+        body: JSON.stringify({ query: userQuery, conversation_id: data.id })
       });
 
       if (!res.ok) {
@@ -37,17 +75,39 @@
         return;
       }
 
-      messages = [...messages, { text: userQuery, sender: "user", reasoning: [], reasoningSectionCollapsed: false, sources: [] }];
-
+      currentConversationId = data.id;
+      
+      // Add user message to conversation
+      const userMessage = { 
+        text: userQuery, 
+        sender: "user", 
+        reasoning: [], 
+        reasoningSectionCollapsed: false, 
+        sources: [] 
+      };
+      messages = [...messages, userMessage];
+      
       const chatData = await res.json();
       requestId = chatData.request_id;
 
-      messages = [...messages, { text: "", sender: "bot", reasoning: [], reasoningSectionCollapsed: false, sources: [] }];
+      // Add empty bot message that will be updated when streaming
+      const botMessage = { 
+        text: "", 
+        sender: "bot", 
+        reasoning: [], 
+        reasoningSectionCollapsed: false, 
+        sources: [],
+        sourcesScrollAtEnd: false,
+        isScrollable: false 
+      };
+      messages = [...messages, botMessage];
+      
+      // Start streaming the response
       streamResponse();
-      } catch (err) {
+    } catch (err) {
       console.error('sendMessage error:', err);
       isLoading = false;
-      }
+    }
 
     userQuery = '';
     
@@ -75,15 +135,25 @@
 
     const url = `/chat?requestId=${encodeURIComponent(requestId)}`;
     eventSource = new EventSource(url);
-    let botMessage : BotMessage = { 
+    let botMessage : ChatMessage;
+    
+    // Reference the last message in the messages array if it's a bot message
+    // This ensures we're updating the correct message when streaming
+    if (messages.length > 0 && messages[messages.length - 1].sender === 'bot') {
+      botMessage = messages[messages.length - 1];
+    } else {
+      // This shouldn't happen normally, but just in case
+      botMessage = { 
         text: "", 
         sender: "bot", 
         reasoning: [] as {text: string; collapsed: boolean}[],
         reasoningSectionCollapsed: false,
-        sources: [] as Source[],
+        sources: [] as ChatSource[],
         sourcesScrollAtEnd: false,
         isScrollable: false 
-    };
+      };
+      messages = [...messages, botMessage];
+    }
 
     eventSource.addEventListener('message', (evt) => {
       const payload = JSON.parse(evt.data);
@@ -102,11 +172,15 @@
                 const scrollContainer = document.querySelector(`.scroll-container:last-child`) as HTMLElement;
                 if (scrollContainer) {
                     const isScrollable = scrollContainer.scrollWidth > scrollContainer.clientWidth;
-                    messages = messages.map((msg, idx) => 
-                        idx === messages.length - 1
-                            ? {...msg, isScrollable}
-                            : msg
-                    );
+                    // Find the index of the bot message we're updating
+                    const botIndex = messages.findIndex(m => m === botMessage);
+                    if (botIndex !== -1) {
+                        messages = messages.map((msg, idx) => 
+                            idx === botIndex
+                                ? {...msg, isScrollable}
+                                : msg
+                        );
+                    }
                 }
             }, 50);
             return;
@@ -137,13 +211,23 @@
     eventSource.addEventListener('error', (err) => {
       console.error('SSE error:', err);
       eventSource?.close();
+      eventSource = null;
       isLoading = false;
     });
   }
+
+  // Handle cleanup when component is destroyed
+  onMount(() => {
+    return () => {
+      eventSource?.close();
+      eventSource = null;
+      isLoading = false;
+    };
+  });
 </script>
 
 <svelte:head>
-  <title>Indeq - {data.conversation.title}</title>
+  <title>Indeq - {data.title}</title>
   <meta name="description" content="Chat with Indeq" />
 </svelte:head>
 

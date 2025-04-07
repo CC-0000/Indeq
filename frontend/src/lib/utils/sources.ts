@@ -1,6 +1,6 @@
-import type { BotMessage } from "$lib/types/chat";
+import type { ChatMessage } from "$lib/types/chat";
 
-export function handleScroll(messages: BotMessage[], e: Event, messageIndex: number): BotMessage[] {
+export function handleScroll(messages: ChatMessage[], e: Event, messageIndex: number): ChatMessage[] {
     const container = e.target as HTMLElement;
     const atEnd = container.scrollLeft + container.clientWidth >= container.scrollWidth - 10;
     const isScrollable = container.scrollWidth > container.clientWidth;
@@ -20,7 +20,7 @@ export function handleScroll(messages: BotMessage[], e: Event, messageIndex: num
     );
 }
 
-export function checkScrollable(messages: BotMessage[], container: HTMLElement, messageIndex: number): BotMessage[] {
+export function checkScrollable(messages: ChatMessage[], container: HTMLElement, messageIndex: number): ChatMessage[] {
     const isScrollable = container.scrollWidth > container.clientWidth;
     return messages.map((msg, idx) => 
         idx === messageIndex 
@@ -29,7 +29,7 @@ export function checkScrollable(messages: BotMessage[], container: HTMLElement, 
     );
 }
 
-export function scrollToPosition(messages: BotMessage[], element: HTMLElement, messageIndex: number, setMessages: (msgs: BotMessage[]) => void): void {
+export function scrollToPosition(messages: ChatMessage[], element: HTMLElement, messageIndex: number, setMessages: (msgs: ChatMessage[]) => void): void {
     const message = messages[messageIndex];
     if (message.sourcesScrollAtEnd) {
         element.scrollTo({ left: 0, behavior: 'smooth' });
@@ -57,9 +57,9 @@ export function scrollToPosition(messages: BotMessage[], element: HTMLElement, m
 // Add the action to check scrollability on mount
 export function initScrollCheck(node: HTMLElement, params: { 
     node: HTMLElement | null;
-    messages: BotMessage[]; 
+    messages: ChatMessage[]; 
     messageIndex: number;
-    setMessages: (msgs: BotMessage[]) => void;
+    setMessages: (msgs: ChatMessage[]) => void;
 }) {
     const { messages, messageIndex, setMessages } = params;
     

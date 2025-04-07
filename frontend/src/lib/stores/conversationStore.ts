@@ -36,7 +36,7 @@ const createConversationStore = () => {
             update(state => ({ 
                 ...state, 
                 headers: data.conversation_headers.map((header: ConversationPayload) => ({
-                  conversationId: header.conversation_id,
+                  conversation_id: header.conversation_id,
                   title: header.title
                 })) || [],
                 loading: false 
