@@ -8,14 +8,13 @@
   import { renderLatex, renderContent } from '$lib/utils/katex';
   import type { BotMessage, ChatState, Source } from "$lib/types/chat";
   import type { DesktopIntegration } from "$lib/types/desktopIntegration";
-  import type { Conversation } from "$lib/types/conversation";
   import ModelSelector from "$lib/components/sidebar/model-selector.svelte";
+  import { isIntegrated } from "$lib/utils/integration";
 
   let userQuery = '';
   let requestId: string | null = null;
   let conversationId: string | null = null;
   let isLoading = false;
-  let sourcesLoading = false;
   const truncateLength = 80;
 
   let eventSource: EventSource | null = null;
@@ -25,38 +24,14 @@
   let conversationContainer: HTMLElement | null = null;
 
   export let data: { 
-    integrations: string[], 
+    integrations: string[],
     desktopInfo: DesktopIntegration,
-    conversation: Conversation | null 
-  };
-
-  const isIntegrated = (provider: string): boolean => {
-    return data.integrations.includes(provider.toUpperCase());
   };
 
   onMount(() => {
     initialize(data.desktopInfo);
     if (data.desktopInfo.isCrawling) {
       startPolling();
-    }
-
-    if (data.conversation) {
-      conversationId = data.conversation.conversationId;
-      
-      const convertedMessages: BotMessage[] = [];
-      for (const msg of data.conversation.fullMessages) {
-        convertedMessages.push({
-          text: msg.text,
-          sender: msg.sender,
-          reasoning: [],
-          reasoningSectionCollapsed: false,
-          sources: [],
-          sourcesScrollAtEnd: false,
-          isScrollable: false
-        });
-      }
-      
-      messages = convertedMessages;
     }
   });
   
@@ -81,8 +56,7 @@
         return;
       }
 
-
-        messages = [...messages, { text: userQuery, sender: "user", reasoning: [], reasoningSectionCollapsed: false, sources: [] }];
+      messages = [...messages, { text: userQuery, sender: "user", reasoning: [], reasoningSectionCollapsed: false, sources: [] }];
 
       const data = await res.json();
       requestId = data.request_id;
@@ -145,7 +119,6 @@
                 return;
             case "source":
                 processSource(payload, botMessage);
-                sourcesLoading = true;
                 setTimeout(async () => {
                     const scrollContainer = document.querySelector(`.scroll-container:last-child`) as HTMLElement;
                     if (scrollContainer) {
@@ -156,7 +129,6 @@
                                 : msg
                         );
                     }
-                    sourcesLoading = false;
                 }, 50);
                 return;
             case "end":
@@ -200,11 +172,6 @@
   <title>Indeq</title>
   <meta name="description" content="Chat with Indeq" />
 </svelte:head>
-
-<!-- Model Selector -->
-<div class="sticky top-0 pt-2 ml-3">
-  <ModelSelector />
-</div>
 
 <main class="min-h-[calc(100vh-60px)] flex flex-col items-center px-6">
   {#if !isFullscreen}
@@ -263,11 +230,11 @@
                 <div class="relative">
                   <div
                     class="w-2 h-2 rounded-full"
-                    style="background-color: {isIntegrated('GOOGLE') ? 'green' : 'red'}"
+                    style="background-color: {isIntegrated(data.integrations, 'GOOGLE') ? 'green' : 'red'}"
                   ></div>
                   <div
                     class="w-2 h-2 rounded-full absolute top-0 animate-ping"
-                    style="background-color: {isIntegrated('GOOGLE') ? 'green' : 'red'}"
+                    style="background-color: {isIntegrated(data.integrations, 'GOOGLE') ? 'green' : 'red'}"
                   ></div>
                 </div>
                 <span class="text-xs text-gray-600 ml-1">Google</span>
@@ -277,11 +244,11 @@
                 <div class="relative">
                   <div
                     class="w-2 h-2 rounded-full"
-                    style="background-color: {isIntegrated('MICROSOFT') ? 'green' : 'red'}"
+                    style="background-color: {isIntegrated(data.integrations, 'MICROSOFT') ? 'green' : 'red'}"
                   ></div>
                   <div
                     class="w-2 h-2 rounded-full absolute top-0 animate-ping"
-                    style="background-color: {isIntegrated('MICROSOFT') ? 'green' : 'red'}"
+                    style="background-color: {isIntegrated(data.integrations, 'MICROSOFT') ? 'green' : 'red'}"
                   ></div>
                 </div>
                 <span class="text-xs text-gray-600 ml-1">Microsoft</span>
@@ -291,11 +258,11 @@
                 <div class="relative">
                   <div
                     class="w-2 h-2 rounded-full"
-                    style="background-color: {isIntegrated('NOTION') ? 'green' : 'red'}"
+                    style="background-color: {isIntegrated(data.integrations, 'NOTION') ? 'green' : 'red'}"
                   ></div>
                   <div
                     class="w-2 h-2 rounded-full absolute top-0 animate-ping"
-                    style="background-color: {isIntegrated('NOTION') ? 'green' : 'red'}"
+                    style="background-color: {isIntegrated(data.integrations, 'NOTION') ? 'green' : 'red'}"
                   ></div>
                 </div>
                 <span class="text-xs text-gray-600 ml-1">Notion</span>
@@ -556,11 +523,11 @@
                   <div class="relative">
                     <div
                       class="w-2 h-2 rounded-full"
-                      style="background-color: {isIntegrated('GOOGLE') ? 'green' : 'red'}"
+                      style="background-color: {isIntegrated(data.integrations, 'GOOGLE') ? 'green' : 'red'}"
                     ></div>
                     <div
                       class="w-2 h-2 rounded-full absolute top-0 animate-ping"
-                      style="background-color: {isIntegrated('GOOGLE') ? 'green' : 'red'}"
+                      style="background-color: {isIntegrated(data.integrations, 'GOOGLE') ? 'green' : 'red'}"
                     ></div>
                   </div>
                   <span class="text-xs text-gray-600 ml-1">Google</span>
@@ -570,11 +537,11 @@
                   <div class="relative">
                     <div
                       class="w-2 h-2 rounded-full"
-                      style="background-color: {isIntegrated('MICROSOFT') ? 'green' : 'red'}"
+                      style="background-color: {isIntegrated(data.integrations, 'MICROSOFT') ? 'green' : 'red'}"
                     ></div>
                     <div
                       class="w-2 h-2 rounded-full absolute top-0 animate-ping"
-                      style="background-color: {isIntegrated('MICROSOFT') ? 'green' : 'red'}"
+                      style="background-color: {isIntegrated(data.integrations, 'MICROSOFT') ? 'green' : 'red'}"
                     ></div>
                   </div>
                   <span class="text-xs text-gray-600 ml-1">Microsoft</span>
@@ -584,11 +551,11 @@
                   <div class="relative">
                     <div
                       class="w-2 h-2 rounded-full"
-                      style="background-color: {isIntegrated('NOTION') ? 'green' : 'red'}"
+                      style="background-color: {isIntegrated(data.integrations, 'NOTION') ? 'green' : 'red'}"
                     ></div>
                     <div
                       class="w-2 h-2 rounded-full absolute top-0 animate-ping"
-                      style="background-color: {isIntegrated('NOTION') ? 'green' : 'red'}"
+                      style="background-color: {isIntegrated(data.integrations, 'NOTION') ? 'green' : 'red'}"
                     ></div>
                   </div>
                   <span class="text-xs text-gray-600 ml-1">Notion</span>

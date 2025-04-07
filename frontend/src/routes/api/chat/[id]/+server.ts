@@ -17,14 +17,14 @@ export const GET: RequestHandler = async ({ cookies, params }) => {
   const conversationId = params.id;
   
   try {
-    const response = await fetch(`${GO_BACKEND_URL}/api/conversation`, {
+    const response = await fetch(`${GO_BACKEND_URL}/api/get_conversation_history`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${session}`
       },
       body: JSON.stringify({
-        conversationId
+        conversation_id: conversationId
       })
     });
     
