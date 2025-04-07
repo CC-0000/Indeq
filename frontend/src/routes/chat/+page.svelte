@@ -208,7 +208,7 @@
 
 <main class="min-h-[calc(100vh-36px)] flex flex-col items-center px-6">
   {#if !isFullscreen}
-  <div class="flex-1 flex flex-col w-full max-w-3xl items-center mt-[calc(30vh)]">
+  <div class="flex-1 flex flex-col w-full max-w-3xl items-center mt-[calc(33vh)]">
     <div class="w-full p-4 mb-3 text-center">
       <div class="flex items-center justify-center gap-3">
         <p class="text-3xl text-gray-700 font-light">How will you be productive today, Patrick?</p>
