@@ -38,7 +38,7 @@ const createConversationStore = () => {
                 headers: data.conversation_headers.map((header: ConversationPayload) => ({
                   conversation_id: header.conversation_id,
                   title: header.title
-                })) || [],
+                })).reverse() || [],
                 loading: false 
               }));
         }

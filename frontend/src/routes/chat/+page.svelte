@@ -12,6 +12,7 @@
   let conversationId = '';
   let requestId = '';
   let chatInput: HTMLTextAreaElement;
+  let isNavigating = false;
 
   export let data: { 
     integrations: string[],
@@ -71,14 +72,14 @@
 
 <main class="min-h-[calc(100vh-60px)] flex flex-col items-center px-6">
   <div class="flex-1 flex flex-col w-full max-w-3xl items-center mt-[calc(33vh)]">
-    <div class="w-full p-4 mb-3 text-center">
+    <div class="w-full p-4 mb-3 text-center welcome-text" style="view-transition-name: welcome-text;">
       <div class="flex items-center justify-center gap-3">
         <p class="text-3xl text-gray-700 font-light">How will you be productive today, Patrick?</p>
       </div>
     </div>
     
     <!-- Chat Input -->
-    <div class="w-full flex justify-center z-10 opacity-95">
+    <div class="w-full flex justify-center z-10 opacity-95 chat-input-container">
       <div class="w-full max-w-3xl p-4 pt-0 pb-0">
         <div class="relative bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
           <textarea
@@ -267,6 +268,22 @@
     }
     50% {
       transform: scaleY(1.35);
+    }
+  }
+
+  /* Welcome text animation */
+  .welcome-text {
+    animation: fly-in-from-top 0.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  }
+
+  @keyframes fly-in-from-top {
+    from {
+      opacity: 0;
+      transform: translateY(-50px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
     }
   }
 </style>

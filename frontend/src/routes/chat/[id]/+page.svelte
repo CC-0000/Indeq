@@ -8,6 +8,7 @@
   import { isIntegrated } from "$lib/utils/integration";
   import { CheckIcon, ChevronDownIcon, FileIcon, FileTextIcon, HardDriveIcon, SendIcon } from "svelte-feather-icons";
   import { onMount } from "svelte";
+  import { conversationStore } from "$lib/stores/conversationStore";
 
   export let data: { id: string, title: string, conversation: ChatMessage[], integrations: string[], requestId: string };
   
@@ -52,6 +53,7 @@
         messages = [{ text: data.title, sender: "user", reasoning: [], reasoningSectionCollapsed: false, sources: [] }];
         messages = [...messages, { text: "", sender: "bot", reasoning: [], reasoningSectionCollapsed: false, sources: [] }];
         streamResponse();
+        conversationStore.fetchConversations();
       } else {
         messages = data.conversation;
       }
@@ -412,7 +414,7 @@
       {/each}
     </div>
     <!-- Chat Input -->
-    <div class="sticky bottom-0 left-0 right-0 flex justify-center z-10 opacity-95 focus-within:opacity-100">
+    <div class="sticky bottom-0 left-0 right-0 flex justify-center z-10 opacity-95 focus-within:opacity-100 chat-input-container">
       <div class="w-full max-w-3xl p-4 pt-0">
         <div class="relative bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
           <textarea

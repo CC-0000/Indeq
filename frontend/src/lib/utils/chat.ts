@@ -94,6 +94,9 @@ export function toggleReasoning(messageIndex: number, reasoningIndex: number, st
 // Function to parse conversation payload into ChatMessage[]
 export function parseConversation(conversation: Conversation): ChatMessage[] {
   const messages: ChatMessage[] = [];
+  if(!conversation.full_messages) {
+    return messages;
+  }
 
   for (const message of conversation.full_messages) {
     if (message.sender === "user") {
