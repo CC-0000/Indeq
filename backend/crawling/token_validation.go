@@ -190,7 +190,7 @@ func validateMicrosoftAccessToken(accessToken string) (*TokenInfo, error) {
 					errorMsg += fmt.Sprintf(", inner code: %s, inner message: %s",
 						errorResponse.Error.InnerError.Code, errorResponse.Error.InnerError.Message)
 				}
-				return fmt.Errorf(errorMsg)
+				return fmt.Errorf("%s", errorMsg)
 			}
 			return fmt.Errorf("invalid Microsoft access token, status: %d, body: %s", resp.StatusCode, string(body))
 		}

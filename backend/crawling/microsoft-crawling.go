@@ -168,77 +168,123 @@ func (s *crawlingServer) ProcessMicrosoftDriveFiles(ctx context.Context, client 
 	}
 	defer os.RemoveAll(tempDir)
 
-	for i := range files.Files {
-		localPath := filepath.Join(tempDir, filepath.Base(files.Files[i].File[0].Metadata.FilePath))
-		err := downloadFile(files.Files[i].File[0].Metadata.ResourceID, token.AccessToken, localPath)
-		if err != nil {
-			log.Printf("Error downloading file: %s", err)
-			continue
-		}
-
-		var text string
-		mimeType := files.Files[i].File[0].Metadata.ResourceType
-		switch mimeType {
-		case "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/msword":
-			text, err = extractDocxText(localPath)
-		case "application/vnd.openxmlformats-officedocument.presentationml.presentation", "application/vnd.ms-powerpoint":
-			text, err = extractPptxText(localPath)
-		default:
-			continue
-		}
-		if err != nil {
-			log.Printf("Error extracting text from file: %s", err)
-			continue
-		}
-
-		// Split text into words first
-		words := strings.Fields(text)
-		totalWords := len(words)
-		if totalWords == 0 {
-			continue
-		}
-
-		chunkSize := 400
-		overlap := 80
-		if totalWords < chunkSize {
-			chunkSize = totalWords
-			overlap = 0
-		}
-
-		var fileChunks []TextChunkMessage
-		for start := 0; start < totalWords; start += chunkSize - overlap {
-			end := start + chunkSize
-			if end > totalWords {
-				end = totalWords
-			}
-
-			if start > 0 && end-start < overlap {
-				continue
-			}
-
-			chunkWords := words[start:end]
-			chunkText := strings.Join(chunkWords, " ")
-
-			metadata := files.Files[i].File[0].Metadata
-			metadata.ChunkID = fmt.Sprintf("startoffset:%d-endoffset:%d", start, end-1)
-
-			fileChunks = append(fileChunks, TextChunkMessage{
-				Metadata: metadata,
-				Content:  chunkText,
-			})
-			if err := s.sendChunkToVector(ctx, fileChunks[len(fileChunks)-1]); err != nil {
-				log.Printf("Error sending chunk to vector: %s", err)
-				continue
-			}
-		}
-
-		files.Files[i].File = fileChunks
-		if err := s.sendFileDoneSignal(ctx, userID, files.Files[i].File[0].Metadata.FilePath, "MICROSOFT"); err != nil {
-			log.Printf("Error sending file done signal: %s", err)
-			continue
-		}
+	type result struct {
+		index int
+		file  File
+		err   error
 	}
-	return files, nil
+
+	resultChan := make(chan result, len(files.Files))
+	var wg sync.WaitGroup
+
+	for i := range files.Files {
+		wg.Add(1)
+		go func(index int, file File) {
+			defer wg.Done()
+
+			if len(file.File) == 0 {
+				resultChan <- result{index: index, file: file}
+				return
+			}
+
+			localPath := filepath.Join(tempDir, filepath.Base(file.File[0].Metadata.FilePath))
+			err := downloadFile(file.File[0].Metadata.ResourceID, token.AccessToken, localPath)
+			if err != nil {
+				resultChan <- result{index: index, err: fmt.Errorf("error downloading file: %w", err)}
+				return
+			}
+
+			var text string
+			mimeType := file.File[0].Metadata.ResourceType
+			switch mimeType {
+			case "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/msword":
+				text, err = extractDocxText(localPath)
+			case "application/vnd.openxmlformats-officedocument.presentationml.presentation", "application/vnd.ms-powerpoint":
+				text, err = extractPptxText(localPath)
+			default:
+				resultChan <- result{index: index, file: file}
+				return
+			}
+			if err != nil {
+				log.Printf("Error extracting text from file: %s", err)
+				resultChan <- result{index: index, file: file}
+				return
+			}
+
+			words := strings.Fields(text)
+			totalWords := len(words)
+			if totalWords == 0 {
+				resultChan <- result{index: index, file: file}
+				return
+			}
+
+			chunkSize := 400
+			overlap := 80
+			if totalWords < chunkSize {
+				chunkSize = totalWords
+				overlap = 0
+			}
+
+			var fileChunks []TextChunkMessage
+
+			for start := 0; start < totalWords; start += chunkSize - overlap {
+				end := start + chunkSize
+				if end > totalWords {
+					end = totalWords
+				}
+
+				if start > 0 && end-start < overlap {
+					continue
+				}
+
+				chunkWords := words[start:end]
+				chunkText := strings.Join(chunkWords, " ")
+
+				metadata := file.File[0].Metadata
+				metadata.ChunkID = fmt.Sprintf("startoffset:%d-endoffset:%d", start, end-1)
+
+				fileChunks = append(fileChunks, TextChunkMessage{
+					Metadata: metadata,
+					Content:  chunkText,
+				})
+				if err := s.sendChunkToVector(ctx, fileChunks[len(fileChunks)-1]); err != nil {
+					log.Printf("Error sending chunk to vector: %s", err)
+					continue
+				}
+			}
+
+			processedFile := File{
+				File: fileChunks,
+			}
+
+			if err := s.sendFileDoneSignal(ctx, file.File[0].Metadata.UserID, file.File[0].Metadata.FilePath, "MICROSOFT"); err != nil {
+				log.Printf("Error sending file done signal for %s: %v", file.File[0].Metadata.FilePath, err)
+			}
+
+			resultChan <- result{index: index, file: processedFile}
+		}(i, files.Files[i])
+	}
+
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	processedFiles := make([]File, len(files.Files))
+	var errs []error
+	for res := range resultChan {
+		if res.err != nil {
+			errs = append(errs, res.err)
+			continue
+		}
+		processedFiles[res.index] = res.file
+	}
+
+	if len(errs) > 0 {
+		return ListofFiles{}, fmt.Errorf("some files failed to process: %v", errs)
+	}
+
+	return ListofFiles{Files: processedFiles}, nil
 }
 
 func downloadFile(itemID, accessToken, outputPath string) error {

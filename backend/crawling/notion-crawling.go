@@ -249,6 +249,9 @@ func (nc *NotionChunker) ProcessBlocks(blockResponse NotionPageResponse) []Proce
 
 // GenerateChunks creates chunks with the specified size and overlap
 func (nc *NotionChunker) GenerateChunks(pageResponse NotionObject, userID, pageTitle string) []TextChunkMessage {
+	if pageTitle == "" {
+		pageTitle = "Untitled"
+	}
 	var chunks []TextChunkMessage
 
 	totalWords := 0

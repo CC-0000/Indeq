@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -107,6 +108,44 @@ const (
 	`
 )
 
+// Global mutexes for database operations
+var (
+	userMutexes         = make(map[string]*sync.Mutex)
+	userMutexesLock     sync.Mutex
+	resourceMutexes     = make(map[string]*sync.Mutex)
+	resourceMutexesLock sync.Mutex
+)
+
+// getUserMutex returns a mutex for a specific user, creating it if it doesn't exist
+func getUserMutex(userID string) *sync.Mutex {
+	userMutexesLock.Lock()
+	defer userMutexesLock.Unlock()
+
+	if mutex, exists := userMutexes[userID]; exists {
+		return mutex
+	}
+
+	mutex := &sync.Mutex{}
+	userMutexes[userID] = mutex
+	return mutex
+}
+
+// getResourceMutex returns a mutex for a specific resource, creating it if it doesn't exist
+func getResourceMutex(userID, resourceID string) *sync.Mutex {
+	key := fmt.Sprintf("%s_%s", userID, resourceID)
+
+	resourceMutexesLock.Lock()
+	defer resourceMutexesLock.Unlock()
+
+	if mutex, exists := resourceMutexes[key]; exists {
+		return mutex
+	}
+
+	mutex := &sync.Mutex{}
+	resourceMutexes[key] = mutex
+	return mutex
+}
+
 // StoreGoogleDriveToken stores a Google Drive retrieval token
 func StoreGoogleDriveToken(ctx context.Context, db *sql.DB, userID, retrievalToken string) error {
 	token := RetrievalToken{
@@ -156,6 +195,10 @@ func StoreMicrosoftDriveToken(ctx context.Context, db *sql.DB, userID, retrieval
 
 // UpsertRetrievalToken inserts or updates a retrieval token
 func UpsertRetrievalToken(ctx context.Context, db *sql.DB, token RetrievalToken) error {
+	mutex := getUserMutex(token.UserID)
+	mutex.Lock()
+	defer mutex.Unlock()
+
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
@@ -188,6 +231,10 @@ func UpsertRetrievalToken(ctx context.Context, db *sql.DB, token RetrievalToken)
 
 // DeleteRetrievalTokens deletes all retrieval tokens for a user and platform
 func DeleteRetrievalTokens(ctx context.Context, db *sql.DB, userID, platform string) (int64, error) {
+	mutex := getUserMutex(userID)
+	mutex.Lock()
+	defer mutex.Unlock()
+
 	result, err := db.ExecContext(ctx, deleteRetrievalTokensQuery, userID, platform)
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete retrieval tokens: %w", err)
@@ -197,6 +244,10 @@ func DeleteRetrievalTokens(ctx context.Context, db *sql.DB, userID, platform str
 
 // GetRetrievalTokens gets all retrieval tokens for a user
 func GetRetrievalTokens(ctx context.Context, db *sql.DB, userID string) ([]RetrievalToken, error) {
+	mutex := getUserMutex(userID)
+	mutex.Lock()
+	defer mutex.Unlock()
+
 	rows, err := db.QueryContext(ctx, getRetrievalTokensQuery, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query retrieval tokens: %w", err)
@@ -242,6 +293,10 @@ func GetOutdatedTokens(ctx context.Context, db *sql.DB) ([]RetrievalToken, error
 
 // UpsertProcessingStatus updates or inserts a processing status for a resource
 func UpsertProcessingStatus(ctx context.Context, db *sql.DB, userID string, resourceID string, platform string, isProcessed bool) error {
+	mutex := getResourceMutex(userID, resourceID)
+	mutex.Lock()
+	defer mutex.Unlock()
+
 	now := time.Now()
 	_, err := db.ExecContext(ctx, upsertProcessingStatusQuery,
 		userID,
@@ -260,6 +315,10 @@ func UpsertProcessingStatus(ctx context.Context, db *sql.DB, userID string, reso
 
 // UpdateCrawlingDone updates the crawling_done status for a user
 func UpdateCrawlingDone(ctx context.Context, db *sql.DB, userID string, platform string, done bool) error {
+	mutex := getUserMutex(userID)
+	mutex.Lock()
+	defer mutex.Unlock()
+
 	now := time.Now()
 	_, err := db.ExecContext(ctx, updateCrawlingDoneQuery,
 		userID,
@@ -275,6 +334,10 @@ func UpdateCrawlingDone(ctx context.Context, db *sql.DB, userID string, platform
 
 // GetProcessingStatus gets the processing status for a user
 func GetProcessingStatus(ctx context.Context, db *sql.DB, userID string, platform string) (map[string]bool, bool, error) {
+	mutex := getUserMutex(userID)
+	mutex.Lock()
+	defer mutex.Unlock()
+
 	rows, err := db.QueryContext(ctx, getProcessingStatusQuery, userID, platform)
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to query processing status: %w", err)
@@ -302,6 +365,10 @@ func GetProcessingStatus(ctx context.Context, db *sql.DB, userID string, platfor
 
 // DeleteProcessingStatus deletes all processing status entries for a user
 func DeleteProcessingStatus(ctx context.Context, db *sql.DB, userID string, platform string) error {
+	mutex := getUserMutex(userID)
+	mutex.Lock()
+	defer mutex.Unlock()
+
 	_, err := db.ExecContext(ctx, deleteProcessingStatusQuery, userID, platform)
 	if err != nil {
 		return fmt.Errorf("failed to delete processing status: %w", err)
@@ -321,6 +388,10 @@ func generateShortKey(userID string, service string) string {
 
 // AddChunkMapping adds a new chunk mapping to the database with retries
 func (s *crawlingServer) AddChunkMapping(ctx context.Context, userID string, serverName string, chunkID string, resourceID string, service string) (string, error) {
+	mutex := getResourceMutex(userID, resourceID)
+	mutex.Lock()
+	defer mutex.Unlock()
+
 	maxRetries := 3
 	var lastErr error
 
@@ -336,7 +407,7 @@ func (s *crawlingServer) AddChunkMapping(ctx context.Context, userID string, ser
 		}
 		lastErr = err
 		log.Printf("Warning: Failed to add chunk mapping (attempt %d): %v", i+1, err)
-		time.Sleep(time.Duration(i+1) * 100 * time.Millisecond) // Exponential backoff
+		time.Sleep(time.Duration(i+1) * 100 * time.Millisecond)
 	}
 
 	return "", fmt.Errorf("failed to add chunk mapping after %d attempts: %w", maxRetries, lastErr)
@@ -429,6 +500,10 @@ func (s *crawlingServer) verifyChunkMapping(ctx context.Context, userID string, 
 
 // DeleteChunkMappingsForFile deletes all chunk mappings for a specific resource with retries
 func (s *crawlingServer) DeleteChunkMappingsForFile(ctx context.Context, userID string, serverName string, resourceID string) error {
+	mutex := getResourceMutex(userID, resourceID)
+	mutex.Lock()
+	defer mutex.Unlock()
+
 	maxRetries := 3
 	var lastErr error
 
