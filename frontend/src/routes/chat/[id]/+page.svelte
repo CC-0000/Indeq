@@ -10,7 +10,13 @@
   import { onMount } from "svelte";
   import { conversationStore } from "$lib/stores/conversationStore";
 
-  export let data: { id: string, title: string, conversation: ChatMessage[], integrations: string[], requestId: string };
+  export let data: { 
+    id: string, 
+    title: string, 
+    conversation: ChatMessage[], 
+    integrations: string[], 
+    newConversation: boolean
+  };
   
   let messages: ChatMessage[] = [];
   let userQuery: string = '';
@@ -18,22 +24,18 @@
   let isReasoning = false;
   let truncateLength = 80;
   let isLoading = false;
-  let requestId: string | null = null;
   let eventSource: EventSource | null = null;
   let currentConversationId: string | null = null;
 
-  // Add reactive statement to update messages when data changes
   $: {
     if (data.id) {
       if (currentConversationId !== data.id) {
         currentConversationId = data.id;
         
         eventSource?.close();
-        
         messages = [];
-        
-        if (data.requestId) {
-          requestId = data.requestId;
+                
+        if (data.newConversation) { // new conversation
           messages = [{ text: data.title, sender: "user", reasoning: [], reasoningSectionCollapsed: false, sources: [] }];
           messages = [...messages, { text: "", sender: "bot", reasoning: [], reasoningSectionCollapsed: false, sources: [] }];
           streamResponse();
@@ -47,9 +49,8 @@
   onMount(() => {
     if (data.id) {
       currentConversationId = data.id;
-      
-      if (data.requestId) {
-        requestId = data.requestId;
+          
+      if (data.newConversation) { // new conversation
         messages = [{ text: data.title, sender: "user", reasoning: [], reasoningSectionCollapsed: false, sources: [] }];
         messages = [...messages, { text: "", sender: "bot", reasoning: [], reasoningSectionCollapsed: false, sources: [] }];
         streamResponse();
@@ -90,7 +91,6 @@
       messages = [...messages, userMessage];
       
       const chatData = await res.json();
-      requestId = chatData.request_id;
 
       // Add empty bot message that will be updated when streaming
       const botMessage = { 
@@ -124,18 +124,12 @@
   }
 
   function streamResponse() {
-    if (!requestId) {
-      console.error('No requestId to stream');
-      isLoading = false;
-      return;
-    }
 
     // Close any existing connection
     eventSource?.close();
-
     isReasoning = false;
 
-    const url = `/chat?requestId=${encodeURIComponent(requestId)}`;
+    const url = `/chat?conversationId=${encodeURIComponent(data.id)}`;
     eventSource = new EventSource(url);
     let botMessage : ChatMessage;
     

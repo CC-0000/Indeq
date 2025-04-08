@@ -4,9 +4,8 @@ import type { PageServerLoad } from './$types';
 import { parseConversation } from '$lib/utils/chat';
 import type { ChatMessage } from '$lib/types/chat';
 
-export const load: PageServerLoad = async ({ params, cookies, fetch, url }) => {
+export const load: PageServerLoad = async ({ params, cookies, fetch }) => {
     const id = params.id;
-    const requestId = url.searchParams.get('requestId');
     const session = cookies.get('jwt');
     if (!session) {
       // No user, redirect to login
@@ -32,9 +31,15 @@ export const load: PageServerLoad = async ({ params, cookies, fetch, url }) => {
 
     const title = conversationData.conversation.title;
     let parsedConversation: ChatMessage[] = [];
-
-    if (!requestId) {
-      parsedConversation = parseConversation(conversationData.conversation);
+    
+    // Check if this navigation came from handleQuery
+    const chatSource = cookies.get('chatSource');
+    const newConversation = chatSource === 'query';
+    parsedConversation = parseConversation(conversationData.conversation);
+    
+    // Clear the cookie after reading it
+    if (newConversation) {
+      cookies.delete('chatSource', { path: '/' });
     }
     
     return {
@@ -42,6 +47,6 @@ export const load: PageServerLoad = async ({ params, cookies, fetch, url }) => {
       title,
       conversation: parsedConversation,
       integrations: providers,
-      requestId
+      newConversation
     };
 }

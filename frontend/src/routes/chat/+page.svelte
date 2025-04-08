@@ -48,15 +48,14 @@
 
     const chatData = await res.json();
     conversationId = chatData.conversation_id;
-    requestId = chatData.request_id;
 
     if (conversationId) {
-      goto(`/chat/${conversationId}?requestId=${requestId}`);
+      document.cookie = "chatSource=query; path=/; max-age=5"; // 5 second expiry
+      goto(`/chat/${conversationId}`);
     } else {
       console.error('No conversation ID returned from server');
       isLoading = false;
     }
-
   }
   
   onDestroy(() => {
