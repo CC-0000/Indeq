@@ -155,6 +155,13 @@ func (s *crawlingServer) NewCrawler(ctx context.Context, userID string, accessTo
 			log.Printf("Error in NotionCrawler for user %s: %v", userID, err)
 		}
 		return files, err
+	case "MICROSOFT":
+		client := createMicrosoftOAuthClient(ctx, accessToken)
+		files, err := s.MicrosoftCrawler(ctx, client, userID)
+		if err != nil {
+			log.Printf("Error in MicrosoftCrawler for user %s: %v", userID, err)
+		}
+		return files, err
 	default:
 		return ListofFiles{}, fmt.Errorf("unsupported platform: %s", platform)
 	}
@@ -175,6 +182,13 @@ func (s *crawlingServer) UpdateCrawler(ctx context.Context, accessToken string, 
 		newRetrievalToken, processedFiles, err := s.UpdateCrawlNotion(ctx, client, userID, retrievalToken)
 		if err != nil {
 			return "", ListofFiles{}, fmt.Errorf("error updating Notion crawl: %w", err)
+		}
+		return newRetrievalToken, processedFiles, nil
+	case "MICROSOFT":
+		client := createMicrosoftOAuthClient(ctx, accessToken)
+		newRetrievalToken, processedFiles, err := s.UpdateCrawlMicrosoft(ctx, client, userID, retrievalToken)
+		if err != nil {
+			return "", ListofFiles{}, fmt.Errorf("error updating Microsoft crawl: %w", err)
 		}
 		return newRetrievalToken, processedFiles, nil
 	default:
@@ -200,6 +214,13 @@ func RetrieveCrawler(ctx context.Context, accessToken string, metadataList []Met
 			textChunks = append(textChunks, textChunk)
 			if err != nil {
 				return File{}, fmt.Errorf("error retrieving Notion Doc chunk: %w", err)
+			}
+		case "MICROSOFT":
+			client := createMicrosoftOAuthClient(ctx, accessToken)
+			textChunk, err := RetrieveMicrosoftCrawler(ctx, client, metadata)
+			textChunks = append(textChunks, textChunk)
+			if err != nil {
+				return File{}, fmt.Errorf("error retrieving Microsoft Doc chunk: %w", err)
 			}
 		default:
 			return File{}, fmt.Errorf("unsupported platform: %s", metadata.Platform)
@@ -301,6 +322,16 @@ func updateCrawlerWithToken(ctx context.Context, s *crawlingServer, userID, plat
 			return ListofFiles{}, err
 		}
 		return processedFiles, nil
+	} else if platform == "MICROSOFT" {
+		newRetrievalToken, processedFiles, err := s.UpdateCrawlMicrosoft(ctx, createMicrosoftOAuthClient(ctx, accessToken), userID, retrievalToken)
+		if err != nil {
+			log.Printf("Error updating crawler: %v", err)
+			return ListofFiles{}, err
+		}
+		if err := storeRetrievalToken(ctx, s.db, userID, platform, service, newRetrievalToken); err != nil {
+			return ListofFiles{}, err
+		}
+		return processedFiles, nil
 	}
 	return ListofFiles{}, fmt.Errorf("unsupported platform: %s", platform)
 }
@@ -326,8 +357,8 @@ func setupDatabase(db *sql.DB) error {
         CREATE TABLE IF NOT EXISTS retrievalTokens (
             id SERIAL PRIMARY KEY,
             user_id UUID NOT NULL,
-			platform TEXT NOT NULL CHECK (platform IN ('GOOGLE', 'NOTION')),
-            service TEXT NOT NULL CHECK (service IN ('GOOGLE_DRIVE', 'GOOGLE_GMAIL', 'NOTION')),
+			platform TEXT NOT NULL CHECK (platform IN ('GOOGLE', 'NOTION', 'MICROSOFT')),
+            service TEXT NOT NULL CHECK (service IN ('GOOGLE_DRIVE', 'GOOGLE_GMAIL', 'NOTION', 'MICROSOFT_DRIVE')),
             retrieval_token TEXT NOT NULL,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -351,7 +382,7 @@ func setupDatabase(db *sql.DB) error {
 			id SERIAL PRIMARY KEY,
 			user_id UUID NOT NULL,
 			resource_id TEXT NOT NULL,
-			platform TEXT NOT NULL CHECK (platform IN ('GOOGLE', 'NOTION')),
+			platform TEXT NOT NULL CHECK (platform IN ('GOOGLE', 'NOTION', 'MICROSOFT')),
 			is_processed BOOLEAN DEFAULT FALSE,
 			crawling_done BOOLEAN DEFAULT FALSE,
 			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -545,6 +576,14 @@ func (s *crawlingServer) startCrawlingSignalReading(ctx context.Context) error {
 	})
 	defer notionReader.Close()
 
+	microsoftReader := kafka.NewReader(kafka.ReaderConfig{
+		Brokers:  []string{broker},
+		GroupID:  "microsoft-crawling-signal-readers",
+		Topic:    "microsoft-crawling-signals",
+		MaxBytes: 10e6,
+	})
+	defer microsoftReader.Close()
+
 	messageCh := make(chan kafka.Message)
 	errorCh := make(chan error)
 
@@ -580,6 +619,22 @@ func (s *crawlingServer) startCrawlingSignalReading(ctx context.Context) error {
 		}
 	}()
 
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				msg, err := microsoftReader.ReadMessage(ctx)
+				if err != nil {
+					errorCh <- err
+				} else {
+					messageCh <- msg
+				}
+			}
+		}
+	}()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -601,6 +656,8 @@ func (s *crawlingServer) startCrawlingSignalReading(ctx context.Context) error {
 				platform = "GOOGLE"
 			case "notion-crawling-signals":
 				platform = "NOTION"
+			case "microsoft-crawling-signals":
+				platform = "MICROSOFT"
 			default:
 				continue
 			}

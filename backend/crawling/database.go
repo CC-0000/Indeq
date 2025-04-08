@@ -11,11 +11,13 @@ import (
 
 // Platform and service constants
 const (
-	PlatformGoogle = "GOOGLE"
-	ServiceDrive   = "GOOGLE_DRIVE"
-	ServiceGmail   = "GOOGLE_GMAIL"
-	PlatformNotion = "NOTION"
-	ServiceNotion  = "NOTION"
+	PlatformGoogle        = "GOOGLE"
+	ServiceDrive          = "GOOGLE_DRIVE"
+	ServiceGmail          = "GOOGLE_GMAIL"
+	PlatformNotion        = "NOTION"
+	ServiceNotion         = "NOTION"
+	PlatformMicrosoft     = "MICROSOFT"
+	ServiceMicrosoftDrive = "MICROSOFT_DRIVE"
 )
 
 // RetrievalToken represents a token entry in the database
@@ -135,6 +137,17 @@ func StoreNotionToken(ctx context.Context, db *sql.DB, userID, retrievalToken st
 		UserID:         userID,
 		Platform:       PlatformNotion,
 		Service:        ServiceNotion,
+		RetrievalToken: retrievalToken,
+		RequiresUpdate: true,
+	}
+	return UpsertRetrievalToken(ctx, db, token)
+}
+
+func StoreMicrosoftDriveToken(ctx context.Context, db *sql.DB, userID, retrievalToken string) error {
+	token := RetrievalToken{
+		UserID:         userID,
+		Platform:       PlatformMicrosoft,
+		Service:        ServiceMicrosoftDrive,
 		RetrievalToken: retrievalToken,
 		RequiresUpdate: true,
 	}

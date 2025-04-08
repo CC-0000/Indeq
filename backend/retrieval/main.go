@@ -54,6 +54,7 @@ func (s *retrievalServer) RetrieveTopKChunks(ctx context.Context, req *pb.Retrie
 	var topKDesktopResults []*pb.Metadata
 	var topKGoogleResults []*pb.Metadata
 	var topKNotionResults []*pb.Metadata
+	var topKMicrosoftResults []*pb.Metadata
 
 	// Separate chunks by platform
 	for _, metadata := range topKMetadatas.TopKMetadatas {
@@ -63,6 +64,8 @@ func (s *retrievalServer) RetrieveTopKChunks(ctx context.Context, req *pb.Retrie
 			topKGoogleResults = append(topKGoogleResults, metadata)
 		} else if metadata.Platform == pb.Platform_PLATFORM_NOTION {
 			topKNotionResults = append(topKNotionResults, metadata)
+		} else if metadata.Platform == pb.Platform_PLATFORM_MICROSOFT {
+			topKMicrosoftResults = append(topKMicrosoftResults, metadata)
 		}
 	}
 
@@ -70,13 +73,12 @@ func (s *retrievalServer) RetrieveTopKChunks(ctx context.Context, req *pb.Retrie
 	var desktopChunkResponse *pb.GetChunksFromUserResponse
 	var googleChunkResponse *pb.GetChunksFromGoogleResponse
 	var notionChunkResponse *pb.GetChunksFromNotionResponse
-
+	var microsoftChunkResponse *pb.GetChunksFromMicrosoftResponse
 	// Create a WaitGroup to synchronize the goroutines
 	var wg sync.WaitGroup
 
-	// Start all 3 operations in separate goroutines
-	wg.Add(3)
-
+	// Start all 4 operations in separate goroutines
+	wg.Add(4)
 	// Desktop chunks goroutine
 	go func() {
 		defer wg.Done()
@@ -141,6 +143,23 @@ func (s *retrievalServer) RetrieveTopKChunks(ctx context.Context, req *pb.Retrie
 		}
 	}()
 
+	go func() {
+		defer wg.Done()
+		if len(topKMicrosoftResults) > 0 {
+			var localErr error
+			microsoftChunkResponse, localErr = s.crawlingClient.GetChunksFromMicrosoft(ctx, &pb.GetChunksFromMicrosoftRequest{
+				UserId:    req.UserId,
+				Metadatas: topKMicrosoftResults,
+				Ttl:       req.Ttl,
+			})
+			if localErr != nil {
+				microsoftChunkResponse = &pb.GetChunksFromMicrosoftResponse{Chunks: []*pb.TextChunkMessage{}}
+			}
+		} else {
+			microsoftChunkResponse = &pb.GetChunksFromMicrosoftResponse{Chunks: []*pb.TextChunkMessage{}}
+		}
+	}()
+
 	// Wait for both operations to complete
 	wg.Wait()
 
@@ -153,6 +172,9 @@ func (s *retrievalServer) RetrieveTopKChunks(ctx context.Context, req *pb.Retrie
 	}
 	if notionChunkResponse.Chunks != nil {
 		topKChunks = append(topKChunks, notionChunkResponse.Chunks...)
+	}
+	if microsoftChunkResponse.Chunks != nil {
+		topKChunks = append(topKChunks, microsoftChunkResponse.Chunks...)
 	}
 
 	// rerank the results by first getting the scores

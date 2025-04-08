@@ -26,13 +26,14 @@ import (
 
 type vectorServer struct {
 	pb.UnimplementedVectorServiceServer
-	milvusClient         client.Client
-	embeddingConn        *grpc.ClientConn
-	embeddingClient      pb.EmbeddingServiceClient
-	desktopWriter        *kafka.Writer
-	googleCrawlingWriter *kafka.Writer
-	notionCrawlingWriter *kafka.Writer
-	collectionName       string
+	milvusClient            client.Client
+	embeddingConn           *grpc.ClientConn
+	embeddingClient         pb.EmbeddingServiceClient
+	desktopWriter           *kafka.Writer
+	googleCrawlingWriter    *kafka.Writer
+	notionCrawlingWriter    *kafka.Writer
+	microsoftCrawlingWriter *kafka.Writer
+	collectionName          string
 }
 
 // func(context):
@@ -196,7 +197,25 @@ func (s *vectorServer) startTextChunkProcess(ctx context.Context) error {
 							log.Print("error: ", err)
 							continue
 						}
+					} else if textChunk.Metadata.Platform == pb.Platform_PLATFORM_MICROSOFT {
+						fileDoneMessage := &pb.FileDoneProcessing{
+							UserId:   textChunk.Metadata.UserId,
+							FilePath: textChunk.Metadata.FilePath,
+						}
+						byteMessage, err := proto.Marshal(fileDoneMessage)
+						if err != nil {
+							log.Print("failed to serialized file done message: ", err)
+							continue
+						}
+						message := kafka.Message{
+							Value: byteMessage,
+						}
+						if err := s.microsoftCrawlingWriter.WriteMessages(ctx, message); err != nil {
+							log.Print("error: ", err)
+							continue
+						}
 					}
+
 					// TODO: send the signals to other platform topics
 				} else if textChunk.Content == "<crawl_done>" {
 					if textChunk.Metadata == nil {
@@ -255,6 +274,24 @@ func (s *vectorServer) startTextChunkProcess(ctx context.Context) error {
 						}
 
 						if err := s.notionCrawlingWriter.WriteMessages(ctx, message); err != nil {
+							log.Print("error: ", err)
+							continue
+						}
+					} else if textChunk.Metadata.Platform == pb.Platform_PLATFORM_MICROSOFT {
+						fileDoneMessage := &pb.FileDoneProcessing{
+							UserId:       textChunk.Metadata.UserId,
+							CrawlingDone: true,
+						}
+						byteMessage, err := proto.Marshal(fileDoneMessage)
+						if err != nil {
+							log.Print("failed to serialized file done message: ", err)
+							continue
+						}
+						message := kafka.Message{
+							Value: byteMessage,
+						}
+
+						if err := s.microsoftCrawlingWriter.WriteMessages(ctx, message); err != nil {
 							log.Print("error: ", err)
 							continue
 						}
@@ -379,6 +416,29 @@ func (s *vectorServer) createNotionCrawlingWriter() {
 	s.notionCrawlingWriter = notionCrawlingWriter
 }
 
+func (s *vectorServer) createMicrosoftCrawlingWriter() {
+	broker, ok := os.LookupEnv("KAFKA_BROKER_ADDRESS")
+	if !ok {
+		log.Fatal("failed to retrieve kafka broker address")
+	}
+
+	microsoftCrawlingWriter := &kafka.Writer{
+		Addr:         kafka.TCP(broker),
+		Topic:        "microsoft-crawling-signals",
+		Balancer:     &kafka.LeastBytes{},
+		BatchSize:    10,
+		BatchTimeout: 1 * time.Second,
+		Compression:  kafka.Lz4,
+		Async:        true, // will not wait for the batch timeout to send messages
+		Completion: func(messages []kafka.Message, err error) {
+			if err != nil {
+				log.Printf("encountered error while writing message to microsoft-crawling-signals: %v", err)
+			}
+		},
+	}
+	s.microsoftCrawlingWriter = microsoftCrawlingWriter
+}
+
 // func(context)
 //   - connects to the milvus instance using an api key from .env variables
 //   - assumes: the client will be closed in the parent function some point
@@ -498,6 +558,9 @@ func main() {
 
 	server.createNotionCrawlingWriter()
 	defer server.notionCrawlingWriter.Close()
+
+	server.createMicrosoftCrawlingWriter()
+	defer server.microsoftCrawlingWriter.Close()
 
 	// TODO: create other writers to signal for google drive, microsoft office, notion, etc.
 

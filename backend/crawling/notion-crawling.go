@@ -159,6 +159,11 @@ type NotionChunker struct {
 	Blocks    []ProcessedBlock
 }
 
+type chunkResult struct {
+	chunk *pb.TextChunkMessage
+	err   error
+}
+
 // NewNotionChunker creates a new chunker
 func NewNotionChunker(chunkSize, overlap int) *NotionChunker {
 	return &NotionChunker{
@@ -511,6 +516,14 @@ func (s *crawlingServer) processNotionFiles(ctx context.Context, client *http.Cl
 		return files, nil
 	}
 
+	type processResult struct {
+		file File
+		err  error
+	}
+
+	resultChan := make(chan processResult, len(files.Files))
+	var wg sync.WaitGroup
+
 	for _, file := range files.Files {
 		if len(file.File) == 0 {
 			continue
@@ -522,47 +535,66 @@ func (s *crawlingServer) processNotionFiles(ctx context.Context, client *http.Cl
 			}
 		}
 
-		switch file.File[0].Metadata.ResourceType {
-		case "page":
-			pageFile := s.processNotionPage(ctx, client, file)
-			if len(pageFile.File) > 0 {
-				processedFiles.Files = append(processedFiles.Files, pageFile)
-				for _, chunk := range pageFile.File {
-					shortKey, err := s.AddChunkMapping(ctx, chunk.Metadata.UserID, "NOTION", chunk.Metadata.ChunkID, file.File[0].Metadata.ResourceID, "NOTION")
-					if err != nil {
-						continue
+		wg.Add(1)
+		go func(f File) {
+			defer wg.Done()
+			var result processResult
+
+			switch f.File[0].Metadata.ResourceType {
+			case "page":
+				pageFile := s.processNotionPage(ctx, client, f)
+				if len(pageFile.File) > 0 {
+					for _, chunk := range pageFile.File {
+						shortKey, err := s.AddChunkMapping(ctx, chunk.Metadata.UserID, "NOTION", chunk.Metadata.ChunkID, f.File[0].Metadata.ResourceID, "NOTION")
+						if err != nil {
+							continue
+						}
+						chunk.Metadata.ChunkID = shortKey
+						if err := s.sendChunkToVector(ctx, chunk); err != nil {
+							continue
+						}
 					}
-					chunk.Metadata.ChunkID = shortKey
-					if err := s.sendChunkToVector(ctx, chunk); err != nil {
-						continue
+					s.markFileProcessed(f.File[0].Metadata.UserID, f.File[0].Metadata.ResourceID, "NOTION")
+					if err := s.sendFileDoneSignal(ctx, f.File[0].Metadata.UserID, f.File[0].Metadata.FilePath, "NOTION"); err != nil {
+						log.Printf("Warning: Failed to send file done signal for page %s: %v", f.File[0].Metadata.ResourceID, err)
 					}
+					result.file = pageFile
 				}
-				s.markFileProcessed(file.File[0].Metadata.UserID, file.File[0].Metadata.ResourceID, "NOTION")
-				if err := s.sendFileDoneSignal(ctx, file.File[0].Metadata.UserID, file.File[0].Metadata.FilePath, "NOTION"); err != nil {
-					log.Printf("Warning: Failed to send file done signal for page %s: %v", file.File[0].Metadata.ResourceID, err)
+			case "database":
+				dbFile := s.processNotionDatabase(ctx, client, f)
+				if len(dbFile.File) > 0 {
+					for _, chunk := range dbFile.File {
+						shortKey, err := s.AddChunkMapping(ctx, chunk.Metadata.UserID, "NOTION", chunk.Metadata.ChunkID, f.File[0].Metadata.ResourceID, "NOTION")
+						if err != nil {
+							continue
+						}
+						chunk.Metadata.ChunkID = shortKey
+						if err := s.sendChunkToVector(ctx, chunk); err != nil {
+							continue
+						}
+					}
+					s.markFileProcessed(f.File[0].Metadata.UserID, f.File[0].Metadata.ResourceID, "NOTION")
+					if err := s.sendFileDoneSignal(ctx, f.File[0].Metadata.UserID, f.File[0].Metadata.FilePath, "NOTION"); err != nil {
+						log.Printf("Warning: Failed to send file done signal for database %s: %v", f.File[0].Metadata.ResourceID, err)
+					}
+					result.file = dbFile
 				}
 			}
-		case "database":
-			dbFile := s.processNotionDatabase(ctx, client, file)
-			if len(dbFile.File) > 0 {
-				processedFiles.Files = append(processedFiles.Files, dbFile)
-				for _, chunk := range dbFile.File {
-					shortKey, err := s.AddChunkMapping(ctx, chunk.Metadata.UserID, "NOTION", chunk.Metadata.ChunkID, file.File[0].Metadata.ResourceID, "NOTION")
-					if err != nil {
-						continue
-					}
-					chunk.Metadata.ChunkID = shortKey
-					if err := s.sendChunkToVector(ctx, chunk); err != nil {
-						continue
-					}
-				}
+			resultChan <- result
+		}(file)
+	}
 
-				s.markFileProcessed(file.File[0].Metadata.UserID, file.File[0].Metadata.ResourceID, "NOTION")
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
 
-				if err := s.sendFileDoneSignal(ctx, file.File[0].Metadata.UserID, file.File[0].Metadata.FilePath, "NOTION"); err != nil {
-					log.Printf("Warning: Failed to send file done signal for database %s: %v", file.File[0].Metadata.ResourceID, err)
-				}
-			}
+	for result := range resultChan {
+		if result.err != nil {
+			return processedFiles, result.err
+		}
+		if len(result.file.File) > 0 {
+			processedFiles.Files = append(processedFiles.Files, result.file)
 		}
 	}
 
@@ -1442,9 +1474,4 @@ func retriveNotionDatabase(ctx context.Context, client *http.Client, metadata Me
 		Metadata: metadata,
 		Content:  strings.Join(chunkWords, " "),
 	}, nil
-}
-
-type chunkResult struct {
-	chunk *pb.TextChunkMessage
-	err   error
 }

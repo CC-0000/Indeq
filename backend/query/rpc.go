@@ -301,6 +301,9 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 		if chunks[0].Metadata.Platform == pb.Platform_PLATFORM_NOTION {
 			queueSourceMessage.Extension = "Notion"
 		}
+		if chunks[0].Metadata.Platform == pb.Platform_PLATFORM_MICROSOFT {
+			queueSourceMessage.Extension = "Microsoft"
+		}
 
 		byteMessage, err := json.Marshal(queueSourceMessage)
 		if err != nil {
