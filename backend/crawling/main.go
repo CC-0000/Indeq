@@ -19,6 +19,9 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
+
+	kivik "github.com/go-kivik/kivik/v4"
+	_ "github.com/go-kivik/kivik/v4/couchdb"
 )
 
 type crawlingServer struct {
@@ -29,6 +32,8 @@ type crawlingServer struct {
 	vectorService      pb.VectorServiceClient
 	db                 *sql.DB
 	kafkaWriter        *kafka.Writer
+	CouchdbClient      *kivik.Client
+	ChunkIDdb          *kivik.DB
 }
 
 type Metadata struct {
@@ -141,17 +146,13 @@ func (s *crawlingServer) NewCrawler(ctx context.Context, userID string, accessTo
 		files, err := s.GoogleCrawler(ctx, client, userID, scopes)
 		if err != nil {
 			log.Printf("Error in GoogleCrawler for user %s: %v", userID, err)
-		} else {
-			log.Printf("GoogleCrawler completed successfully for user %s", userID)
 		}
 		return files, err
 	case "NOTION":
 		client := createNotionOAuthClient(ctx, accessToken)
-		files, err := s.NotionCrawler(ctx, client, userID, scopes)
+		files, err := s.NotionCrawler(ctx, client, userID)
 		if err != nil {
 			log.Printf("Error in NotionCrawler for user %s: %v", userID, err)
-		} else {
-			log.Printf("NotionCrawler completed successfully for user %s", userID)
 		}
 		return files, err
 	default:
@@ -167,6 +168,13 @@ func (s *crawlingServer) UpdateCrawler(ctx context.Context, accessToken string, 
 		newRetrievalToken, processedFiles, err := s.UpdateCrawlGoogle(ctx, client, service, userID, retrievalToken)
 		if err != nil {
 			return "", ListofFiles{}, fmt.Errorf("error updating Google crawl: %w", err)
+		}
+		return newRetrievalToken, processedFiles, nil
+	case "NOTION":
+		client := createNotionOAuthClient(ctx, accessToken)
+		newRetrievalToken, processedFiles, err := s.UpdateCrawlNotion(ctx, client, userID, retrievalToken)
+		if err != nil {
+			return "", ListofFiles{}, fmt.Errorf("error updating Notion crawl: %w", err)
 		}
 		return newRetrievalToken, processedFiles, nil
 	default:
@@ -239,14 +247,12 @@ func (s *crawlingServer) UpdateDBCrawler() {
 		log.Printf("Error querying outdated tokens: %v", err)
 		return
 	}
-
 	for _, token := range tokens {
 		accessToken, err := s.retrieveAccessToken(ctx, token.UserID, token.Platform)
 		if err != nil {
 			log.Printf("Error retrieving access token: %v", err)
 			continue
 		}
-
 		processedFiles, err := updateCrawlerWithToken(ctx, s, token.UserID, token.Platform, token.Service, token.RetrievalToken, accessToken)
 		if err != nil {
 			log.Printf("Error updating crawler: %v", err)
@@ -257,7 +263,6 @@ func (s *crawlingServer) UpdateDBCrawler() {
 }
 
 // startPeriodicCrawlerWorker starts a periodic crawler worker
-
 func (s *crawlingServer) startPeriodicCrawlerWorker(ctx context.Context) {
 	ticker := time.NewTicker(time.Second * 30)
 	go func() {
@@ -265,7 +270,6 @@ func (s *crawlingServer) startPeriodicCrawlerWorker(ctx context.Context) {
 		for {
 			select {
 			case <-ctx.Done():
-				log.Println("Stopping periodic crawler worker...")
 				return
 			case <-ticker.C:
 				log.Println("Running periodic crawler worker...")
@@ -277,15 +281,28 @@ func (s *crawlingServer) startPeriodicCrawlerWorker(ctx context.Context) {
 
 // updateCrawlerWithToken updates the crawler with a new access token
 func updateCrawlerWithToken(ctx context.Context, s *crawlingServer, userID, platform, service, retrievalToken, accessToken string) (ListofFiles, error) {
-	newRetrievalToken, processedFiles, err := s.UpdateCrawlGoogle(ctx, createGoogleOAuthClient(ctx, accessToken), service, userID, retrievalToken)
-	if err != nil {
-		log.Printf("Error updating crawler: %v", err)
-		return ListofFiles{}, err
+	if platform == "GOOGLE" {
+		newRetrievalToken, processedFiles, err := s.UpdateCrawlGoogle(ctx, createGoogleOAuthClient(ctx, accessToken), service, userID, retrievalToken)
+		if err != nil {
+			log.Printf("Error updating crawler: %v", err)
+			return ListofFiles{}, err
+		}
+		if err := storeRetrievalToken(ctx, s.db, userID, platform, service, newRetrievalToken); err != nil {
+			return ListofFiles{}, err
+		}
+		return processedFiles, nil
+	} else if platform == "NOTION" {
+		newRetrievalToken, processedFiles, err := s.UpdateCrawlNotion(ctx, createNotionOAuthClient(ctx, accessToken), userID, retrievalToken)
+		if err != nil {
+			log.Printf("Error updating crawler: %v", err)
+			return ListofFiles{}, err
+		}
+		if err := storeRetrievalToken(ctx, s.db, userID, platform, service, newRetrievalToken); err != nil {
+			return ListofFiles{}, err
+		}
+		return processedFiles, nil
 	}
-	if err := storeRetrievalToken(ctx, s.db, userID, platform, service, newRetrievalToken); err != nil {
-		return ListofFiles{}, err
-	}
-	return processedFiles, nil
+	return ListofFiles{}, fmt.Errorf("unsupported platform: %s", platform)
 }
 
 // storeRetrievalToken stores a new retrieval token or updates an existing one
@@ -310,7 +327,7 @@ func setupDatabase(db *sql.DB) error {
             id SERIAL PRIMARY KEY,
             user_id UUID NOT NULL,
 			platform TEXT NOT NULL CHECK (platform IN ('GOOGLE', 'NOTION')),
-            service TEXT NOT NULL CHECK (service IN ('GOOGLE_DRIVE', 'GOOGLE_GMAIL')),
+            service TEXT NOT NULL CHECK (service IN ('GOOGLE_DRIVE', 'GOOGLE_GMAIL', 'NOTION')),
             retrieval_token TEXT NOT NULL,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -334,6 +351,7 @@ func setupDatabase(db *sql.DB) error {
 			id SERIAL PRIMARY KEY,
 			user_id UUID NOT NULL,
 			resource_id TEXT NOT NULL,
+			platform TEXT NOT NULL CHECK (platform IN ('GOOGLE', 'NOTION')),
 			is_processed BOOLEAN DEFAULT FALSE,
 			crawling_done BOOLEAN DEFAULT FALSE,
 			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -357,36 +375,26 @@ func setupDatabase(db *sql.DB) error {
 }
 
 func (s *crawlingServer) DeleteCrawlerData(ctx context.Context, req *pb.DeleteCrawlerDataRequest) (*pb.DeleteCrawlerDataResponse, error) {
-	rowsAffected, err := DeleteRetrievalTokens(ctx, s.db, req.UserId, req.Platform)
+	_, err := DeleteRetrievalTokens(ctx, s.db, req.UserId, req.Platform)
 	if err != nil {
 		return &pb.DeleteCrawlerDataResponse{
 			Success: false,
 			Message: fmt.Sprintf("Database error deleting retrieval tokens: %v", err),
 		}, nil
 	}
-
-	_, err = s.db.ExecContext(ctx, deleteProcessingStatusQuery, req.UserId)
+	_, err = s.db.ExecContext(ctx, deleteProcessingStatusQuery, req.UserId, req.Platform)
 	if err != nil {
 		return &pb.DeleteCrawlerDataResponse{
 			Success: false,
 			Message: fmt.Sprintf("Database error deleting processing status: %v", err),
 		}, nil
 	}
-
-	if rowsAffected == 0 {
-		return &pb.DeleteCrawlerDataResponse{
-			Success: true,
-			Message: "No crawler data found to delete",
-		}, nil
-	}
-
 	if err := s.deleteFilesFromVector(ctx, req.UserId, req.Platform); err != nil {
 		return &pb.DeleteCrawlerDataResponse{
 			Success: false,
 			Message: fmt.Sprintf("Failed to delete files from vector service: %v", err),
 		}, nil
 	}
-
 	return &pb.DeleteCrawlerDataResponse{
 		Success: true,
 		Message: "Crawler data deleted successfully",
@@ -395,15 +403,21 @@ func (s *crawlingServer) DeleteCrawlerData(ctx context.Context, req *pb.DeleteCr
 
 // deleteFilesFromVector deletes all files for a user from the vector service
 func (s *crawlingServer) deleteFilesFromVector(ctx context.Context, userID string, platform string) error {
-	_, err := s.vectorService.DeleteFiles(ctx, &pb.VectorFileDeleteRequest{
+	platformEnum := convertPlatformToEnum(platform)
+	request := &pb.VectorFileDeleteRequest{
 		UserId:    userID,
-		Platform:  convertPlatformToEnum(platform),
+		Platform:  platformEnum,
 		Exclusive: true,
 		Files:     []string{},
-	})
+	}
+	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	_, err := s.vectorService.DeleteFiles(timeoutCtx, request)
 	if err != nil {
 		return fmt.Errorf("failed to delete files from vector service: %v", err)
 	}
+
 	return nil
 }
 
@@ -515,7 +529,6 @@ func (s *crawlingServer) startCrawlingSignalReading(ctx context.Context) error {
 		return fmt.Errorf("failed to retrieve kafka broker address")
 	}
 
-	// Create readers for both Google and Notion signals
 	googleReader := kafka.NewReader(kafka.ReaderConfig{
 		Brokers:  []string{broker},
 		GroupID:  "google-crawling-signal-readers",
@@ -532,16 +545,13 @@ func (s *crawlingServer) startCrawlingSignalReading(ctx context.Context) error {
 	})
 	defer notionReader.Close()
 
-	// Create channels for messages and errors
 	messageCh := make(chan kafka.Message)
 	errorCh := make(chan error)
 
-	// Start goroutine for Google signals
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
-				log.Print("Shutting down Google crawling signal consumer channeler")
 				return
 			default:
 				msg, err := googleReader.ReadMessage(ctx)
@@ -554,12 +564,10 @@ func (s *crawlingServer) startCrawlingSignalReading(ctx context.Context) error {
 		}
 	}()
 
-	// Start goroutine for Notion signals
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
-				log.Print("Shutting down Notion crawling signal consumer channeler")
 				return
 			default:
 				msg, err := notionReader.ReadMessage(ctx)
@@ -575,7 +583,6 @@ func (s *crawlingServer) startCrawlingSignalReading(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Print("Shutting down crawling signal consumer processor...")
 			return nil
 		case err := <-errorCh:
 			if err != nil {
@@ -587,12 +594,23 @@ func (s *crawlingServer) startCrawlingSignalReading(ctx context.Context) error {
 				log.Printf("Error unmarshalling message: %v", err)
 				continue
 			}
+
+			var platform string
+			switch msg.Topic {
+			case "google-crawling-signals":
+				platform = "GOOGLE"
+			case "notion-crawling-signals":
+				platform = "NOTION"
+			default:
+				continue
+			}
+
 			if signal.CrawlingDone {
-				s.markCrawlingComplete(signal.UserId)
-				log.Printf("crawling done for user %s", signal.UserId)
+				log.Printf("crawling done for user %s on platform %s", signal.UserId, platform)
+				s.markCrawlingComplete(signal.UserId, platform)
 			} else {
-				s.markFileProcessed(signal.UserId, signal.FilePath)
-				log.Printf("file done for user %s: %s", signal.UserId, signal.FilePath)
+				log.Printf("file done for user %s: %s on platform %s", signal.UserId, signal.FilePath, platform)
+				s.markFileProcessed(signal.UserId, signal.FilePath, platform)
 			}
 		}
 	}
@@ -631,6 +649,39 @@ func (s *crawlingServer) connectToIntegrationService(tlsConfig *tls.Config) {
 
 	s.integrationConn = integrationConn
 	s.integrationService = pb.NewIntegrationServiceClient(integrationConn)
+}
+
+func (s *crawlingServer) connectToCouchDB(ctx context.Context) {
+	couchdbUser, ok := os.LookupEnv("COUCHDB_USER")
+	if !ok {
+		log.Fatalf("failed to retrieve the couchdb user")
+	}
+	couchdbPassword, ok := os.LookupEnv("COUCHDB_PASSWORD")
+	if !ok {
+		log.Fatalf("failed to retrieve the couchdb password")
+	}
+	couchdbAddress, ok := os.LookupEnv("COUCHDB_ADDRESS")
+	if !ok {
+		log.Fatalf("failed to retrieve the couchdb address")
+	}
+	chunkIDDBName := "chunk_ids"
+
+	client, err := kivik.New("couch", fmt.Sprintf("http://%s:%s@%s/", couchdbUser, couchdbPassword, couchdbAddress))
+	if err != nil {
+		log.Fatalf("failed to connect to couchdb: %v", err)
+	}
+	s.CouchdbClient = client
+
+	exists, err := client.DBExists(ctx, chunkIDDBName)
+	if err != nil {
+		log.Fatalf("failed to check if database exists: %v", err)
+	} else if !exists {
+		if err := client.CreateDB(ctx, chunkIDDBName); err != nil {
+			log.Fatalf("failed to create chunk_ids couchdb database: %v", err)
+		}
+	}
+
+	s.ChunkIDdb = client.DB(chunkIDDBName)
 }
 
 func main() {
@@ -689,6 +740,7 @@ func main() {
 
 	server.connectToVectorService(clientTLSConfig)
 	defer server.vectorConn.Close()
+
 	server.connectToIntegrationService(clientTLSConfig)
 	defer server.integrationConn.Close()
 	// Connect to Kafka writer
@@ -697,15 +749,15 @@ func main() {
 	}
 	defer server.kafkaWriter.Close()
 
+	// Start the crawling signal reader
+	go server.startCrawlingSignalReading(ctx)
+
+	// Connect to chunk id database
+	server.connectToCouchDB(ctx)
+	defer server.ChunkIDdb.Close()
+
 	// Start the periodic crawler worker
 	server.startPeriodicCrawlerWorker(ctx)
-
-	// Start the crawling signal reader
-	go func() {
-		if err := server.startCrawlingSignalReading(context.Background()); err != nil {
-			log.Printf("Error starting crawling signal reader: %v", err)
-		}
-	}()
 
 	opts := []grpc.ServerOption{
 		grpc.Creds(credentials.NewTLS(tlsConfig)),

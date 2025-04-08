@@ -25,8 +25,8 @@ type SlideElementType string
 const (
 	SlideElementTypeText  SlideElementType = "text"
 	SlideElementTypeTable SlideElementType = "table"
-	SlideElementTypeImage SlideElementType = "image"
-	SlideElementTypeVideo SlideElementType = "video"
+	//SlideElementTypeImage SlideElementType = "image"
+	//SlideElementTypeVideo SlideElementType = "video"
 	SlideElementTypeChart SlideElementType = "chart"
 	SlideElementTypeShape SlideElementType = "shape"
 )
@@ -152,32 +152,32 @@ func (sp *SlidesProcessor) extractWordsFromSlide(slide *slides.Page, slideIndex 
 			wordInfoList = sp.extractWordsFromShape(element.Shape, slideIndex, elementIndex, wordInfoList)
 		case element.Table != nil:
 			wordInfoList = sp.extractWordsFromTable(element.Table, slideIndex, elementIndex, wordInfoList)
-		case element.Image != nil:
-			if element.Image.ContentUrl != "" {
-				wordInfoList = append(wordInfoList, SlideWordInfo{
-					Position: SlidePosition{
-						ElementType:  SlideElementTypeImage,
-						SlideIndex:   slideIndex,
-						ElementIndex: elementIndex,
-						Offset:       0,
-					},
-					Word:   element.Image.ContentUrl,
-					Length: len(element.Image.ContentUrl),
-				})
-			}
-		case element.Video != nil:
-			if element.Video.Url != "" {
-				wordInfoList = append(wordInfoList, SlideWordInfo{
-					Position: SlidePosition{
-						ElementType:  SlideElementTypeVideo,
-						SlideIndex:   slideIndex,
-						ElementIndex: elementIndex,
-						Offset:       0,
-					},
-					Word:   element.Video.Url,
-					Length: len(element.Video.Url),
-				})
-			}
+			// case element.Image != nil:
+			// 	if element.Image.ContentUrl != "" {
+			// 		wordInfoList = append(wordInfoList, SlideWordInfo{
+			// 			Position: SlidePosition{
+			// 				ElementType:  SlideElementTypeImage,
+			// 				SlideIndex:   slideIndex,
+			// 				ElementIndex: elementIndex,
+			// 				Offset:       0,
+			// 			},
+			// 			Word:   element.Image.ContentUrl,
+			// 			Length: len(element.Image.ContentUrl),
+			// 		})
+			// 	}
+			// case element.Video != nil:
+			// 	if element.Video.Url != "" {
+			// 		wordInfoList = append(wordInfoList, SlideWordInfo{
+			// 			Position: SlidePosition{
+			// 				ElementType:  SlideElementTypeVideo,
+			// 				SlideIndex:   slideIndex,
+			// 				ElementIndex: elementIndex,
+			// 				Offset:       0,
+			// 			},
+			// 			Word:   element.Video.Url,
+			// 			Length: len(element.Video.Url),
+			// 		})
+			// 	}
 		}
 	}
 
@@ -400,16 +400,16 @@ func (sp *SlidesProcessor) ExtractSlidesChunk(presentation *slides.Presentation,
 						}
 					}
 				}
-			case element.Image != nil && element.Image.ContentUrl != "":
-				slideWords = append(slideWords, element.Image.ContentUrl)
-				slideOffsets = append(slideOffsets, slideOffset)
-				slideOffset += len(element.Image.ContentUrl) + 1
-				wordCount = 1
-			case element.Video != nil && element.Video.Url != "":
-				slideWords = append(slideWords, element.Video.Url)
-				slideOffsets = append(slideOffsets, slideOffset)
-				slideOffset += len(element.Video.Url) + 1
-				wordCount = 1
+			// case element.Image != nil && element.Image.ContentUrl != "":
+			// 	slideWords = append(slideWords, element.Image.ContentUrl)
+			// 	slideOffsets = append(slideOffsets, slideOffset)
+			// 	slideOffset += len(element.Image.ContentUrl) + 1
+			// 	wordCount = 1
+			// case element.Video != nil && element.Video.Url != "":
+			// 	slideWords = append(slideWords, element.Video.Url)
+			// 	slideOffsets = append(slideOffsets, slideOffset)
+			// 	slideOffset += len(element.Video.Url) + 1
+			// 	wordCount = 1
 			default:
 				continue
 			}

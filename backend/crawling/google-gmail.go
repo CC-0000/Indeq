@@ -87,7 +87,7 @@ func (s *crawlingServer) CrawlGmailHistory(ctx context.Context, client *http.Cli
 					}
 					file, err := processMessage(fullMsg, userID)
 					if err == nil {
-						if len(file.File) > 0 && s.isFileProcessed(userID, file.File[0].Metadata.ResourceID) {
+						if len(file.File) > 0 && s.isFileProcessed(userID, file.File[0].Metadata.ResourceID, "GOOGLE") {
 							continue
 						}
 
@@ -117,7 +117,6 @@ func (s *crawlingServer) CrawlGmailHistory(ctx context.Context, client *http.Cli
 		pageToken = res.NextPageToken
 	}
 
-	s.markCrawlingComplete(userID)
 	retrievalToken := strconv.FormatUint(latestHistoryID, 10)
 	return ListofFiles{Files: files}, retrievalToken, nil
 }
@@ -154,7 +153,7 @@ func (s *crawlingServer) GetGoogleGmailList(ctx context.Context, client *http.Cl
 					continue
 				}
 
-				if len(file.File) > 0 && s.isFileProcessed(userID, file.File[0].Metadata.ResourceID) {
+				if len(file.File) > 0 && s.isFileProcessed(userID, file.File[0].Metadata.ResourceID, "GOOGLE") {
 					resultChan <- CrawlResult{Files: []File{file}}
 					continue
 				}
@@ -233,7 +232,6 @@ func (s *crawlingServer) GetGoogleGmailList(ctx context.Context, client *http.Cl
 		return ListofFiles{}, "", fmt.Errorf("some messages failed to process: %v", errs)
 	}
 
-	s.markCrawlingComplete(userID)
 	retrievalToken := strconv.FormatUint(latestHistoryID, 10)
 	return ListofFiles{Files: files}, retrievalToken, nil
 }

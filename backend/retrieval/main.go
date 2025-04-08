@@ -69,12 +69,13 @@ func (s *retrievalServer) RetrieveTopKChunks(ctx context.Context, req *pb.Retrie
 	// Get Desktop chunks and Google chunks concurrently
 	var desktopChunkResponse *pb.GetChunksFromUserResponse
 	var googleChunkResponse *pb.GetChunksFromGoogleResponse
+	var notionChunkResponse *pb.GetChunksFromNotionResponse
 
 	// Create a WaitGroup to synchronize the goroutines
 	var wg sync.WaitGroup
 
-	// Start both operations in separate goroutines
-	wg.Add(2)
+	// Start all 3 operations in separate goroutines
+	wg.Add(3)
 
 	// Desktop chunks goroutine
 	go func() {
@@ -123,22 +124,25 @@ func (s *retrievalServer) RetrieveTopKChunks(ctx context.Context, req *pb.Retrie
 		}
 	}()
 
-	// Wait for both operations to complete
-	wg.Wait()
-
-	var notionChunkResponse *pb.GetChunksFromNotionResponse
-	if len(topKGoogleResults) > 0 {
-		notionChunkResponse, err = s.crawlingClient.GetChunksFromNotion(ctx, &pb.GetChunksFromNotionRequest{
-			UserId:    req.UserId,
-			Metadatas: topKNotionResults,
-			Ttl:       req.Ttl,
-		})
-		if err != nil {
+	go func() {
+		defer wg.Done()
+		if len(topKNotionResults) > 0 {
+			var localErr error
+			notionChunkResponse, localErr = s.crawlingClient.GetChunksFromNotion(ctx, &pb.GetChunksFromNotionRequest{
+				UserId:    req.UserId,
+				Metadatas: topKNotionResults,
+				Ttl:       req.Ttl,
+			})
+			if localErr != nil {
+				notionChunkResponse = &pb.GetChunksFromNotionResponse{Chunks: []*pb.TextChunkMessage{}}
+			}
+		} else {
 			notionChunkResponse = &pb.GetChunksFromNotionResponse{Chunks: []*pb.TextChunkMessage{}}
 		}
-	} else {
-		notionChunkResponse = &pb.GetChunksFromNotionResponse{Chunks: []*pb.TextChunkMessage{}}
-	}
+	}()
+
+	// Wait for both operations to complete
+	wg.Wait()
 
 	var topKChunks []*pb.TextChunkMessage
 	if desktopChunkResponse.Chunks != nil {

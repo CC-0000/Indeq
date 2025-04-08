@@ -298,6 +298,10 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 		if chunks[0].Metadata.Platform == pb.Platform_PLATFORM_GOOGLE {
 			queueSourceMessage.Extension = "Google"
 		}
+		if chunks[0].Metadata.Platform == pb.Platform_PLATFORM_NOTION {
+			queueSourceMessage.Extension = "Notion"
+		}
+
 		byteMessage, err := json.Marshal(queueSourceMessage)
 		if err != nil {
 			return &pb.QueryResponse{}, fmt.Errorf("failed to marshal source message: %w", err)

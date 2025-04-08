@@ -18,12 +18,10 @@ func (s *crawlingServer) GoogleCrawler(ctx context.Context, client *http.Client,
 	var files ListofFiles
 	var mu sync.Mutex
 	scopeSet := make(map[string]struct{}, len(scopes))
-	log.Printf("GoogleCrawler started for user %s with %d scopes", userID, len(scopes))
 
 	for _, scope := range scopes {
 		scopeSet[scope] = struct{}{}
 	}
-	log.Printf("Scope set created with %d entries", len(scopeSet))
 
 	crawlers := map[string]func(context.Context, *http.Client, string) (ListofFiles, error){
 		"https://www.googleapis.com/auth/drive.readonly": s.CrawlGoogleDrive,
@@ -36,7 +34,6 @@ func (s *crawlingServer) GoogleCrawler(ctx context.Context, client *http.Client,
 	activeCrawlers := 0
 	for scope, crawler := range crawlers {
 		if _, ok := scopeSet[scope]; !ok {
-			log.Printf("Skipping crawler for scope %s - not in user's scope set", scope)
 			continue
 		}
 		activeCrawlers++
@@ -46,7 +43,6 @@ func (s *crawlingServer) GoogleCrawler(ctx context.Context, client *http.Client,
 
 			select {
 			case <-ctx.Done():
-				log.Printf("Context cancelled for scope %s", scope)
 				errs <- ctx.Err()
 				return
 			default:
@@ -55,8 +51,6 @@ func (s *crawlingServer) GoogleCrawler(ctx context.Context, client *http.Client,
 					errs <- fmt.Errorf("%s crawl failed: %w", scope, err)
 					return
 				}
-				log.Printf("Successfully processed %d files for scope %s", len(processedFiles.Files), scope)
-
 				mu.Lock()
 				files.Files = append(files.Files, processedFiles.Files...)
 				mu.Unlock()
@@ -74,7 +68,6 @@ func (s *crawlingServer) GoogleCrawler(ctx context.Context, client *http.Client,
 	completedCrawlers := make(map[string]bool)
 	for scope := range results {
 		completedCrawlers[scope] = true
-		log.Printf("Crawler completed for scope: %s (%d/%d complete)", scope, len(completedCrawlers), activeCrawlers)
 	}
 
 	var errorList []error
@@ -86,7 +79,6 @@ func (s *crawlingServer) GoogleCrawler(ctx context.Context, client *http.Client,
 	}
 
 	if activeCrawlers > 0 && len(completedCrawlers) == activeCrawlers {
-		s.markCrawlingComplete(userID)
 		if err := s.sendCrawlDoneSignal(ctx, userID, "GOOGLE"); err != nil {
 			log.Printf("Failed to send crawl done signal for Google services: %v", err)
 		}

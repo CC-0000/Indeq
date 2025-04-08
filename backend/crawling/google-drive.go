@@ -71,8 +71,8 @@ func (s *crawlingServer) UpdateCrawlGoogleDrive(ctx context.Context, client *htt
 		if len(file.File) > 0 {
 			filePaths = append(filePaths, file.File[0].Metadata.FilePath)
 			resourceID := file.File[0].Metadata.ResourceID
-			if s.isFileProcessed(userID, resourceID) {
-				if err := UpsertProcessingStatus(ctx, s.db, userID, resourceID, false); err != nil {
+			if s.isFileProcessed(userID, resourceID, "GOOGLE") {
+				if err := UpsertProcessingStatus(ctx, s.db, userID, resourceID, "GOOGLE", false); err != nil {
 					log.Printf("Warning: failed to reset tracking status for file %s: %v", resourceID, err)
 				}
 			}
@@ -347,13 +347,13 @@ func (s *crawlingServer) ProcessAllGoogleDriveFiles(ctx context.Context, client 
 		var err error
 		switch mimeType {
 		case "application/vnd.google-apps.document":
-			numWorkers, err = strconv.Atoi(os.Getenv("CRAWLING_GOOGLE_RETRIVAL_MAX_WORKERS"))
+			numWorkers, err = strconv.Atoi(os.Getenv("CRAWLING_GOOGLEDOCS_MAX_WORKERS"))
 			if err != nil {
 				fmt.Printf("Warning: failed to retrieve the k value from the env variables: %v", err)
 			}
 
 		case "application/vnd.google-apps.presentation":
-			numWorkers, err = strconv.Atoi(os.Getenv("CRAWLING_GOOGLE_RETRIVAL_MAX_WORKERS"))
+			numWorkers, err = strconv.Atoi(os.Getenv("CRAWLING_GOOGLESLIDES_MAX_WORKERS"))
 			if err != nil {
 				fmt.Printf("Warning: failed to retrieve the k value from the env variables: %v", err)
 			}
@@ -377,9 +377,7 @@ func (s *crawlingServer) ProcessAllGoogleDriveFiles(ctx context.Context, client 
 					originalFilePath := item.file.File[0].Metadata.FilePath
 					originalUserID := item.file.File[0].Metadata.UserID
 					originalResourceID := item.file.File[0].Metadata.ResourceID
-
-					if s.isFileProcessed(originalUserID, originalResourceID) {
-						log.Printf("Skipping already processed file: %s", originalFilePath)
+					if s.isFileProcessed(originalUserID, originalResourceID, "GOOGLE") {
 						resultCh <- result{index: item.index, file: item.file}
 						continue
 					}
@@ -447,7 +445,6 @@ func (s *crawlingServer) ProcessAllGoogleDriveFiles(ctx context.Context, client 
 	} else {
 		log.Print("No valid files found in Drive crawl")
 	}
-
 	return ListofFiles{Files: processedFiles}, nil
 }
 
