@@ -1,0 +1,20 @@
+import { addMeltEventListener, makeElement } from '../../internal/helpers/index.js';
+export function createLabel() {
+    const root = makeElement('label', {
+        action: (node) => {
+            const mouseDown = addMeltEventListener(node, 'mousedown', (e) => {
+                if (!e.defaultPrevented && e.detail > 1) {
+                    e.preventDefault();
+                }
+            });
+            return {
+                destroy: mouseDown,
+            };
+        },
+    });
+    return {
+        elements: {
+            root,
+        },
+    };
+}

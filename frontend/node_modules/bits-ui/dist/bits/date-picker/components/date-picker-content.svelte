@@ -1,0 +1,83 @@
+<script>import { melt } from "@melt-ui/svelte";
+import { getCtx, updatePositioning } from "../ctx.js";
+export let transition = void 0;
+export let transitionConfig = void 0;
+export let inTransition = void 0;
+export let inTransitionConfig = void 0;
+export let outTransition = void 0;
+export let outTransitionConfig = void 0;
+export let asChild = false;
+export let id = void 0;
+export let side = "bottom";
+export let align = "center";
+export let sideOffset = 0;
+export let alignOffset = 0;
+export let collisionPadding = 8;
+export let avoidCollisions = true;
+export let collisionBoundary = void 0;
+export let sameWidth = false;
+export let fitViewport = false;
+export let strategy = "absolute";
+export let overlap = false;
+export let el = void 0;
+const {
+  elements: { content },
+  states: { open },
+  ids,
+  getPopoverAttrs
+} = getCtx();
+const attrs = getPopoverAttrs("content");
+$: if (id) {
+  ids.popover.content.set(id);
+}
+$: builder = $content;
+$: Object.assign(builder, attrs);
+$: updatePositioning({
+  side,
+  align,
+  sideOffset,
+  alignOffset,
+  collisionPadding,
+  avoidCollisions,
+  collisionBoundary,
+  sameWidth,
+  fitViewport,
+  strategy,
+  overlap
+});
+</script>
+
+{#if asChild && $open}
+	<slot {builder} />
+{:else if transition && $open}
+	<div
+		bind:this={el}
+		transition:transition={transitionConfig}
+		{...builder} use:builder.action
+		{...$$restProps}
+	>
+		<slot {builder} />
+	</div>
+{:else if inTransition && outTransition && $open}
+	<div
+		bind:this={el}
+		in:inTransition={inTransitionConfig}
+		out:outTransition={outTransitionConfig}
+		{...builder} use:builder.action
+		{...$$restProps}
+	>
+		<slot {builder} />
+	</div>
+{:else if inTransition && $open}
+	<div bind:this={el} in:inTransition={inTransitionConfig} {...builder} use:builder.action {...$$restProps}>
+		<slot {builder} />
+	</div>
+{:else if outTransition && $open}
+	<div bind:this={el} out:outTransition={outTransitionConfig} {...builder} use:builder.action {...$$restProps}>
+		<slot {builder} />
+	</div>
+{:else if $open}
+	<div bind:this={el} {...builder} use:builder.action {...$$restProps}>
+		<slot {builder} />
+	</div>
+{/if}

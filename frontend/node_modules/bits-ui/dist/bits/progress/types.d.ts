@@ -1,0 +1,14 @@
+import type { CreateProgressProps as MeltProgressProps } from "@melt-ui/svelte";
+import type { DOMElement, Expand, HTMLDivAttributes, OmitValue, OnChangeFn } from "../../internal/index.js";
+export type ProgressPropsWithoutHTML = Expand<OmitValue<MeltProgressProps> & {
+    /**
+     * The value of the progress bar.
+     * You can bind this to a number value to programmatically control the value.
+     */
+    value?: MeltProgressProps["defaultValue"] | undefined;
+    /**
+     * A callback function called when the value changes.
+     */
+    onValueChange?: OnChangeFn<number | null> | undefined;
+} & DOMElement>;
+export type ProgressProps = ProgressPropsWithoutHTML & HTMLDivAttributes;

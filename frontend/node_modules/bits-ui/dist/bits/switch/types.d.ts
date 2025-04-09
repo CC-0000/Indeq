@@ -1,0 +1,35 @@
+import type { HTMLButtonAttributes, HTMLInputAttributes } from "svelte/elements";
+import type { CreateSwitchProps as MeltSwitchProps } from "@melt-ui/svelte";
+import type { DOMEl, DOMElement, Expand, HTMLSpanAttributes, OmitChecked, OnChangeFn } from "../../internal/index.js";
+import type { CustomEventHandler } from "../../index.js";
+export type SwitchPropsWithoutHTML = Expand<OmitChecked<MeltSwitchProps> & {
+    /**
+     * The checked state of the switch.
+     * You can bind this to a boolean value to programmatically control the checked state.
+     *
+     * @defaultValue false
+     */
+    checked?: boolean | undefined;
+    /**
+     * A callback function called when the checked state changes.
+     */
+    onCheckedChange?: OnChangeFn<boolean> | undefined;
+    /**
+     * Whether to include the hidden input element in the DOM.
+     */
+    includeInput?: boolean | undefined;
+    /**
+     * Additional input attributes to pass to the hidden input element.
+     * Note, the value, name, type, and checked attributes are derived from the
+     * Switch props and cannot be overridden.
+     */
+    inputAttrs?: Partial<Omit<HTMLInputAttributes, "value" | "name" | "type" | "checked">> | undefined;
+} & DOMElement<HTMLButtonElement>>;
+export type SwitchThumbPropsWithoutHTML = DOMElement<HTMLSpanElement>;
+export type SwitchProps = SwitchPropsWithoutHTML & HTMLButtonAttributes;
+export type SwitchThumbProps = SwitchThumbPropsWithoutHTML & HTMLSpanAttributes;
+export type SwitchInputProps = HTMLInputAttributes & DOMEl<HTMLInputElement>;
+export type SwitchEvents<T extends Element = HTMLButtonElement> = {
+    click: CustomEventHandler<MouseEvent, T>;
+    keydown: CustomEventHandler<KeyboardEvent, T>;
+};

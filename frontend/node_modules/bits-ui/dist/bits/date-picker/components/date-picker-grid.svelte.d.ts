@@ -1,0 +1,32 @@
+import { SvelteComponent } from "svelte";
+import type { GridProps } from "../index.js";
+declare const __propDef: {
+    props: GridProps;
+    events: {
+        [evt: string]: CustomEvent<any>;
+    };
+    slots: {
+        default: {
+            builder: {
+                tabindex: number;
+                role: string;
+                'aria-readonly': "true" | undefined;
+                'aria-disabled': "true" | undefined;
+                'data-readonly': string | undefined;
+                'data-disabled': string | undefined;
+            } & {
+                [x: `data-melt-${string}`]: "";
+            } & {
+                action: import("svelte/action").Action<any, any, Record<never, any>>;
+            };
+        };
+    };
+    exports?: {} | undefined;
+    bindings?: string | undefined;
+};
+export type DatePickerGridProps = typeof __propDef.props;
+export type DatePickerGridEvents = typeof __propDef.events;
+export type DatePickerGridSlots = typeof __propDef.slots;
+export default class DatePickerGrid extends SvelteComponent<DatePickerGridProps, DatePickerGridEvents, DatePickerGridSlots> {
+}
+export {};

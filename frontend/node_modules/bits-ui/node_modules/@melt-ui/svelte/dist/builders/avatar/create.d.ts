@@ -1,0 +1,41 @@
+/// <reference types="svelte" />
+import type { CreateAvatarProps } from './types.js';
+export declare const createAvatar: (props?: CreateAvatarProps) => {
+    elements: {
+        image: import("../../internal/helpers/index.js").MeltElement<[import("../../internal/helpers/index.js").WithGet<import("svelte/store").Writable<string>>, {
+            update: (updater: import("svelte/store").Updater<"error" | "loading" | "loaded">, sideEffect?: ((newValue: "error" | "loading" | "loaded") => void) | undefined) => void;
+            set: (this: void, value: "error" | "loading" | "loaded") => void;
+            subscribe(this: void, run: import("svelte/store").Subscriber<"error" | "loading" | "loaded">, invalidate?: import("svelte/store").Invalidator<"error" | "loading" | "loaded"> | undefined): import("svelte/store").Unsubscriber;
+            get: () => "error" | "loading" | "loaded";
+            destroy?: (() => void) | undefined;
+        }], import("svelte/action").Action<any, any, Record<never, any>>, ([$src, $loadingStatus]: [string, "error" | "loading" | "loaded"]) => {
+            src: string;
+            style: string;
+        }, "avatar-image">;
+        fallback: import("../../internal/helpers/index.js").MeltElement<[{
+            update: (updater: import("svelte/store").Updater<"error" | "loading" | "loaded">, sideEffect?: ((newValue: "error" | "loading" | "loaded") => void) | undefined) => void;
+            set: (this: void, value: "error" | "loading" | "loaded") => void;
+            subscribe(this: void, run: import("svelte/store").Subscriber<"error" | "loading" | "loaded">, invalidate?: import("svelte/store").Invalidator<"error" | "loading" | "loaded"> | undefined): import("svelte/store").Unsubscriber;
+            get: () => "error" | "loading" | "loaded";
+            destroy?: (() => void) | undefined;
+        }], import("svelte/action").Action<any, any, Record<never, any>>, ([$loadingStatus]: ["error" | "loading" | "loaded"]) => {
+            style: string | undefined;
+            hidden: boolean | undefined;
+        }, "avatar-fallback">;
+    };
+    states: {
+        loadingStatus: {
+            update: (updater: import("svelte/store").Updater<"error" | "loading" | "loaded">, sideEffect?: ((newValue: "error" | "loading" | "loaded") => void) | undefined) => void;
+            set: (this: void, value: "error" | "loading" | "loaded") => void;
+            subscribe(this: void, run: import("svelte/store").Subscriber<"error" | "loading" | "loaded">, invalidate?: import("svelte/store").Invalidator<"error" | "loading" | "loaded"> | undefined): import("svelte/store").Unsubscriber;
+            get: () => "error" | "loading" | "loaded";
+            destroy?: (() => void) | undefined;
+        };
+    };
+    options: import("../../internal/helpers/index.js").ToWritableStores<Omit<{
+        src: string;
+        delayMs: number;
+        loadingStatus?: import("svelte/store").Writable<"error" | "loading" | "loaded"> | undefined;
+        onLoadingStatusChange: import("../../internal/helpers/index.js").ChangeFn<"error" | "loading" | "loaded"> | undefined;
+    }, "loadingStatus" | "onLoadingStatusChange">>;
+};

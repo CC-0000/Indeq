@@ -1,0 +1,62 @@
+/// <reference types="svelte" />
+import type { MeltActionReturn } from '../../internal/types.js';
+import type { TabsEvents } from './events.js';
+import type { CreateTabsProps, TabsTriggerProps } from './types.js';
+export declare function createTabs(props?: CreateTabsProps): {
+    elements: {
+        root: import("../../internal/helpers/index.js").MeltElement<import("../../internal/helpers/index.js").WithGet<import("svelte/store").Writable<import("../../internal/types.js").Orientation>>, import("svelte/action").Action<any, any, Record<never, any>>, ($orientation: import("../../internal/types.js").Orientation) => {
+            'data-orientation': import("../../internal/types.js").Orientation;
+        }, string>;
+        list: import("../../internal/helpers/index.js").MeltElement<import("../../internal/helpers/index.js").WithGet<import("svelte/store").Writable<import("../../internal/types.js").Orientation>>, import("svelte/action").Action<any, any, Record<never, any>>, ($orientation: import("../../internal/types.js").Orientation) => {
+            role: string;
+            'aria-orientation': import("../../internal/types.js").Orientation;
+            'data-orientation': import("../../internal/types.js").Orientation;
+        }, string>;
+        trigger: import("../../internal/helpers/index.js").MeltElement<[{
+            update: (updater: import("svelte/store").Updater<string>, sideEffect?: ((newValue: string) => void) | undefined) => void;
+            set: (this: void, value: string) => void;
+            subscribe(this: void, run: import("svelte/store").Subscriber<string>, invalidate?: import("svelte/store").Invalidator<string> | undefined): import("svelte/store").Unsubscriber;
+            get: () => string;
+            destroy?: (() => void) | undefined;
+        }, import("../../internal/helpers/index.js").WithGet<import("svelte/store").Writable<import("../../internal/types.js").Orientation>>], (node: HTMLElement) => MeltActionReturn<TabsEvents['trigger']>, ([$value, $orientation]: [string, import("../../internal/types.js").Orientation]) => (props: TabsTriggerProps) => {
+            type: "button";
+            role: string;
+            'data-state': string;
+            tabindex: number;
+            'data-value': string;
+            'data-orientation': import("../../internal/types.js").Orientation;
+            'data-disabled': boolean | undefined;
+            disabled: boolean | undefined;
+        }, string>;
+        content: import("../../internal/helpers/index.js").MeltElement<{
+            update: (updater: import("svelte/store").Updater<string>, sideEffect?: ((newValue: string) => void) | undefined) => void;
+            set: (this: void, value: string) => void;
+            subscribe(this: void, run: import("svelte/store").Subscriber<string>, invalidate?: import("svelte/store").Invalidator<string> | undefined): import("svelte/store").Unsubscriber;
+            get: () => string;
+            destroy?: (() => void) | undefined;
+        }, import("svelte/action").Action<any, any, Record<never, any>>, ($value: string) => (tabValue: string) => {
+            role: string;
+            'aria-labelledby': string;
+            hidden: boolean | undefined;
+            tabindex: number;
+        }, string>;
+    };
+    states: {
+        value: {
+            update: (updater: import("svelte/store").Updater<string>, sideEffect?: ((newValue: string) => void) | undefined) => void;
+            set: (this: void, value: string) => void;
+            subscribe(this: void, run: import("svelte/store").Subscriber<string>, invalidate?: import("svelte/store").Invalidator<string> | undefined): import("svelte/store").Unsubscriber;
+            get: () => string;
+            destroy?: (() => void) | undefined;
+        };
+    };
+    options: import("../../internal/helpers/index.js").ToWritableStores<Omit<{
+        defaultValue?: string | undefined;
+        value?: import("svelte/store").Writable<string> | undefined;
+        onValueChange?: import("../../internal/helpers/index.js").ChangeFn<string> | undefined;
+        orientation: import("../../internal/types.js").Orientation;
+        activateOnFocus: boolean;
+        loop: boolean;
+        autoSet: boolean;
+    }, "value" | "onValueChange" | "defaultValue" | "autoSet">>;
+};

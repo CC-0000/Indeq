@@ -1,0 +1,24 @@
+<script>import { melt } from "@melt-ui/svelte";
+import { getCtx } from "../ctx.js";
+export let asChild = false;
+export let el = void 0;
+const {
+  elements: { viewport },
+  getAttrs
+} = getCtx();
+const bitsAttrs = getAttrs("viewport");
+$: attrs = {
+  ...$$restProps,
+  ...bitsAttrs
+};
+$: builder = $viewport;
+$: Object.assign(builder, attrs);
+</script>
+
+{#if asChild}
+	<slot {builder} />
+{:else}
+	<div {...builder} use:builder.action bind:this={el}>
+		<slot {builder} />
+	</div>
+{/if}
