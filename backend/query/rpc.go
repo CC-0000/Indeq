@@ -177,23 +177,28 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 	// TODO: implement function calling for better filtering (dates, titles, etc.)
 	// TODO: implement query conversion for better searching
 
-	expandedQuery, err := s.expandQuery(ctx, req.Query, req.ConversationId)
+	expandedQuery, searchNeeded, err := s.expandQuery(ctx, req.Query, req.ConversationId)
 	if err != nil {
 		return &pb.QueryResponse{}, fmt.Errorf("failed to expand query: %w", err)
 	}
-	log.Print("got the expanded query: ", expandedQuery)
+	log.Print("got the expanded query: ", expandedQuery, "\n do we need to search? ", searchNeeded)
 
 	// fetch context associated with the query
-	topKChunksResponse, err := s.retrievalService.RetrieveTopKChunks(ctx, &pb.RetrieveTopKChunksRequest{
-		UserId:         req.UserId,
-		Prompt:         req.Query,
-		ExpandedPrompt: expandedQuery,
-		K:              int32(kVal),
-		Ttl:            uint32(ttlVal),
-	})
-	if err != nil {
-		topKChunksResponse = &pb.RetrieveTopKChunksResponse{
-			TopKChunks: []*pb.TextChunkMessage{},
+	topKChunksResponse := &pb.RetrieveTopKChunksResponse{
+		TopKChunks: []*pb.TextChunkMessage{},
+	}
+	if searchNeeded {
+		topKChunksResponse, err = s.retrievalService.RetrieveTopKChunks(ctx, &pb.RetrieveTopKChunksRequest{
+			UserId:         req.UserId,
+			Prompt:         req.Query,
+			ExpandedPrompt: expandedQuery,
+			K:              int32(kVal),
+			Ttl:            uint32(ttlVal),
+		})
+		if err != nil {
+			topKChunksResponse = &pb.RetrieveTopKChunksResponse{
+				TopKChunks: []*pb.TextChunkMessage{},
+			}
 		}
 	}
 
@@ -406,34 +411,44 @@ func (s *queryServer) sendToQueue(ctx context.Context, channel *amqp.Channel, qu
 
 // func(context, query to expand, conversation id)
 //   - takes in a query and returns the expanded query that ideally contains better keywords for search
+//   - will return (..., FALSE, ...) if a search call is not needed
 //   - can be set to return the original query if the env variable QUERY_EXPANSION is set to false
-func (s *queryServer) expandQuery(ctx context.Context, query string, conversationID string) (string, error) {
+func (s *queryServer) expandQuery(ctx context.Context, query string, conversationID string) (string, bool, error) {
 	if os.Getenv("QUERY_EXPANSION") == "false" {
-		return query, nil
+		return query, true, nil // Return original query, indicate search is needed
 	}
 
-	fullprompt := "User Query: {" + query + "}\n\n" +
-		"Search Terms:"
-
-	// feed the old conversation to the model
+	// Get the conversation history
 	conversation, err := s.getConversation(ctx, conversationID)
 	if err != nil {
-		return query, fmt.Errorf("failed to get conversation: %w", err)
+		return query, true, fmt.Errorf("failed to get conversation: %w", err)
 	}
+
+	// Set up the model and session
 	session := s.geminiFlash2ModelLight.StartChat()
 	session.History = s.convertConversationToSummarizedChatHistory(conversation)
 
-	// send the new message
-	resp, err := session.SendMessage(ctx, genai.Text(fullprompt))
+	// Send the message
+	resp, err := session.SendMessage(ctx, genai.Text(query))
 	if err != nil {
-		return query, fmt.Errorf("failed to send message to google gemini: %w", err)
+		return query, true, fmt.Errorf("failed to send message to Google Gemini: %w", err)
 	}
-	var messageText string
+
+	// Process the response to check for function calls
 	if len(resp.Candidates) > 0 && len(resp.Candidates[0].Content.Parts) > 0 {
-		if textPart, ok := resp.Candidates[0].Content.Parts[0].(genai.Text); ok {
-			messageText = string(textPart)
+		if funcCall, ok := resp.Candidates[0].Content.Parts[0].(genai.FunctionCall); ok {
+			if action, ok := funcCall.Args["action"].(string); ok {
+				if action == "search" {
+					if expandedQuery, ok := funcCall.Args["expanded_query"].(string); ok {
+						return expandedQuery, true, nil
+					}
+					return query, true, fmt.Errorf("failed to get expanded query from function call, even when expected")
+				} else if action == "direct_answer" {
+					return query, false, nil
+				}
+			}
 		}
 	}
 
-	return messageText, nil
+	return query, false, fmt.Errorf("function call was not called")
 }

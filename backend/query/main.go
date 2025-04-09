@@ -187,18 +187,44 @@ func (s *queryServer) connectToLLMApis() {
 	lightModel.SetTopP(0.95)
 	lightModel.SetMaxOutputTokens(200)
 	lightModel.ResponseMIMEType = "text/plain"
-	systemPrompt = "IMPORTANT: Do NOT answer the query directly. Your task is ONLY to expand and rephrase the query into search terms.\n\n" +
-		"Instructions:\n" +
-		"1. Analyze the user query\n" +
-		"2. Generate 3-5 alternative phrasings, related concepts, and key terms that would be useful for searching documents\n" +
-		"3. Format your response ONLY as a list of search terms and phrases\n" +
-		"4. Do NOT provide explanations or direct answers to the query\n\n"
-
+	systemPrompt = "IMPORTANT: Do NOT answer the query directly. You are to ALWAYS responds using the handle_query function.\n" +
+		"For each user query, you must decide:\n" +
+		"- Use \"direct_answer\" when the query is about general knowledge, definitions, or topics that don't require up-to-date information\n" +
+		"- Use \"search\" when the query needs recent information, specific data, specialized knowledge, or personal information\n" +
+		"IMPORTANT: ALWAYS respond by calling the handle_query function with the appropriate action and expanded_query fields. NEVER respond with plain text."
 	lightModel.SystemInstruction = &genai.Content{
 		Parts: []genai.Part{
 			genai.Text(systemPrompt),
 		},
 	}
+	// Define our function declaration for query handling
+	handleQueryFunction := &genai.FunctionDeclaration{
+		Name: "handle_query",
+		Description: "Process the user query by selecting one of two actions:\n" +
+			"1. 'direct_answer' - For general knowledge questions that don't need research\n" +
+			"2. 'search' - For queries requiring research or up-to-date information\n\n" +
+			"When 'search' is selected, provide 3-5 alternative phrasings and key terms as expanded_query",
+		Parameters: &genai.Schema{
+			Type: genai.TypeObject,
+
+			Properties: map[string]*genai.Schema{
+				"action": {
+					Type:        genai.TypeString,
+					Enum:        []string{"search", "direct_answer"},
+					Description: "Whether to search for more information or provide a direct answer",
+				},
+				"expanded_query": {
+					Type:        genai.TypeString,
+					Description: "Expanded search terms and phrases if action is 'search'",
+				},
+			},
+			Required: []string{"action"},
+		},
+	}
+	lightModel.Tools = []*genai.Tool{
+		{FunctionDeclarations: []*genai.FunctionDeclaration{handleQueryFunction}},
+	}
+
 	s.geminiFlash2ModelLight = lightModel
 
 	summarizationModel := client.GenerativeModel("gemini-2.0-flash-lite")
