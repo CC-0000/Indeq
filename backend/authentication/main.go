@@ -712,6 +712,7 @@ func (s *authServer) CreateOrUpdateGoogleUser(ctx context.Context, req *pb.Creat
 	var existingName sql.NullString
 	var existingGoogleId sql.NullString
 	var userExists bool
+	var userCreated bool = false
 
 	// Try to find user by email if provided and not empty
 	if req.Email != "" {
@@ -810,11 +811,13 @@ func (s *authServer) CreateOrUpdateGoogleUser(ctx context.Context, req *pb.Creat
 		if err != nil || !dRes.Success {
 			log.Printf("Failed to set up userstore")
 		}
+		userCreated = true
 	
 	}
 
 	// Commit the transaction
 	if err := tx.Commit(); err != nil {
+		userCreated = false
 		return nil, fmt.Errorf("failed to commit transaction: %v", err)
 	}
 
@@ -835,6 +838,7 @@ func (s *authServer) CreateOrUpdateGoogleUser(ctx context.Context, req *pb.Creat
 	return &pb.CreateOrUpdateGoogleUserResponse{
 		UserId: userId,
 		Token:  tokenString,
+		UserCreated: userCreated,
 	}, nil
 }
 

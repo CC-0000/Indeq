@@ -62,5 +62,6 @@ message CreateOrUpdateGoogleUserRequest {
 message CreateOrUpdateGoogleUserResponse {
     string user_id = 1;
     string token = 2;    // JWT token for authentication
+    bool user_created = 3;  // Indicates whether a new user was created
 }
 

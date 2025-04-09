@@ -103,6 +103,7 @@ message SSOConnectResponse {
     string error_details = 3;
     string token = 4;  // JWT token for the authenticated user
     string user_id = 5;  // ID of the user who was authenticated
+    bool user_created = 6;  // Indicates whether a new user was created
 }
 
 // HTTP request and response messages for SSO connect
@@ -118,4 +119,5 @@ message HttpSSOConnectResponse {
     string error_details = 3;
     string token = 4;  // JWT token for the authenticated user
     string user_id = 5;  // ID of the user who was authenticated
+    bool user_created = 6;  // Indicates whether a new user was created
 }

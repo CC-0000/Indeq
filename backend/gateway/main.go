@@ -769,6 +769,7 @@ func handleSSOLoginGenerator(clients *ServiceClients) http.HandlerFunc {
 			ErrorDetails: "",
 			Token:        userResponse.Token,
 			UserId:       userResponse.UserId,
+			UserCreated:  userResponse.UserCreated,
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(respBody)
