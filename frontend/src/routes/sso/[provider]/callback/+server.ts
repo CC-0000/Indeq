@@ -38,11 +38,13 @@ export const GET = async ({ params, url, cookies }: RequestEvent) => {
           sameSite: 'lax'
         });
 
-        // Redirect to chat page on success
+        // Redirect to chat page on success with user_created status
         return new Response(null, {
           status: 302,
-          headers: { Location: '/chat' }
-      });
+          headers: { 
+            Location: `/chat?user_created=${data.user_created ? 'true' : 'false'}`
+          }
+        });
       }
 
     } catch (error) {
