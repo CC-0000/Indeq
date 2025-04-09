@@ -238,7 +238,7 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 		}
 
 		fullprompt += "Question: " + req.Query + "\n\n"
-		fullprompt += "Instructions: Provide a comprehensive answer to the question above, using the given excerpts plus the conversation history if necessary, but falling back to your expert general knowledge if the excerpts are insufficient. Cite sources using the <number_of_excerpt_in_question> (for example, when citing Excerpt: 1, use <1>) of the document."
+		fullprompt += "Instructions: Provide a comprehensive answer to the question above, using the given excerpts plus the conversation history if necessary, but falling back to your expert general knowledge if the excerpts are insufficient. Cite excerpts using the <number_of_excerpt_in_question> (for example, when citing Excerpt: 1, use <1>) of the document."
 	}
 
 	// TODO: add the option to use more than 1 model

@@ -172,7 +172,7 @@ func (s *queryServer) connectToLLMApis() {
 	heavyModel.SetTopP(0.95)
 	heavyModel.SetMaxOutputTokens(8196)
 	heavyModel.ResponseMIMEType = "text/plain"
-	systemPrompt := "You are a very helpful assistant called Indeq with knowledge on virtually every single topic. You will ALWAYS find the best answer to the user's query, even if you're missing information from excerpts. Use the conversation history, and any provided excerpts to augment your general knowledge and then answer the question that follows. Always cite sources using the <number_of_excerpt_in_question> (for example, when citing Excerpt: 1, use <1>) when using specific information from the excerpts.\n\n"
+	systemPrompt := "You are a very helpful assistant called Indeq with knowledge on virtually every single topic. You will ALWAYS find the best answer to the user's query, even if you're missing information from excerpts. Use the conversation history, and any provided excerpts to augment your general knowledge and then answer the question that follows. Always cite excerpts using the <number_of_excerpt_in_question> (for example, when citing Excerpt: 1, use <1>) when using specific information from the excerpts.\n\n"
 	heavyModel.SystemInstruction = &genai.Content{
 		Parts: []genai.Part{
 			genai.Text(systemPrompt),
