@@ -205,18 +205,18 @@ func (s *queryServer) sendToOpenApiModel(ctx context.Context, model string, conv
 				},
 			)
 
+			queueTokenMessage := &pb.QueryTokenMessage{
+				Type:  "token",
+				Token: choice.Delta.Content,
+			}
+			if choice.Delta.Content == "</think>" { // detect think end
+				queueTokenMessage.Type = "think_end"
+				queueTokenMessage.Token = "THINKING HAS ENDED"
+				reasoning = false
+			}
+
 			if err == nil {
 				// Queue exists, send the token
-				queueTokenMessage := &pb.QueryTokenMessage{
-					Type:  "token",
-					Token: choice.Delta.Content,
-				}
-				if choice.Delta.Content == "</think>" { // detect think end
-					queueTokenMessage.Type = "think_end"
-					queueTokenMessage.Token = "THINKING HAS ENDED"
-					reasoning = false
-				}
-
 				byteMessage, err := json.Marshal(queueTokenMessage)
 				if err != nil {
 					log.Printf("Error marshalling token message: %v", err)
