@@ -47,7 +47,7 @@ func modelAllowed(model string) bool {
 	return ok
 }
 
-func (s *queryServer) sendToOpenApiModel(ctx context.Context, model string, conversation *pb.QueryConversation, fullprompt string, llmResponse *string, queue amqp.Queue, channel *amqp.Channel) error {
+func (s *queryServer) sendToOpenApiModel(ctx context.Context, model string, conversation *pb.QueryConversation, fullprompt string, llmResponse *string, reasoningResponse *string, queue amqp.Queue, channel *amqp.Channel) error {
 	// Prepare the request URL
 	apiURL := "https://api.deepinfra.com/v1/openai/chat/completions"
 	if _, ok := openAiModels[model]; ok {
@@ -123,7 +123,8 @@ func (s *queryServer) sendToOpenApiModel(ctx context.Context, model string, conv
 		return fmt.Errorf("OpenAI/DeepInfra API returned non-200 status code: %d, body: %s", resp.StatusCode, string(body))
 	}
 
-	// if this is a thinking model, we need to send the thinking token
+	// if this is a thinking model, we need to send the thinking token'
+	reasoning := false
 	if _, ok := thinkingModels[model]; ok {
 		//</think>
 		// Check if the queue still exists
@@ -154,6 +155,7 @@ func (s *queryServer) sendToOpenApiModel(ctx context.Context, model string, conv
 				log.Printf("Error publishing message: %v", err)
 			}
 		}
+		reasoning = true
 	}
 
 	// Process the SSE stream
@@ -212,6 +214,7 @@ func (s *queryServer) sendToOpenApiModel(ctx context.Context, model string, conv
 				if choice.Delta.Content == "</think>" { // detect think end
 					queueTokenMessage.Type = "think_end"
 					queueTokenMessage.Token = "THINKING HAS ENDED"
+					reasoning = false
 				}
 
 				byteMessage, err := json.Marshal(queueTokenMessage)
@@ -228,7 +231,13 @@ func (s *queryServer) sendToOpenApiModel(ctx context.Context, model string, conv
 			}
 
 			// Append to the complete response
-			*llmResponse += choice.Delta.Content
+			if choice.Delta.Content != "</think>" {
+				if reasoning {
+					*reasoningResponse += choice.Delta.Content
+				} else {
+					*llmResponse += choice.Delta.Content
+				}
+			}
 		}
 	}
 

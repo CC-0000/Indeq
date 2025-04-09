@@ -216,7 +216,7 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 
 	if len(chunksByFilePath) == 0 {
 		fullprompt += "Question: " + req.Query + "\n\n"
-		fullprompt += "Instructions: Provide a comprehensive answer to the question above, using the conversation history as context, as there are no excerpts to use."
+		fullprompt += "Instructions: Answer to the question above, using the conversation history (if present) as context."
 	} else {
 		excerptNumber := 1
 		for _, chunks := range chunksByFilePath {
@@ -233,7 +233,7 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 		}
 
 		fullprompt += "Question: " + req.Query + "\n\n"
-		fullprompt += "Instructions: Provide a comprehensive answer to the question above, using the given excerpts plus the conversation history if necessary, but falling back to your expert general knowledge if the excerpts are insufficient. Cite sources using the <Excerpt number> (with angle brackets!) of the document."
+		fullprompt += "Instructions: Provide a comprehensive answer to the question above, using the given excerpts plus the conversation history if necessary, but falling back to your expert general knowledge if the excerpts are insufficient. Cite sources using the <number_of_excerpt_in_question> (for example, when citing Excerpt: 1, use <1>) of the document."
 	}
 
 	// TODO: add the option to use more than 1 model
@@ -269,7 +269,8 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 	modelError := new(error)
 	sourceError := new(error)
 	llmResponse := new(string)
-	var sources []*pb.QuerySourceMessage
+	reasoningResponse := new(string)
+	sources := new([]*pb.QuerySourceMessage)
 
 	// Start goroutine for the model
 	go func(modelError *error, llmResponse *string) {
@@ -278,15 +279,15 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 		if req.Model == "gemini-2.0-flash" {
 			*modelError = s.sendToGemini(ctx, conversation, fullprompt, llmResponse, queue, channel)
 		} else if _, ok := deepInfraModels[req.Model]; ok {
-			*modelError = s.sendToOpenApiModel(ctx, req.Model, conversation, fullprompt, llmResponse, queue, channel)
+			*modelError = s.sendToOpenApiModel(ctx, req.Model, conversation, fullprompt, llmResponse, reasoningResponse, queue, channel)
 		} else if _, ok := openAiModels[req.Model]; ok {
-			*modelError = s.sendToOpenApiModel(ctx, req.Model, conversation, fullprompt, llmResponse, queue, channel)
+			*modelError = s.sendToOpenApiModel(ctx, req.Model, conversation, fullprompt, llmResponse, reasoningResponse, queue, channel)
 		}
 		// Add other model handlers as needed
 	}(modelError, llmResponse)
 
 	// send the sources first
-	go func(err *error, sources []*pb.QuerySourceMessage) {
+	go func(err *error, sources *[]*pb.QuerySourceMessage) {
 		defer wg.Done()
 
 		excerptNumber := 1
@@ -315,7 +316,7 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 			if err = s.sendToQueue(ctx, channel, queue.Name, byteMessage); err != nil {
 				*modelError = fmt.Errorf("failed to publish message: %w", err)
 			}
-			sources = append(sources, queueSourceMessage)
+			*sources = append(*sources, queueSourceMessage)
 			excerptNumber++
 		}
 
@@ -346,8 +347,12 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 	llmMessage := &pb.QueryMessage{
 		Text:      *llmResponse,
 		Sender:    "model",
-		Sources:   sources,
+		Sources:   *sources,
 		Reasoning: []string{}, // TODO: implement reasoning for reasoning models
+	}
+	// if we have reasoning, add it to the message
+	if *reasoningResponse != "" {
+		llmMessage.Reasoning = strings.Split(*reasoningResponse, "\n")
 	}
 	oldConversation.FullMessages = append(oldConversation.FullMessages, llmMessage)
 	oldConversation.SummarizedMessages = append(oldConversation.SummarizedMessages, llmMessage)
