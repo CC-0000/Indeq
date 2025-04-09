@@ -35,6 +35,7 @@ type queryServer struct {
 	summaryLowerBound              int
 	systemPrompt                   string
 	deepInfraApiKey                string
+	openAiApiKey                   string
 	geminiClient                   *genai.Client
 	geminiFlash2ModelHeavy         *genai.GenerativeModel
 	geminiFlash2ModelLight         *genai.GenerativeModel
@@ -141,6 +142,12 @@ func (s *queryServer) connectToLLMApis() {
 	}
 	s.deepInfraApiKey = deepInfraApiKey
 
+	openAiApiKey, ok := os.LookupEnv("OPENAI_API_KEY")
+	if !ok {
+		log.Fatalf("failed to retrieve the openai api key")
+	}
+	s.openAiApiKey = openAiApiKey
+
 	summaryUpperBound, err := strconv.ParseInt(os.Getenv("QUERY_SUMMARY_UPPER_BOUND"), 10, 64)
 	if err != nil {
 		log.Fatalf("failed to retrieve the query summary upper bound: %v", err)
@@ -159,13 +166,13 @@ func (s *queryServer) connectToLLMApis() {
 	}
 	s.geminiClient = client
 
-	heavyModel := client.GenerativeModel("gemini-2.0-flash-lite")
+	heavyModel := client.GenerativeModel("gemini-2.0-flash")
 	heavyModel.SetTemperature(1)
 	heavyModel.SetTopK(1)
 	heavyModel.SetTopP(0.95)
 	heavyModel.SetMaxOutputTokens(8196)
 	heavyModel.ResponseMIMEType = "text/plain"
-	systemPrompt := "You are a very helpful assistant called Indeq with knowledge on virtually every single topic. You will ALWAYS find the best answer to the user's query, even if you're missing information from excerpts. Use the conversation history, and any provided excerpts to augment your general knowledge and then answer the question that follows. Always cite sources using the <number_of_excerpt_in_question> (with angle brackets!) when using specific information from the excerpts.\n\n"
+	systemPrompt := "You are a very helpful assistant called Indeq with knowledge on virtually every single topic. You will ALWAYS find the best answer to the user's query, even if you're missing information from excerpts. Use the conversation history, and any provided excerpts to augment your general knowledge and then answer the question that follows. Always cite sources using the <number_of_excerpt_in_question> (for example, when citing Excerpt: 1, use <1>) when using specific information from the excerpts.\n\n"
 	heavyModel.SystemInstruction = &genai.Content{
 		Parts: []genai.Part{
 			genai.Text(systemPrompt),

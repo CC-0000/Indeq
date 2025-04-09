@@ -275,12 +275,13 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 	go func(modelError *error, llmResponse *string) {
 		defer wg.Done()
 
-		if req.Model == "gemini-2.0-flash-lite" {
-			*modelError = s.sendToGemini2FlashLite(ctx, conversation, fullprompt, llmResponse, queue, channel)
+		if req.Model == "gemini-2.0-flash" {
+			*modelError = s.sendToGemini(ctx, conversation, fullprompt, llmResponse, queue, channel)
+		} else if _, ok := deepInfraModels[req.Model]; ok {
+			*modelError = s.sendToOpenApiModel(ctx, req.Model, conversation, fullprompt, llmResponse, queue, channel)
+		} else if _, ok := openAiModels[req.Model]; ok {
+			*modelError = s.sendToOpenApiModel(ctx, req.Model, conversation, fullprompt, llmResponse, queue, channel)
 		}
-		// else if req.Model == "llama-4.0-maverick" {
-		// 	*modelError = s.sendToLlama4Maverick(systemPrompt, conversation, fullprompt)
-		// }
 		// Add other model handlers as needed
 	}(modelError, llmResponse)
 
