@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sync"
 
 	"os"
 	"path/filepath"
@@ -17,7 +18,6 @@ import (
 
 	"github.com/google/generative-ai-go/genai"
 	"github.com/google/uuid"
-	"google.golang.org/api/iterator"
 
 	_ "github.com/go-kivik/kivik/v4/couchdb"
 )
@@ -163,6 +163,16 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 	if err != nil {
 		return &pb.QueryResponse{}, fmt.Errorf("failed to retrieve the ttl env variable: %w", err)
 	}
+	defaultModel, ok := os.LookupEnv("QUERY_DEFAULT_MODEL")
+	if !ok {
+		return &pb.QueryResponse{}, fmt.Errorf("failed to retrieve the default_model env variable")
+	}
+	if req.Model == "" {
+		req.Model = defaultModel
+	}
+	if !modelAllowed(req.Model) {
+		return &pb.QueryResponse{}, fmt.Errorf("model %s is not supported", req.Model)
+	}
 
 	// TODO: implement function calling for better filtering (dates, titles, etc.)
 	// TODO: implement query conversion for better searching
@@ -227,19 +237,10 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 	}
 
 	// TODO: add the option to use more than 1 model
-
-	// start a gemini session and pull in the chat history
 	conversation, err := s.getConversation(ctx, req.ConversationId)
 	if err != nil {
 		return &pb.QueryResponse{}, fmt.Errorf("failed to get conversation: %w", err)
 	}
-	session := s.geminiFlash2ModelHeavy.StartChat()
-	session.History = s.convertConversationToSummarizedChatHistory(conversation)
-
-	// send the message to the llm
-	iter := session.SendMessageStream(ctx, genai.Text(fullprompt))
-	var llmResponse string
-	var sources []*pb.QuerySourceMessage
 
 	// Create a rabbitmq channel to stream the response
 	channel, err := s.rabbitMQConn.Channel()
@@ -263,82 +264,69 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 		return &pb.QueryResponse{}, fmt.Errorf("failed to create queue: %w", err)
 	}
 
+	var wg sync.WaitGroup
+	wg.Add(2)
+	modelError := new(error)
+	sourceError := new(error)
+	llmResponse := new(string)
+	var sources []*pb.QuerySourceMessage
+
+	// Start goroutine for the model
+	go func(modelError *error, llmResponse *string) {
+		defer wg.Done()
+
+		if req.Model == "gemini-2.0-flash-lite" {
+			*modelError = s.sendToGemini2FlashLite(ctx, conversation, fullprompt, llmResponse, queue, channel)
+		}
+		// else if req.Model == "llama-4.0-maverick" {
+		// 	*modelError = s.sendToLlama4Maverick(systemPrompt, conversation, fullprompt)
+		// }
+		// Add other model handlers as needed
+	}(modelError, llmResponse)
+
 	// send the sources first
-	excerptNumber := 1
-	for _, chunks := range chunksByFilePath {
-		// create a QueueSourceMessage for each file group
-		if len(chunks) == 0 {
-			continue
-		}
-		queueSourceMessage := &pb.QuerySourceMessage{
-			Type:          "source",
-			ExcerptNumber: int32(excerptNumber),
-			Title:         chunks[0].Metadata.Title[:len(chunks[0].Metadata.Title)-len(filepath.Ext(chunks[0].Metadata.FilePath))],
-			Extension:     strings.TrimPrefix(filepath.Ext(chunks[0].Metadata.FilePath), "."),
-			FilePath:      chunks[0].Metadata.FilePath,
-			FileUrl:       chunks[0].Metadata.FileUrl,
-		}
-		// TODO: implement the correct file extension for google sourced documents
-		if chunks[0].Metadata.Platform == pb.Platform_PLATFORM_GOOGLE {
-			queueSourceMessage.Extension = "Google"
-		}
-		byteMessage, err := json.Marshal(queueSourceMessage)
-		if err != nil {
-			return &pb.QueryResponse{}, fmt.Errorf("failed to marshal source message: %w", err)
-		}
+	go func(err *error, sources []*pb.QuerySourceMessage) {
+		defer wg.Done()
 
-		if err = s.sendToQueue(ctx, channel, queue.Name, byteMessage); err != nil {
-			return &pb.QueryResponse{}, fmt.Errorf("failed to publish message: %w", err)
-		}
-		sources = append(sources, queueSourceMessage)
-		excerptNumber++
-	}
-
-	// send the tokens
-	for {
-		resp, err := iter.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return &pb.QueryResponse{}, fmt.Errorf("error streaming response from gemini: %w", err)
-		}
-
-		for _, candidate := range resp.Candidates {
-			for _, part := range candidate.Content.Parts {
-				// check if the queue still exists
-				_, err := channel.QueueDeclarePassive(
-					req.ConversationId, // queue name
-					false,              // durable
-					true,               // delete when unused
-					false,              // exclusive
-					false,              // no-wait
-					amqp.Table{ // arguments
-						"x-expires": s.queueTTL, // 5 minutes in milliseconds
-					},
-				)
-				if err == nil {
-					// only send tokens if the queue still exists
-					// create our token type
-					queueTokenMessage := &pb.QueryTokenMessage{
-						Type:  "token",
-						Token: fmt.Sprintf("%v", part),
-					}
-					byteMessage, err := json.Marshal(queueTokenMessage)
-					if err != nil {
-						log.Printf("Error marshalling token message: %v", err)
-						continue
-					}
-
-					err = s.sendToQueue(ctx, channel, queue.Name, byteMessage)
-					if err != nil {
-						log.Printf("Error publishing message: %v", err)
-						continue
-					}
-				}
-				llmResponse += fmt.Sprintf("%v", part)
+		excerptNumber := 1
+		for _, chunks := range chunksByFilePath {
+			// create a QueueSourceMessage for each file group
+			if len(chunks) == 0 {
+				continue
 			}
+			queueSourceMessage := &pb.QuerySourceMessage{
+				Type:          "source",
+				ExcerptNumber: int32(excerptNumber),
+				Title:         chunks[0].Metadata.Title[:len(chunks[0].Metadata.Title)-len(filepath.Ext(chunks[0].Metadata.FilePath))],
+				Extension:     strings.TrimPrefix(filepath.Ext(chunks[0].Metadata.FilePath), "."),
+				FilePath:      chunks[0].Metadata.FilePath,
+				FileUrl:       chunks[0].Metadata.FileUrl,
+			}
+			// TODO: implement the correct file extension for google sourced documents
+			if chunks[0].Metadata.Platform == pb.Platform_PLATFORM_GOOGLE {
+				queueSourceMessage.Extension = "Google"
+			}
+			byteMessage, err := json.Marshal(queueSourceMessage)
+			if err != nil {
+				*modelError = fmt.Errorf("failed to marshal source message: %w", err)
+			}
+
+			if err = s.sendToQueue(ctx, channel, queue.Name, byteMessage); err != nil {
+				*modelError = fmt.Errorf("failed to publish message: %w", err)
+			}
+			sources = append(sources, queueSourceMessage)
+			excerptNumber++
 		}
+
+	}(sourceError, sources)
+
+	wg.Wait()
+
+	if *modelError != nil {
+		return &pb.QueryResponse{}, *modelError
+	}
+	if *sourceError != nil {
+		return &pb.QueryResponse{}, *sourceError
 	}
 
 	oldConversation, err := s.getConversation(ctx, req.ConversationId)
@@ -355,7 +343,7 @@ func (s *queryServer) MakeQuery(ctx context.Context, req *pb.QueryRequest) (*pb.
 	oldConversation.SummarizedMessages = append(oldConversation.SummarizedMessages, userMessage)
 
 	llmMessage := &pb.QueryMessage{
-		Text:      llmResponse,
+		Text:      *llmResponse,
 		Sender:    "model",
 		Sources:   sources,
 		Reasoning: []string{}, // TODO: implement reasoning for reasoning models

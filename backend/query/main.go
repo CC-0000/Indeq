@@ -33,6 +33,8 @@ type queryServer struct {
 	queueTTL                       int
 	summaryUpperBound              int
 	summaryLowerBound              int
+	systemPrompt                   string
+	deepInfraApiKey                string
 	geminiClient                   *genai.Client
 	geminiFlash2ModelHeavy         *genai.GenerativeModel
 	geminiFlash2ModelLight         *genai.GenerativeModel
@@ -124,7 +126,7 @@ func (s *queryServer) connectToRabbitMQ() {
 // func(context)
 //   - connects to google gemini
 //   - assumes: the client will be closed in the parent function at some point
-func (s *queryServer) connectToGoogleGemini() {
+func (s *queryServer) connectToLLMApis() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -132,6 +134,12 @@ func (s *queryServer) connectToGoogleGemini() {
 	if !ok {
 		log.Fatalf("failed to retrieve the gemini api key")
 	}
+
+	deepInfraApiKey, ok := os.LookupEnv("DEEPINFRA_API_KEY")
+	if !ok {
+		log.Fatalf("failed to retrieve the deep infra api key")
+	}
+	s.deepInfraApiKey = deepInfraApiKey
 
 	summaryUpperBound, err := strconv.ParseInt(os.Getenv("QUERY_SUMMARY_UPPER_BOUND"), 10, 64)
 	if err != nil {
@@ -163,6 +171,7 @@ func (s *queryServer) connectToGoogleGemini() {
 			genai.Text(systemPrompt),
 		},
 	}
+	s.systemPrompt = systemPrompt
 	s.geminiFlash2ModelHeavy = heavyModel
 
 	lightModel := client.GenerativeModel("gemini-2.0-flash-lite")
@@ -302,7 +311,7 @@ func main() {
 	defer server.retrievalConn.Close()
 
 	// Connect to google gemini
-	server.connectToGoogleGemini()
+	server.connectToLLMApis()
 	defer server.geminiClient.Close()
 
 	// Connect to couchdb
