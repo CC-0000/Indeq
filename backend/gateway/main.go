@@ -7,11 +7,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
+	"bytes"
 	"time"
 
 	pb "github.com/cc-0000/indeq/common/api"
@@ -402,6 +405,45 @@ func handleOAuthURLGenerator(clients *ServiceClients) http.HandlerFunc {
 	}
 }
 
+func handleSSOOAuthGenerator(clients *ServiceClients) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log.Println("Received request to handle SSO login")
+		var getOAuthURLRequest pb.HttpGetOAuthURLRequest
+		ctx := r.Context()
+
+		if err := json.NewDecoder(r.Body).Decode(&getOAuthURLRequest); err != nil {
+			http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+			return
+		}
+
+		if getOAuthURLRequest.Provider == "" {
+			http.Error(w, "Missing provider", http.StatusBadRequest)
+			return
+		}
+
+		provider, err := stringToEnumProvider(getOAuthURLRequest.Provider)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		oAuthURLRes, err := clients.integrationClient.GetSSOURL(ctx, &pb.GetSSOURLRequest{
+			Provider: provider,
+		})
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to get SSO URL: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		respBody := &pb.HttpGetOAuthURLResponse{
+			Url: oAuthURLRes.Url,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		json.NewEncoder(w).Encode(respBody)
+	}
+}
+
 func handleGetIntegrationsGenerator(clients *ServiceClients) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		log.Println("Received request to get users integrations")
@@ -520,6 +562,217 @@ func handleConnectIntegrationGenerator(clients *ServiceClients) http.HandlerFunc
 			Success:      connectRes.Success,
 			Message:      connectRes.Message,
 			ErrorDetails: connectRes.ErrorDetails,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(respBody)
+	}
+}
+
+// handleSSOLoginGenerator handles the OAuth callback for SSO flows
+// This is specifically for unauthenticated users who are signing in with Google SSO
+func handleSSOLoginGenerator(clients *ServiceClients) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var ssoConnectRequest pb.HttpSSOConnectRequest
+		// Set up context
+		ctx := r.Context()
+
+		if err := json.NewDecoder(r.Body).Decode(&ssoConnectRequest); err != nil {
+			http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+			return
+		}
+
+		if ssoConnectRequest.Provider == "" {
+			log.Println("Missing provider")
+			http.Error(w, "Missing provider", http.StatusBadRequest)
+			return
+		}
+
+		// Check if the authorization code is empty
+		if ssoConnectRequest.AuthCode == "" {
+			log.Println("Missing authorization code")
+			http.Error(w, "Missing authorization code", http.StatusBadRequest)
+			return
+		}
+
+		// Check if the environment variables are properly set
+		clientID := os.Getenv("GOOGLE_SSO_CLIENT_ID")
+		clientSecret := os.Getenv("GOOGLE_SSO_CLIENT_SECRET")
+		redirectURI := os.Getenv("GOOGLE_SSO_REDIRECT_URI")
+
+		if clientID == "" {
+			log.Println("Missing GOOGLE_SSO_CLIENT_ID environment variable")
+			http.Error(w, "Server configuration error", http.StatusInternalServerError)
+			return
+		}
+
+		if clientSecret == "" {
+			log.Println("Missing GOOGLE_SSO_CLIENT_SECRET environment variable")
+			http.Error(w, "Server configuration error", http.StatusInternalServerError)
+			return
+		}
+
+		if redirectURI == "" {
+			log.Println("Missing GOOGLE_SSO_REDIRECT_URI environment variable")
+			http.Error(w, "Server configuration error", http.StatusInternalServerError)
+			return
+		}
+
+		// Check state from redis
+		if ssoConnectRequest.State == "" {
+			log.Println("Missing state")
+			http.Error(w, "Missing state", http.StatusBadRequest)
+			return
+		}
+
+		// For SSO flows, we expect the state to have the "sso:" prefix
+		// This is set in the GetSSOURL function
+		ssoState := "sso:" + ssoConnectRequest.State
+		
+		validateRes, err := clients.integrationClient.ValidateOAuthState(ctx, &pb.ValidateOAuthStateRequest{
+			State: ssoState,
+		})
+
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to validate SSO state: %v", err), http.StatusInternalServerError)
+			return
+		} else {
+			log.Println("SSO state validated")
+		}
+
+		if !validateRes.Success {
+			http.Error(w, validateRes.ErrorDetails, http.StatusBadRequest)
+			return
+		}
+		
+		// Exchange the authorization code for tokens
+		tokenURL := "https://oauth2.googleapis.com/token"
+		data := url.Values{}
+		data.Set("code", ssoConnectRequest.AuthCode)
+		data.Set("client_id", os.Getenv("GOOGLE_SSO_CLIENT_ID"))
+		data.Set("client_secret", os.Getenv("GOOGLE_SSO_CLIENT_SECRET"))
+		data.Set("redirect_uri", os.Getenv("GOOGLE_SSO_REDIRECT_URI"))
+		data.Set("grant_type", "authorization_code")
+		
+		// Create the request manually to see what's being sent
+		req, err := http.NewRequest("POST", tokenURL, strings.NewReader(data.Encode()))
+		if err != nil {
+			http.Error(w, "Failed to create token exchange request", http.StatusInternalServerError)
+			return
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		
+		// Send the request
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			http.Error(w, "Failed to exchange code for tokens", http.StatusInternalServerError)
+			return
+		}
+		// Create a new reader with the body bytes for subsequent json.Decode
+		var bodyBytes []byte
+		bodyBytes, err = io.ReadAll(resp.Body)
+		if err != nil {
+			http.Error(w, "Failed to read response body", http.StatusInternalServerError)
+			return
+		}
+		
+		defer resp.Body.Close()
+
+		var tokenResp struct {
+			AccessToken  string `json:"access_token"`
+			TokenType    string `json:"token_type"`
+			ExpiresIn    int    `json:"expires_in"`
+			RefreshToken string `json:"refresh_token"`
+			Scope        string `json:"scope"`
+		}
+
+		// Decode the token response
+		if err := json.Unmarshal(bodyBytes, &tokenResp); err != nil {
+			http.Error(w, "Failed to decode token response", http.StatusInternalServerError)
+			return
+		}
+
+		// Check if we got an access token
+		if tokenResp.AccessToken == "" {
+			http.Error(w, "Failed to get access token", http.StatusInternalServerError)
+			return
+		}
+
+		// Use the access token to get the user's email from Google
+		userInfoURL := "https://www.googleapis.com/oauth2/v2/userinfo"
+		req, err = http.NewRequest("GET", userInfoURL, nil)
+		if err != nil {
+			http.Error(w, "Failed to create user info request", http.StatusInternalServerError)
+			return
+		}
+
+		req.Header.Set("Authorization", "Bearer "+tokenResp.AccessToken)
+		userInfoResp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			http.Error(w, "Failed to get user info", http.StatusInternalServerError)
+			return
+		}
+		
+		// Read and log the response body
+		bodyBytes, err = io.ReadAll(userInfoResp.Body)
+		if err != nil {
+			log.Printf("Failed to read response body: %v", err)
+			http.Error(w, "Failed to read response body", http.StatusInternalServerError)
+			return
+		}
+		
+		// Check if the response is successful
+		if userInfoResp.StatusCode != http.StatusOK {
+			log.Printf("Failed to get user info: status=%d, body=%s", 
+				userInfoResp.StatusCode, string(bodyBytes))
+			http.Error(w, "Failed to get user info", http.StatusInternalServerError)
+			return
+		}
+		
+		// Create a new reader with the body bytes for subsequent decoding
+		userInfoResp.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+		defer userInfoResp.Body.Close()
+
+		var userInfo struct {
+			ID            string `json:"id"`
+			Email         string `json:"email"`
+			VerifiedEmail bool   `json:"verified_email"`
+			Name          string `json:"name"`
+			Picture       string `json:"picture"`
+		}
+
+		if err := json.NewDecoder(userInfoResp.Body).Decode(&userInfo); err != nil {
+			log.Printf("Failed to decode user info: %v, body: %s", err, string(bodyBytes))
+			http.Error(w, "Failed to decode user info", http.StatusInternalServerError)
+			return
+		}
+
+		// Check if we got the required user info
+		if userInfo.Email == "" {
+			log.Printf("No email in user info response: %s", string(bodyBytes))
+			http.Error(w, "Failed to get user email", http.StatusInternalServerError)
+			return
+		}
+
+		// Call authentication service to create/update Google user
+		userResponse, err := clients.authClient.CreateOrUpdateGoogleUser(ctx, &pb.CreateOrUpdateGoogleUserRequest{
+			GoogleId: userInfo.ID,
+			Name:    userInfo.Name,
+			Email:   userInfo.Email,
+		})
+
+		if err != nil {
+			log.Printf("Failed to create/update user: %v", err)
+			http.Error(w, "Failed to create/update user", http.StatusInternalServerError)
+			return
+		}
+		
+		respBody := &pb.HttpSSOConnectResponse{
+			Success:      true,
+			Message:      "Successfully authenticated with Google",
+			ErrorDetails: "",
+			Token:        userResponse.Token,
+			UserId:       userResponse.UserId,
+			UserCreated:  userResponse.UserCreated,
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(respBody)
@@ -950,6 +1203,8 @@ func main() {
 	mux.HandleFunc("POST /api/disconnect", authMiddleware(handleDisconnectIntegrationGenerator(serviceClients), serviceClients))
 	mux.HandleFunc("GET /api/integrations", authMiddleware(handleGetIntegrationsGenerator(serviceClients), serviceClients))
 	mux.HandleFunc("POST /api/oauth", handleOAuthURLGenerator(serviceClients))
+	mux.HandleFunc("POST /api/ssooauth", handleSSOOAuthGenerator(serviceClients))
+	mux.HandleFunc("POST /api/ssologin", handleSSOLoginGenerator(serviceClients))
 	mux.HandleFunc("POST /api/waitlist", handleAddToWaitlist(serviceClients))
 	mux.HandleFunc("GET /api/desktop_stats", authMiddleware(handleGetDesktopStatsGenerator(serviceClients), serviceClients))
 	mux.HandleFunc("POST /api/manualcrawl", authMiddleware(handleManualCrawlGenerator(serviceClients), serviceClients))

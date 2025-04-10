@@ -7,6 +7,7 @@
     import { renderLatex, renderContent } from '$lib/utils/katex';
 	  import type { BotMessage, ChatState, Source } from "$lib/types/chat";
     import type { DesktopIntegration } from "$lib/types/desktopIntegration";
+    import { toast } from 'svelte-sonner';
 
   let userQuery = '';
   let requestId: string | null = null;
@@ -20,8 +21,7 @@
   let isReasoning = false;
   let conversationContainer: HTMLElement | null = null;
 
-  export let data: { integrations: string[], desktopInfo: DesktopIntegration };
-
+  export let data: { integrations: string[], desktopInfo: DesktopIntegration, userCreated: string, redirectedFrom: string };
   const isIntegrated = (provider: string): boolean => {
     return data.integrations.includes(provider.toUpperCase());
   };
@@ -31,6 +31,21 @@
     if (data.desktopInfo.isCrawling) {
       startPolling();
     }
+    
+    if (data.userCreated === 'true') {
+      toast.success('Welcome aboard! 🎉');
+    } else if (data.userCreated === 'false') {
+      toast.success('Welcome back! 👋');
+    }
+
+    if (data.redirectedFrom === 'login') {
+      toast.info('You are already logged in. Please sign out to access the login page.');
+    } else if (data.redirectedFrom === 'register') {
+      toast.info('You are already logged in. Please sign out to access the register page.');
+    }
+    // Clean up the URL parameters
+    const url = new URL(window.location.href);
+    window.history.replaceState({}, '', url.toString());
   });
   
   onDestroy(() => {

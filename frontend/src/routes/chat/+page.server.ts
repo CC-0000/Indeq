@@ -5,6 +5,17 @@ import type { DesktopIntegration } from '$lib/types/desktopIntegration';
 
 export const load: PageServerLoad = async ({ cookies, fetch }) => {
   const session = cookies.get('jwt');
+  const userCreated = cookies.get('user_created');
+  const redirectedFrom = cookies.get('redirected_from');
+
+  // If user was just created, clear the cookie after 5 seconds
+  if (userCreated) {
+    cookies.set('user_created', '', {
+      path: '/',
+      maxAge: 5 // 5 seconds
+    });
+  }
+
   if (!session) {
     // No user, redirect to login
     throw redirect(302, '/login');
@@ -39,6 +50,8 @@ export const load: PageServerLoad = async ({ cookies, fetch }) => {
 
   return {
     integrations: providers,
-    desktopInfo: desktopIntegrationData
+    desktopInfo: desktopIntegrationData,
+    userCreated: userCreated,
+    redirectedFrom: redirectedFrom
   };
 };
