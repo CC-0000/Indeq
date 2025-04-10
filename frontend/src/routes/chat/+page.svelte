@@ -7,7 +7,6 @@
     import { renderLatex, renderContent } from '$lib/utils/katex';
 	  import type { BotMessage, ChatState, Source } from "$lib/types/chat";
     import type { DesktopIntegration } from "$lib/types/desktopIntegration";
-    import { page } from '$app/stores';
     import { toast } from 'svelte-sonner';
 
   let userQuery = '';
@@ -22,8 +21,7 @@
   let isReasoning = false;
   let conversationContainer: HTMLElement | null = null;
 
-  export let data: { integrations: string[], desktopInfo: DesktopIntegration };
-
+  export let data: { integrations: string[], desktopInfo: DesktopIntegration, userCreated: string, redirectedFrom: string };
   const isIntegrated = (provider: string): boolean => {
     return data.integrations.includes(provider.toUpperCase());
   };
@@ -33,30 +31,20 @@
     if (data.desktopInfo.isCrawling) {
       startPolling();
     }
-
-    // Check for user_created parameter for Google SSO login
-    const params = new URLSearchParams(window.location.search);
-    const userCreated = params.get('user_created');
-    const redirected = params.get('redirected');
-    const from = params.get('from');
-
-    if (userCreated === 'true') {
+    
+    if (data.userCreated === 'true') {
       toast.success('Welcome aboard! 🎉');
-    } else if (userCreated === 'false') {
+    } else if (data.userCreated === 'false') {
       toast.success('Welcome back! 👋');
     }
 
-    // Display message for redirected users
-    if (redirected === 'true' && from) {
-      const pageName = from === 'login' ? 'login' : 'register';
-      toast.info(`You are already logged in. Please sign out to access the ${pageName} page.`);
+    if (data.redirectedFrom === 'login') {
+      toast.info('You are already logged in. Please sign out to access the login page.');
+    } else if (data.redirectedFrom === 'register') {
+      toast.info('You are already logged in. Please sign out to access the register page.');
     }
-
     // Clean up the URL parameters
     const url = new URL(window.location.href);
-    url.searchParams.delete('user_created');
-    url.searchParams.delete('redirected');
-    url.searchParams.delete('from');
     window.history.replaceState({}, '', url.toString());
   });
   
