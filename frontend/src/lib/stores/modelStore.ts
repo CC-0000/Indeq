@@ -11,11 +11,11 @@ export type Model = {
 
 const AVAILABLE_MODELS: Model[] = [
   { 
-    id: 'gemini-2-flash', 
+    id: 'gemini-2.0-flash', 
     name: 'Gemini 2.0 Flash',
   },
   { 
-    id: 'llama-4-maverick', 
+    id: 'llama-4.0-maverick', 
     name: 'Llama 4 Maverick',
   },
   { 
@@ -29,10 +29,6 @@ const AVAILABLE_MODELS: Model[] = [
   { 
     id: 'deepseek-r1-distill-qwen-32b', 
     name: 'DeepSeek R1 Distill Qwen 32B',
-  },
-  { 
-    id: 'phi-4', 
-    name: 'Phi-4',
   }
 ];
 

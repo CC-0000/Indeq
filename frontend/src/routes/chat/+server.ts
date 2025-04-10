@@ -29,10 +29,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${jwt}`
       },
-      body: JSON.stringify({
-        query,
-        conversation_id
-      })
+      body: JSON.stringify(body)
     });
 
     if (!goRes.ok) {

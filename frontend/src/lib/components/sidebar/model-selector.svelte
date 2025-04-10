@@ -1,6 +1,5 @@
 <script lang="ts">
     import { modelStore } from "$lib/stores/modelStore";
-    import { sidebarExpanded } from "$lib/stores/sidbarStore";
     import { fade } from 'svelte/transition';
     import { ChevronDownIcon } from "svelte-feather-icons";
     import { onMount } from "svelte";
@@ -40,12 +39,11 @@
     // Get model logo based on model ID
     function getModelLogo(modelId: string): string {
         const logos: Record<string, string> = {
-            'gemini-2-flash': '/gemini.svg',
-            'llama-4-maverick': '/meta.svg', // Using microsoft logo for llama
+            'gemini-2.0-flash': '/gemini.svg',
+            'llama-4.0-maverick': '/meta.svg', // Using microsoft logo for llama
             'qwq-32b': '/qwen.png',
             'gpt-4o-mini': '/openai.svg', 
             'deepseek-r1-distill-qwen-32b': '/deepseek.svg',
-            'phi-4': '/microsoft.png' // Using microsoft logo for Phi
         };
         
         return logos[modelId] || '/microsoft.png';

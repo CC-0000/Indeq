@@ -6,7 +6,8 @@
   import type { DesktopIntegration } from "$lib/types/desktopIntegration";
   import { isIntegrated } from "$lib/utils/integration";
   import { goto } from "$app/navigation";
-
+  import { modelStore } from "$lib/stores/modelStore";
+  
   let userQuery = '';
   let isLoading = false;
   let conversationId = '';
@@ -36,7 +37,7 @@
     const res = await fetch('/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: userQuery, conversation_id: '' })
+      body: JSON.stringify({ query: userQuery, conversation_id: '', model: $modelStore })
     });
 
     if (!res.ok) {

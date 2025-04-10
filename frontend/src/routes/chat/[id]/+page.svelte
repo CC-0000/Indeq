@@ -9,6 +9,7 @@
   import { CheckIcon, ChevronDownIcon, FileIcon, FileTextIcon, HardDriveIcon, SendIcon } from "svelte-feather-icons";
   import { onMount } from "svelte";
   import { conversationStore } from "$lib/stores/conversationStore";
+  import { modelStore } from "$lib/stores/modelStore";
 
   export let data: { 
     id: string, 
@@ -17,6 +18,8 @@
     integrations: string[], 
     newConversation: boolean
   };
+
+  console.log('modelStore', $modelStore);
   
   let messages: ChatMessage[] = [];
   let userQuery: string = '';
@@ -68,7 +71,7 @@
       const res = await fetch('/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: userQuery, conversation_id: data.id })
+        body: JSON.stringify({ query: userQuery, conversation_id: data.id, model: $modelStore })
       });
 
       if (!res.ok) {
