@@ -343,6 +343,7 @@ func (s *authServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb
 		base64.RawStdEncoding.EncodeToString(hash),
 	)
 
+
 	// Store in the database
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -351,9 +352,42 @@ func (s *authServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb
 			Error:   err.Error(),
 		}, fmt.Errorf("failed to begin transaction: %v", err)
 	}
+	var userId string
+	var googleId string
+	var passwordHash sql.NullString
+	err = tx.QueryRowContext(
+		ctx,
+		"SELECT id FROM users WHERE email = $1",
+		strings.ToLower(req.Email), // Normalize email
+	).Scan(&userId)
+
+	if err != sql.ErrNoRows {
+
+		fmt.Println("Email already exists checking for google id")
+		err = tx.QueryRowContext(
+			ctx,
+			"SELECT google_id, password_hash FROM users WHERE email = $1",
+			strings.ToLower(req.Email), // Normalize email
+		).Scan(&googleId, &passwordHash)
+		
+		// Google ID exists without a password hash
+		if err == nil && googleId != "" && (passwordHash.String == "") {
+			err = tx.QueryRowContext(
+				ctx,
+				"UPDATE users SET password_hash = $1 WHERE email = $2 RETURNING id",
+				encodedHash,
+				strings.ToLower(req.Email),
+			).Scan(&userId)
+			if err := tx.Commit(); err != nil {
+				return nil, fmt.Errorf("failed to commit transaction: %v", err)
+			}
+			return &pb.RegisterResponse{Success: true}, nil
+		}
+		return &pb.RegisterResponse{Success: false, Error: "email already exists"}, nil
+	}
+
 	defer tx.Rollback()
 
-	var userId string
 	err = tx.QueryRowContext(
 		ctx,
 		"INSERT INTO users (email, password_hash, name) VALUES ($1, $2, $3) RETURNING id",
@@ -361,13 +395,6 @@ func (s *authServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb
 		encodedHash,
 		req.Name,
 	).Scan(&userId)
-
-	if err != nil {
-		return &pb.RegisterResponse{
-			Success: false,
-			Error:   "email already exists",
-		}, err
-	}
 
 	// Try to create a corresponding entry in the desktop tracking collection
 	dRes, err := s.desktopClient.SetupUserStats(ctx, &pb.SetupUserStatsRequest{

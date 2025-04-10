@@ -19,6 +19,9 @@ export const handle: Handle = async ({ event, resolve }) => {
     '/sso/GOOGLE',
     '/sso/GOOGLE/callback'
   ];
+
+  const authRoutes = ['/login', '/register'];
+
   const productionRoutes = ['/', '/terms', '/privacy', '/api/waitlist', '/sitemap.xml'];
 
   if (APP_ENV === 'PRODUCTION' && !productionRoutes.includes(event.url.pathname)) {
@@ -26,7 +29,7 @@ export const handle: Handle = async ({ event, resolve }) => {
   }
 
   // Redirect authenticated users away from login and register pages
-  if (isAuthenticated && (event.url.pathname === '/login' || event.url.pathname === '/register')) {
+  if (isAuthenticated && authRoutes.includes(event.url.pathname) && event.request.method === 'GET') {
     const redirectFrom = event.url.pathname === '/login' ? 'login' : 'register';
     return redirect(302, `/chat?redirected=true&from=${redirectFrom}`);
   }

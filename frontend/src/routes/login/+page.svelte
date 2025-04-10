@@ -26,7 +26,7 @@
       isGoogleLoading = true;
       
       // Redirect to Google's consent screen
-      window.location.href = '/sso/GOOGLE';
+      await goto('/sso/GOOGLE');
 
       
     } catch (error) {

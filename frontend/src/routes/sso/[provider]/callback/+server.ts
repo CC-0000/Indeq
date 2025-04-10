@@ -39,10 +39,17 @@ export const GET = async ({ params, url, cookies }: RequestEvent) => {
         });
 
         // Redirect to chat page on success with user_created status
+        cookies.set('user_created', data.user_created ? 'true' : 'false', {
+          httpOnly: true,
+          secure: true,
+          path: '/',
+          maxAge: 60 * 60 * 24,
+          sameSite: 'lax'
+        });
         return new Response(null, {
           status: 302,
           headers: { 
-            Location: `/chat?user_created=${data.user_created ? 'true' : 'false'}`
+            Location: `/chat`
           }
         });
       }
