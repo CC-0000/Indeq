@@ -98,16 +98,13 @@ func (s *crawlingServer) retrieveAccessToken(ctx context.Context, userID string,
 	if err != nil {
 		return "", fmt.Errorf("error calling GetAccessToken: %v", err)
 	}
-
 	if !response.Success {
 		return "", fmt.Errorf("failed to retrieve access token: %s", response.Message)
 	}
-
 	_, err = ValidateAccessToken(response.AccessToken, platform)
 	if err != nil {
 		return "", fmt.Errorf("failed to validate access token: %v", err)
 	}
-
 	return response.AccessToken, nil
 }
 
@@ -196,39 +193,6 @@ func (s *crawlingServer) UpdateCrawler(ctx context.Context, accessToken string, 
 	}
 }
 
-// RetrieveCrawler retrieves a specific chunk from a Google Doc based on its ChunkID
-func RetrieveCrawler(ctx context.Context, accessToken string, metadataList []Metadata) (File, error) {
-	textChunks := make([]TextChunkMessage, 0)
-	for _, metadata := range metadataList {
-		switch metadata.Platform {
-		case "GOOGLE":
-			client := createGoogleOAuthClient(ctx, accessToken)
-			textChunk, err := RetrieveGoogleCrawler(ctx, client, metadata)
-			textChunks = append(textChunks, textChunk)
-			if err != nil {
-				return File{}, fmt.Errorf("error retrieving Google Doc chunk: %w", err)
-			}
-		case "NOTION":
-			client := createNotionOAuthClient(ctx, accessToken)
-			textChunk, err := RetrieveNotionCrawler(ctx, client, metadata)
-			textChunks = append(textChunks, textChunk)
-			if err != nil {
-				return File{}, fmt.Errorf("error retrieving Notion Doc chunk: %w", err)
-			}
-		case "MICROSOFT":
-			client := createMicrosoftOAuthClient(ctx, accessToken)
-			textChunk, err := RetrieveMicrosoftCrawler(ctx, client, metadata)
-			textChunks = append(textChunks, textChunk)
-			if err != nil {
-				return File{}, fmt.Errorf("error retrieving Microsoft Doc chunk: %w", err)
-			}
-		default:
-			return File{}, fmt.Errorf("unsupported platform: %s", metadata.Platform)
-		}
-	}
-	return File{File: textChunks}, nil
-}
-
 // ManualCrawler updates the crawler when user presses update to make sure data is up-to-date
 func (s *crawlingServer) ManualCrawler(ctx context.Context, req *pb.ManualCrawlerRequest) (*pb.ManualCrawlerResponse, error) {
 	tokens, err := GetRetrievalTokens(ctx, s.db, req.UserId)
@@ -258,6 +222,23 @@ func (s *crawlingServer) ManualCrawler(ctx context.Context, req *pb.ManualCrawle
 	return &pb.ManualCrawlerResponse{Success: true}, nil
 }
 
+// startPeriodicCrawlerWorker starts a periodic crawler worker
+func (s *crawlingServer) startPeriodicCrawlerWorker(ctx context.Context) {
+	ticker := time.NewTicker(time.Second * 30)
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				log.Println("Running periodic crawler worker...")
+				s.UpdateDBCrawler()
+			}
+		}
+	}()
+}
+
 // UpdateDBCrawler updates the crawler with new access tokens to make sure data is up-to-date
 func (s *crawlingServer) UpdateDBCrawler() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -274,30 +255,12 @@ func (s *crawlingServer) UpdateDBCrawler() {
 			log.Printf("Error retrieving access token: %v", err)
 			continue
 		}
-		processedFiles, err := updateCrawlerWithToken(ctx, s, token.UserID, token.Platform, token.Service, token.RetrievalToken, accessToken)
+		_, err = updateCrawlerWithToken(ctx, s, token.UserID, token.Platform, token.Service, token.RetrievalToken, accessToken)
 		if err != nil {
 			log.Printf("Error updating crawler: %v", err)
 			continue
 		}
-		log.Printf("Processed %d files for user %s", len(processedFiles.Files), token.UserID)
 	}
-}
-
-// startPeriodicCrawlerWorker starts a periodic crawler worker
-func (s *crawlingServer) startPeriodicCrawlerWorker(ctx context.Context) {
-	ticker := time.NewTicker(time.Second * 30)
-	go func() {
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				log.Println("Running periodic crawler worker...")
-				s.UpdateDBCrawler()
-			}
-		}
-	}()
 }
 
 // updateCrawlerWithToken updates the crawler with a new access token
@@ -334,75 +297,6 @@ func updateCrawlerWithToken(ctx context.Context, s *crawlingServer, userID, plat
 		return processedFiles, nil
 	}
 	return ListofFiles{}, fmt.Errorf("unsupported platform: %s", platform)
-}
-
-// storeRetrievalToken stores a new retrieval token or updates an existing one
-func storeRetrievalToken(ctx context.Context, db *sql.DB, userID, platform, service, retrievalToken string) error {
-	token := RetrievalToken{
-		UserID:         userID,
-		Platform:       platform,
-		Service:        service,
-		RetrievalToken: retrievalToken,
-		RequiresUpdate: true,
-	}
-	return UpsertRetrievalToken(ctx, db, token)
-}
-
-// setupDatabase creates and configures the database tables
-func setupDatabase(db *sql.DB) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	// create retrievalTokens table
-	_, err := db.ExecContext(ctx, `
-        CREATE TABLE IF NOT EXISTS retrievalTokens (
-            id SERIAL PRIMARY KEY,
-            user_id UUID NOT NULL,
-			platform TEXT NOT NULL CHECK (platform IN ('GOOGLE', 'NOTION', 'MICROSOFT')),
-            service TEXT NOT NULL CHECK (service IN ('GOOGLE_DRIVE', 'GOOGLE_GMAIL', 'NOTION', 'MICROSOFT_DRIVE')),
-            retrieval_token TEXT NOT NULL,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			requires_update BOOLEAN DEFAULT TRUE,
-			UNIQUE (user_id, service)
-        );
-    `)
-	if err != nil {
-		return fmt.Errorf("failed to create retrievalTokens table: %v", err)
-	}
-	_, err = db.ExecContext(ctx, `
-		CREATE INDEX IF NOT EXISTS user_service_idx ON retrievalTokens (user_id, service);
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create user_service index: %v", err)
-	}
-
-	// Create processing_status table
-	_, err = db.ExecContext(ctx, `
-		CREATE TABLE IF NOT EXISTS processing_status (
-			id SERIAL PRIMARY KEY,
-			user_id UUID NOT NULL,
-			resource_id TEXT NOT NULL,
-			platform TEXT NOT NULL CHECK (platform IN ('GOOGLE', 'NOTION', 'MICROSOFT')),
-			is_processed BOOLEAN DEFAULT FALSE,
-			crawling_done BOOLEAN DEFAULT FALSE,
-			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			UNIQUE (user_id, resource_id)
-		);
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create processing_status table: %v", err)
-	}
-
-	_, err = db.ExecContext(ctx, `
-		CREATE INDEX IF NOT EXISTS processing_status_user_idx ON processing_status (user_id);
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create processing_status_user index: %v", err)
-	}
-
-	fmt.Println("Database setup completed: retrieval_tokens and processing_status tables are ready.")
-	return nil
 }
 
 func (s *crawlingServer) DeleteCrawlerData(ctx context.Context, req *pb.DeleteCrawlerDataRequest) (*pb.DeleteCrawlerDataResponse, error) {

@@ -108,6 +108,63 @@ const (
 	`
 )
 
+// setupDatabase creates and configures the database tables
+func setupDatabase(db *sql.DB) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	// create retrievalTokens table
+	_, err := db.ExecContext(ctx, `
+        CREATE TABLE IF NOT EXISTS retrievalTokens (
+            id SERIAL PRIMARY KEY,
+            user_id UUID NOT NULL,
+			platform TEXT NOT NULL CHECK (platform IN ('GOOGLE', 'NOTION', 'MICROSOFT')),
+            service TEXT NOT NULL CHECK (service IN ('GOOGLE_DRIVE', 'GOOGLE_GMAIL', 'NOTION', 'MICROSOFT_DRIVE')),
+            retrieval_token TEXT NOT NULL,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			requires_update BOOLEAN DEFAULT TRUE,
+			UNIQUE (user_id, service)
+        );
+    `)
+	if err != nil {
+		return fmt.Errorf("failed to create retrievalTokens table: %v", err)
+	}
+	_, err = db.ExecContext(ctx, `
+		CREATE INDEX IF NOT EXISTS user_service_idx ON retrievalTokens (user_id, service);
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create user_service index: %v", err)
+	}
+
+	// Create processing_status table
+	_, err = db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS processing_status (
+			id SERIAL PRIMARY KEY,
+			user_id UUID NOT NULL,
+			resource_id TEXT NOT NULL,
+			platform TEXT NOT NULL CHECK (platform IN ('GOOGLE', 'NOTION', 'MICROSOFT')),
+			is_processed BOOLEAN DEFAULT FALSE,
+			crawling_done BOOLEAN DEFAULT FALSE,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE (user_id, resource_id)
+		);
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create processing_status table: %v", err)
+	}
+
+	_, err = db.ExecContext(ctx, `
+		CREATE INDEX IF NOT EXISTS processing_status_user_idx ON processing_status (user_id);
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create processing_status_user index: %v", err)
+	}
+
+	fmt.Println("Database setup completed: retrieval_tokens and processing_status tables are ready.")
+	return nil
+}
+
 // Global mutexes for database operations
 var (
 	userMutexes         = make(map[string]*sync.Mutex)
@@ -144,6 +201,18 @@ func getResourceMutex(userID, resourceID string) *sync.Mutex {
 	mutex := &sync.Mutex{}
 	resourceMutexes[key] = mutex
 	return mutex
+}
+
+// storeRetrievalToken stores a new retrieval token or updates an existing one
+func storeRetrievalToken(ctx context.Context, db *sql.DB, userID, platform, service, retrievalToken string) error {
+	token := RetrievalToken{
+		UserID:         userID,
+		Platform:       platform,
+		Service:        service,
+		RetrievalToken: retrievalToken,
+		RequiresUpdate: true,
+	}
+	return UpsertRetrievalToken(ctx, db, token)
 }
 
 // StoreGoogleDriveToken stores a Google Drive retrieval token

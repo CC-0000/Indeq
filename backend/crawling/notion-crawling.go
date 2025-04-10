@@ -173,6 +173,88 @@ func NewNotionChunker(chunkSize, overlap int) *NotionChunker {
 	}
 }
 
+// createNotionOAuthClient creates a new OAuth client for Notion API
+func createNotionOAuthClient(ctx context.Context, accessToken string) *http.Client {
+	tokenSource := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: accessToken})
+	return oauth2.NewClient(ctx, tokenSource)
+}
+
+// NotionCrawler is the main entry point for crawling Notion content
+func (s *crawlingServer) NotionCrawler(ctx context.Context, client *http.Client, userID string) (ListofFiles, error) {
+	files, retrievalToken, err := s.NotionSearch(ctx, client, userID, "", true)
+	if err != nil {
+		return ListofFiles{}, fmt.Errorf("failed to search for objects: %w", err)
+	}
+	StoreNotionToken(ctx, s.db, userID, retrievalToken)
+	processedFiles, err := s.processNotionFiles(ctx, client, files)
+	if err != nil {
+		return ListofFiles{}, fmt.Errorf("failed to process files: %w", err)
+	}
+	if processedFiles.Files == nil {
+		return ListofFiles{}, nil
+	}
+
+	return processedFiles, nil
+}
+
+func (s *crawlingServer) UpdateCrawlNotion(ctx context.Context, client *http.Client, userID string, retrievalToken string) (string, ListofFiles, error) {
+	files, newToken, err := s.NotionSearch(ctx, client, userID, retrievalToken, false)
+	if err != nil {
+		return "", ListofFiles{}, fmt.Errorf("failed to search for objects: %w", err)
+	}
+	var filePaths []string
+	for _, file := range files.Files {
+		if len(file.File) == 0 {
+			continue
+		}
+
+		resourceID := file.File[0].Metadata.ResourceID
+		filePath := file.File[0].Metadata.FilePath
+
+		if err := s.DeleteChunkMappingsForFile(ctx, userID, "NOTION", resourceID); err != nil {
+			log.Printf("Warning: failed to delete old chunk mappings for file %s: %v", resourceID, err)
+		}
+
+		if err := UpsertProcessingStatus(ctx, s.db, userID, resourceID, "NOTION", false); err != nil {
+			log.Printf("Warning: failed to reset processing status for file %s: %v", resourceID, err)
+		}
+
+		filePaths = append(filePaths, filePath)
+	}
+
+	if len(filePaths) > 0 {
+		_, err = s.vectorService.DeleteFiles(ctx, &pb.VectorFileDeleteRequest{
+			UserId:    userID,
+			Platform:  pb.Platform_PLATFORM_NOTION,
+			Files:     filePaths,
+			Exclusive: false,
+		})
+		if err != nil {
+			log.Printf("Warning: failed to delete old vectors: %v", err)
+		}
+	}
+
+	processedFiles, err := s.processNotionFiles(ctx, client, files)
+	if err != nil {
+		for _, file := range files.Files {
+			if len(file.File) > 0 {
+				if err := UpsertProcessingStatus(ctx, s.db, userID, file.File[0].Metadata.ResourceID, "NOTION", false); err != nil {
+					log.Printf("Warning: failed to reset processing status after error for file %s: %v", file.File[0].Metadata.ResourceID, err)
+				}
+			}
+		}
+		return "", ListofFiles{}, fmt.Errorf("failed to process files: %w", err)
+	}
+
+	if len(processedFiles.Files) > 0 {
+		if err := s.sendCrawlDoneSignal(ctx, userID, "NOTION"); err != nil {
+			log.Printf("Warning: failed to send crawl done signal: %v", err)
+		}
+	}
+
+	return newToken, processedFiles, nil
+}
+
 // ProcessBlocks processes the blocks from a Notion API response
 func (nc *NotionChunker) ProcessBlocks(blockResponse NotionPageResponse) []ProcessedBlock {
 	nc.Blocks = []ProcessedBlock{}
@@ -341,90 +423,8 @@ func (nc *NotionChunker) GenerateChunks(pageResponse NotionObject, userID, pageT
 	return chunks
 }
 
-// createNotionOAuthClient creates a new OAuth client for Notion API
-func createNotionOAuthClient(ctx context.Context, accessToken string) *http.Client {
-	tokenSource := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: accessToken})
-	return oauth2.NewClient(ctx, tokenSource)
-}
-
-// NotionCrawler is the main entry point for crawling Notion content
-func (s *crawlingServer) NotionCrawler(ctx context.Context, client *http.Client, userID string) (ListofFiles, error) {
-	files, retrievalToken, err := s.NotionSearch(ctx, client, userID, "")
-	if err != nil {
-		return ListofFiles{}, fmt.Errorf("failed to search for objects: %w", err)
-	}
-	StoreNotionToken(ctx, s.db, userID, retrievalToken)
-	processedFiles, err := s.processNotionFiles(ctx, client, files)
-	if err != nil {
-		return ListofFiles{}, fmt.Errorf("failed to process files: %w", err)
-	}
-	if processedFiles.Files == nil {
-		return ListofFiles{}, nil
-	}
-
-	return processedFiles, nil
-}
-
-func (s *crawlingServer) UpdateCrawlNotion(ctx context.Context, client *http.Client, userID string, retrievalToken string) (string, ListofFiles, error) {
-	files, newToken, err := s.NotionSearch(ctx, client, userID, retrievalToken)
-	if err != nil {
-		return "", ListofFiles{}, fmt.Errorf("failed to search for objects: %w", err)
-	}
-	var filePaths []string
-	for _, file := range files.Files {
-		if len(file.File) == 0 {
-			continue
-		}
-
-		resourceID := file.File[0].Metadata.ResourceID
-		filePath := file.File[0].Metadata.FilePath
-
-		if err := s.DeleteChunkMappingsForFile(ctx, userID, "NOTION", resourceID); err != nil {
-			log.Printf("Warning: failed to delete old chunk mappings for file %s: %v", resourceID, err)
-		}
-
-		if err := UpsertProcessingStatus(ctx, s.db, userID, resourceID, "NOTION", false); err != nil {
-			log.Printf("Warning: failed to reset processing status for file %s: %v", resourceID, err)
-		}
-
-		filePaths = append(filePaths, filePath)
-	}
-
-	if len(filePaths) > 0 {
-		_, err = s.vectorService.DeleteFiles(ctx, &pb.VectorFileDeleteRequest{
-			UserId:    userID,
-			Platform:  pb.Platform_PLATFORM_NOTION,
-			Files:     filePaths,
-			Exclusive: false,
-		})
-		if err != nil {
-			log.Printf("Warning: failed to delete old vectors: %v", err)
-		}
-	}
-
-	processedFiles, err := s.processNotionFiles(ctx, client, files)
-	if err != nil {
-		for _, file := range files.Files {
-			if len(file.File) > 0 {
-				if err := UpsertProcessingStatus(ctx, s.db, userID, file.File[0].Metadata.ResourceID, "NOTION", false); err != nil {
-					log.Printf("Warning: failed to reset processing status after error for file %s: %v", file.File[0].Metadata.ResourceID, err)
-				}
-			}
-		}
-		return "", ListofFiles{}, fmt.Errorf("failed to process files: %w", err)
-	}
-
-	if len(processedFiles.Files) > 0 {
-		if err := s.sendCrawlDoneSignal(ctx, userID, "NOTION"); err != nil {
-			log.Printf("Warning: failed to send crawl done signal: %v", err)
-		}
-	}
-
-	return newToken, processedFiles, nil
-}
-
 // NotionSearch searches for all accessible Notion pages and databases
-func (s *crawlingServer) NotionSearch(ctx context.Context, client *http.Client, userID, retrievalToken string) (ListofFiles, string, error) {
+func (s *crawlingServer) NotionSearch(ctx context.Context, client *http.Client, userID, retrievalToken string, initial bool) (ListofFiles, string, error) {
 	var files ListofFiles
 	nextCursor := ""
 	newRetrievalToken := ""
@@ -464,7 +464,7 @@ func (s *crawlingServer) NotionSearch(ctx context.Context, client *http.Client, 
 			return files, retrievalToken, fmt.Errorf("failed to decode search response: %w", err)
 		}
 		for _, page := range searchResp.Results {
-			if retrievalToken != "" {
+			if retrievalToken != "" && !initial {
 				retrivalTime, err := time.Parse(time.RFC3339, retrievalToken)
 				if err != nil {
 					return files, retrievalToken, fmt.Errorf("failed to parse retrieval token: %w", err)
@@ -649,7 +649,7 @@ func (s *crawlingServer) processNotionPage(ctx context.Context, client *http.Cli
 		value := extractPropertyValue(propType, propObj)
 		if value != "" {
 			propertiesContent += fmt.Sprintf("%s: %s\n", propName, value)
-			if propName == "Name" {
+			if propType == "title" {
 				pageTitle = value
 			}
 		}

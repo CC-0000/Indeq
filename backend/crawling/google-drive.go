@@ -38,17 +38,14 @@ func (s *crawlingServer) CrawlGoogleDrive(ctx context.Context, client *http.Clie
 	if err != nil {
 		return ListofFiles{}, fmt.Errorf("error retrieving Google Drive file list: %w", err)
 	}
-
 	processedFiles, err := s.ProcessAllGoogleDriveFiles(ctx, client, filelist)
 	if err != nil {
 		return ListofFiles{}, fmt.Errorf("error processing Google Drive files: %w", err)
 	}
-
 	retrievalToken, err := GetStartPageToken(ctx, client)
 	if err != nil {
 		return ListofFiles{}, fmt.Errorf("error getting start page token: %w", err)
 	}
-
 	if err := StoreGoogleDriveToken(ctx, s.db, userID, retrievalToken); err != nil {
 		return ListofFiles{}, fmt.Errorf("failed to store change token: %w", err)
 	}
@@ -61,11 +58,9 @@ func (s *crawlingServer) UpdateCrawlGoogleDrive(ctx context.Context, client *htt
 	if err != nil {
 		return "", ListofFiles{}, fmt.Errorf("error retrieving Google Drive changes: %w", err)
 	}
-
 	if len(filelist.Files) == 0 {
 		return changeToken, ListofFiles{}, nil
 	}
-
 	var filePaths []string
 	for _, file := range filelist.Files {
 		if len(file.File) > 0 {
