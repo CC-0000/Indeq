@@ -34,7 +34,7 @@ type integrationServer struct {
 	crawlingService pb.CrawlingServiceClient
 	db              *sql.DB // integration database
 	redisClient     *redis.RedisClient
-	authClient      pb.AuthenticationServiceClient // Add auth client for token generation
+	authClient      pb.AuthenticationServiceClient // Needas Integration service needs to call auth service to generate tokens
 }
 
 // TokenResponse represents the OAuth token response from our providers

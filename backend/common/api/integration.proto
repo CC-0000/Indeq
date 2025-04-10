@@ -106,13 +106,6 @@ message SSOConnectResponse {
     bool user_created = 6;  // Indicates whether a new user was created
 }
 
-// HTTP request and response messages for SSO connect
-message HttpSSOConnectRequest {
-    string provider = 1;
-    string auth_code = 2;
-    string state = 3;
-}
-
 message HttpSSOConnectResponse {
     bool success = 1;
     string message = 2;

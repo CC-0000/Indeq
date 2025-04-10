@@ -30,7 +30,6 @@
 
       
     } catch (error) {
-      console.error('Google login error:', error);
       toast.error(error instanceof Error ? error.message : 'Failed to initiate Google login');
       isGoogleLoading = false;
     }

@@ -428,6 +428,7 @@ func (s *authServer) Verify(ctx context.Context, req *pb.VerifyRequest) (*pb.Ver
 
 	// check if token was able to be parsed
 	if err != nil {
+		log.Printf("Failed to parse token: %v", err)
 		return &pb.VerifyResponse{Valid: false, Error: "invalid token"}, nil
 	}
 
