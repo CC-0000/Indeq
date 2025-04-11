@@ -35,7 +35,7 @@ export const actions: Actions = {
       return fail(400, { error: 'Invalid type' });
     }
 
-    const token = cookies.get('pendingRegisterToken');
+    const token = cookies.get('pendingRegisterToken') || cookies.get('pendingForgotToken');
 
     if (!token) {
       return fail(400, { error: 'Something went wrong. Please try again.' });

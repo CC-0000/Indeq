@@ -87,11 +87,12 @@ message ForgotPasswordRequest {
 message ForgotPasswordResponse {
     bool success = 1;
     string error = 2;
+    string token = 3;
 }
 
 message ResetPasswordRequest {
-    string email = 1;
-    string password = 2;
+    string password = 1;
+    string token = 2;
 }
 
 message ResetPasswordResponse {

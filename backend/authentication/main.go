@@ -490,40 +490,40 @@ func (s *authServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb
 			Error:   "Email already exists!",
 		}, nil
 	}
-	// Check rate limit
-	ip, err := getIPFromContext(ctx)
-	if err != nil {
-		return &pb.RegisterResponse{
-			Success: false,
-			Error:   "Something went wrong. Please try again later.",
-		}, err
-	}
-	log.Printf("Checking rate limit for IP: %s", ip)
-	ipKey := fmt.Sprintf("reg_ip:%s", ip)
+	// // Check rate limit
+	// ip, err := getIPFromContext(ctx)
+	// if err != nil {
+	// 	return &pb.RegisterResponse{
+	// 		Success: false,
+	// 		Error:   "Something went wrong. Please try again later.",
+	// 	}, err
+	// }
+	// log.Printf("Checking rate limit for IP: %s", ip)
+	// ipKey := fmt.Sprintf("reg_ip:%s", ip)
 
-	ipCount, err := s.redisClient.Incr(ctx, ipKey, 1)
-	if err != nil {
-		return &pb.RegisterResponse{
-			Success: false,
-			Error:   "Something went wrong. Please try again later.",
-		}, err
-	}
+	// ipCount, err := s.redisClient.Incr(ctx, ipKey, 1)
+	// if err != nil {
+	// 	return &pb.RegisterResponse{
+	// 		Success: false,
+	// 		Error:   "Something went wrong. Please try again later.",
+	// 	}, err
+	// }
 
-	if ipCount == 1 {
-		if err := s.redisClient.Expire(ctx, ipKey, 5*time.Minute); err != nil {
-			return &pb.RegisterResponse{
-				Success: false,
-				Error:   "Something went wrong. Please try again later.",
-			}, err
-		}
-	}
+	// if ipCount == 1 {
+	// 	if err := s.redisClient.Expire(ctx, ipKey, 5*time.Minute); err != nil {
+	// 		return &pb.RegisterResponse{
+	// 			Success: false,
+	// 			Error:   "Something went wrong. Please try again later.",
+	// 		}, err
+	// 	}
+	// }
 
-	if ipCount > 3 {
-		return &pb.RegisterResponse{
-			Success: false,
-			Error:   "Too many attempts. Please try again later.",
-		}, nil
-	}
+	// if ipCount > 3 {
+	// 	return &pb.RegisterResponse{
+	// 		Success: false,
+	// 		Error:   "Too many attempts. Please try again later.",
+	// 	}, nil
+	// }
 
 	// Generate a random salt
 	salt := make([]byte, s.argonParams.saltLength)
@@ -670,21 +670,21 @@ func (s *authServer) ResendOTP(ctx context.Context, req *pb.ResendOTPRequest) (*
 		}, nil
 	}
 
-	rateLimitKey := fmt.Sprintf("otp_resend:%s", req.Token)
-	allowed, err := s.redisClient.SetNX(ctx, rateLimitKey, "1", 30*time.Second)
-	log.Printf("allowed: %t", allowed)
-	if err != nil {
-		return &pb.ResendOTPResponse{
-			Success: false,
-			Error:   "Internal error during rate limiting",
-		}, err
-	}
-	if !allowed {
-		return &pb.ResendOTPResponse{
-			Success: false,
-			Error:   "Too many resend attempts.",
-		}, nil
-	}
+	// rateLimitKey := fmt.Sprintf("otp_resend:%s", req.Token)
+	// allowed, err := s.redisClient.SetNX(ctx, rateLimitKey, "1", 30*time.Second)
+	// log.Printf("allowed: %t", allowed)
+	// if err != nil {
+	// 	return &pb.ResendOTPResponse{
+	// 		Success: false,
+	// 		Error:   "Internal error during rate limiting",
+	// 	}, err
+	// }
+	// if !allowed {
+	// 	return &pb.ResendOTPResponse{
+	// 		Success: false,
+	// 		Error:   "Too many resend attempts.",
+	// 	}, nil
+	// }
 
 	var redisKey string
 	if req.Type == "register" {
@@ -692,6 +692,8 @@ func (s *authServer) ResendOTP(ctx context.Context, req *pb.ResendOTPRequest) (*
 	} else if req.Type == "forgot" {
 		redisKey = fmt.Sprintf("forgot:%s", req.Token)
 	}
+
+	log.Printf("redisKey: %s", redisKey)
 
 	data, err := s.redisClient.Get(ctx, redisKey)
 	if err != nil {
@@ -701,11 +703,17 @@ func (s *authServer) ResendOTP(ctx context.Context, req *pb.ResendOTPRequest) (*
 		}, err
 	}
 
+	if data == "" {
+		return &pb.ResendOTPResponse{
+			Success: false,
+			Error:   "Something went wrong. Please try again later.",
+		}, nil
+	}
 	newOTP, err := generateOTP()
 	if err != nil {
 		return &pb.ResendOTPResponse{
 			Success: false,
-			Error: "Something went wrong. Please try again later.",
+			Error:   "Something went wrong. Please try again later.",
 		}, err
 	}
 
@@ -780,15 +788,20 @@ The Indeq Team
 				Error:   "Something went wrong. Please try again later.",
 			}, err
 		}
-		
-		// Compose the email body for password reset.
-		emailBody := fmt.Sprintf(`You requested a password reset.
 
-Please use the following OTP to reset your password:
+		// Compose the email body for password reset.
+		emailBody := fmt.Sprintf(`Hi there,
+
+You requested a password reset.
+
+To reset your password, enter the following 6-digit code:
 
 Your verification code: %s
 
 This code will expire in 5 minutes. If you did not request a password reset, please ignore this email.
+
+Thank you,
+The Indeq Team
 `, newOTP)
 		emailSubject := "Indeq - Reset Your Password"
 
@@ -948,8 +961,6 @@ func (s *authServer) VerifyOTP(ctx context.Context, req *pb.VerifyOTPRequest) (*
 			}, nil
 		}
 
-		s.redisClient.Del(ctx, redisKey)
-
 		return &pb.VerifyOTPResponse{
 			Success: true,
 		}, nil
@@ -988,6 +999,206 @@ func (s *authServer) Verify(ctx context.Context, req *pb.VerifyRequest) (*pb.Ver
 	}
 
 	return &pb.VerifyResponse{Valid: false, Error: "invalid token"}, nil
+}
+
+// rpc(context, forgot password request)
+//   - takes in an email and sends a reset password email to the user
+func (s *authServer) ForgotPassword(ctx context.Context, req *pb.ForgotPasswordRequest) (*pb.ForgotPasswordResponse, error) {
+	if req.Email == "" {
+		return &pb.ForgotPasswordResponse{
+			Success: false,
+			Error:   "Email is required",
+		}, nil
+	}
+	
+	req.Email = strings.ToLower(req.Email)
+
+	// // rate limit the user
+	// rateLimitKey := fmt.Sprintf("forgot:%s", req.Email)
+	// rateLimitCfg := Config{
+	// 	KeyPrefix: "forgot",
+	// 	Limit:     1,
+	// 	Duration:  24 * time.Hour,
+	// }
+
+	// allowed, err := CheckRateLimit(ctx, s.redisClient, rateLimitKey, rateLimitCfg)
+	// if err != nil {
+	// 	// Failed to check rate limit
+	// 	return &pb.ForgotPasswordResponse{
+	// 		Success: false,
+	// 		Error:   "Something went wrong. Please try again later.",
+	// 	}, err
+	// }
+
+	// if !allowed {
+	// 	return &pb.ForgotPasswordResponse{
+	// 		Success: false,
+	// 		Error:   "Too many requests. Please try again later.",
+	// 	}, nil
+	// }
+
+	otp, err := generateOTP()
+	if err != nil {
+		// Failed to generate OTP
+		return &pb.ForgotPasswordResponse{
+			Success: false,
+			Error:   "Something went wrong. Please try again later.",
+		}, err
+	}
+
+	token := uuid.New().String()
+	redisKey := fmt.Sprintf("forgot:%s", token)
+
+	payload := ForgotPayload{
+		Email: req.Email,
+		OTP:   otp,
+	}
+
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return &pb.ForgotPasswordResponse{
+			Success: false,
+			Error:   "Something went wrong. Please try again later.",
+		}, err
+	}
+
+	err = s.redisClient.Set(ctx, redisKey, payloadBytes, 5*time.Minute)
+	if err != nil {
+		// Failed to set a token in redis
+		return &pb.ForgotPasswordResponse{
+			Success: false,
+			Error:   "Something went wrong. Please try again later.",
+		}, err
+	}
+
+	emailBody := fmt.Sprintf(`Hi there,
+
+You requested a password reset.
+
+To reset your password, enter the following 6-digit code:
+
+Your verification code: %s
+
+This code will expire in 5 minutes. If you did not request a password reset, please ignore this email.
+
+Thank you,
+The Indeq Team
+`, otp)
+	emailSubject := "Indeq - Reset Your Password"
+
+	if err := s.sendEmail(req.Email, emailSubject, emailBody); err != nil {
+		// Failed to send reset password email
+		return &pb.ForgotPasswordResponse{
+			Success: false,
+			Error:   "Something went wrong. Please try again later.",
+		}, err
+	}
+
+	return &pb.ForgotPasswordResponse{
+		Success: true,
+		Token:   token,
+	}, nil
+}
+
+// rpc(context, reset password request)
+//   - takes in a token and a password and resets the password
+func (s *authServer) ResetPassword(ctx context.Context, req *pb.ResetPasswordRequest) (*pb.ResetPasswordResponse, error) {
+	if req.Token == "" {
+		return &pb.ResetPasswordResponse{
+			Success: false,
+			Error:   "No token found",
+		}, nil
+	}
+
+	if req.Password == "" {
+		return &pb.ResetPasswordResponse{
+			Success: false,
+			Error:   "Password is required",
+		}, nil
+	}
+	redisKey := fmt.Sprintf("forgot:%s", req.Token)
+	log.Printf("redisKey: %s", redisKey)
+	data, err := s.redisClient.Get(ctx, redisKey)
+	if err != nil {
+		return &pb.ResetPasswordResponse{
+			Success: false,
+			Error:   "Something went wrong. Please try again later.",
+		}, err
+	}
+
+	if data == "" {
+		return &pb.ResetPasswordResponse{
+			Success: false,
+			Error:   "No data found",
+		}, nil
+	}
+
+	if err := s.validatePassword(req.Password); err != nil {
+		return &pb.ResetPasswordResponse{
+			Success: false,
+			Error:   "Password is not valid",
+		}, err
+	}
+
+	// Generate a random salt
+	salt := make([]byte, s.argonParams.saltLength)
+	if _, err := rand.Read(salt); err != nil {
+		return &pb.ResetPasswordResponse{
+			Success: false,
+			Error:   fmt.Sprintf("couldn't make a salt: %v", err),
+		}, err
+	}
+
+	// Generate a password hash
+	hash := argon2.IDKey(
+		[]byte(req.Password),
+		salt,
+		s.argonParams.iterations,
+		s.argonParams.memory,
+		s.argonParams.parallelism,
+		s.argonParams.keyLength,
+	)
+
+	// Keep encryption details alongside the hash
+	encodedHash := fmt.Sprintf(
+		"$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s",
+		argon2.Version,
+		s.argonParams.memory,
+		s.argonParams.iterations,
+		s.argonParams.parallelism,
+		base64.RawStdEncoding.EncodeToString(salt),
+		base64.RawStdEncoding.EncodeToString(hash),
+	)
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return &pb.ResetPasswordResponse{
+			Success: false,
+			Error:   "Something went wrong. Please try again later.",
+		}, err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.ExecContext(ctx, "UPDATE users SET password_hash = $1 WHERE email = $2", encodedHash, strings.ToLower(data))
+	if err != nil {
+		return &pb.ResetPasswordResponse{
+			Success: false,
+			Error:   "Something went wrong. Please try again later.",
+		}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return &pb.ResetPasswordResponse{
+			Success: false,
+			Error:   "Something went wrong. Please try again later.",
+		}, err
+	}
+
+	s.redisClient.Del(ctx, redisKey)
+
+	return &pb.ResetPasswordResponse{
+		Success: true,
+	}, nil
 }
 
 // rpc(context, sign csr request)

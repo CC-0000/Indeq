@@ -766,7 +766,6 @@ func handleResendOTPGenerator(clients *ServiceClients) http.HandlerFunc {
 			Type: resendOTPRequest.Type,
 			Token: resendOTPRequest.Token,
 		})
-
 		if err != nil {
 			http.Error(w, "Failed to resend otp", http.StatusInternalServerError)
 			return
@@ -823,6 +822,78 @@ func handleVerifyOTPGenerator(clients *ServiceClients) http.HandlerFunc {
 			Error:   res.Error,
 			Token:   res.Token,
 			UserId:  res.UserId,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(httpResponse)
+	}
+}
+
+func handleForgotPasswordGenerator(clients *ServiceClients) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log.Println("Received forgot password request")
+
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var forgotPasswordRequest pb.HttpForgotPasswordRequest
+		if err := json.NewDecoder(r.Body).Decode(&forgotPasswordRequest); err != nil {
+			log.Printf("Error: %v", err)
+			http.Error(w, "Bad Request", http.StatusBadRequest)
+			return
+		}
+		
+		res, err := clients.authClient.ForgotPassword(r.Context(), &pb.ForgotPasswordRequest{
+			Email: forgotPasswordRequest.Email,
+		})
+
+		if err != nil {
+			http.Error(w, "Failed to send reset password email", http.StatusInternalServerError)
+			return
+		}
+
+		httpResponse := &pb.HttpForgotPasswordResponse{
+			Success: res.Success,
+			Error:   res.Error,
+			Token:   res.Token,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(httpResponse)
+	}
+}
+
+func handleResetPasswordGenerator(clients *ServiceClients) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log.Println("Received reset password request")
+
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var resetPasswordRequest pb.HttpResetPasswordRequest
+		if err := json.NewDecoder(r.Body).Decode(&resetPasswordRequest); err != nil {
+			log.Printf("Error: %v", err)
+			http.Error(w, "Bad Request", http.StatusBadRequest)
+			return
+		}
+
+		res, err := clients.authClient.ResetPassword(r.Context(), &pb.ResetPasswordRequest{
+			Token: resetPasswordRequest.Token,
+			Password: resetPasswordRequest.Password,
+		})
+
+		if err != nil {
+			http.Error(w, "Failed to reset password", http.StatusInternalServerError)
+			return
+		}
+
+		httpResponse := &pb.HttpResetPasswordResponse{
+			Success: res.Success,
+			Error:   res.Error,
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -1042,8 +1113,8 @@ func main() {
 	mux.HandleFunc("POST /api/manualcrawl", authMiddleware(handleManualCrawlGenerator(serviceClients), serviceClients))
 	mux.HandleFunc("POST /api/verify-otp", handleVerifyOTPGenerator(serviceClients))
 	mux.HandleFunc("POST /api/resend-otp", handleResendOTPGenerator(serviceClients))
-	// mux.HandleFunc("POST /api/forgot-password", handleForgotPasswordGenerator(serviceClients))
-	// mux.HandleFunc("POST /api/reset-password", handleResetPasswordGenerator(serviceClients))
+	mux.HandleFunc("POST /api/forgot-password", handleForgotPasswordGenerator(serviceClients))
+	mux.HandleFunc("POST /api/reset-password", handleResetPasswordGenerator(serviceClients))
 
 	httpPort := os.Getenv("GATEWAY_ADDRESS")
 	server := &http.Server{

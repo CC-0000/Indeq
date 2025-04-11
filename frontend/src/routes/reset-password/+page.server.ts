@@ -4,9 +4,9 @@ import { fail, redirect } from "@sveltejs/kit";
 import { GO_BACKEND_URL } from "$env/static/private";
 
 export const load: PageServerLoad = async ({ cookies }) => {
-  const pendingReset = cookies.get('pendingReset');
+  const pendingForgot = cookies.get('pendingForgotToken');
 
-  if (!pendingReset) {
+  if (!pendingForgot) {
     throw redirect(303, '/forgot-password');
   }
 
@@ -17,17 +17,17 @@ export const actions: Actions = {
   default: async ({ request, cookies }) => {
     const data = await request.formData();
     const password = data.get('password');
-    const email = cookies.get('pendingReset');
+    const token = cookies.get('pendingForgotToken');
 
-    if (!email) {
-      return fail(400, { error: 'Reset session expired. Please start again.' });
+    if (!token) {
+      return fail(400, { error: 'Something went wrong. Please try again.' });
     }
 
     // Call backend to update password
     const res = await fetch(`${GO_BACKEND_URL}/api/reset-password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password })
+      body: JSON.stringify({ password, token })
     });
 
     if (!res.ok) {
@@ -41,19 +41,8 @@ export const actions: Actions = {
       return fail(400, { error: response.error || 'Failed to reset password' });
     }
 
-    // Optionally, log them in right after
-    if (response.token) {
-      cookies.set('jwt', response.token, {
-        httpOnly: true,
-        secure: true,
-        sameSite: 'lax',
-        path: '/',
-        maxAge: 60 * 60 * 24 // 1 day
-      });
-    }
-
     // Clear the reset session
-    cookies.delete('pendingReset', { path: '/' });
+    cookies.delete('pendingForgotToken', { path: '/' });
 
     return { success: true };
   }

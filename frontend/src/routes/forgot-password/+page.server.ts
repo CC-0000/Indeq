@@ -29,11 +29,11 @@ export const actions: Actions = {
       return fail(400, { error: response.error || 'An unknown error occurred' });
     }
 
+    const token = response.token;
+
     cookies.set(
-      'pendingReset',
-      JSON.stringify({
-        email: email.toString()
-      }),
+      'pendingForgotToken',
+      token,
       {
         httpOnly: true,
         secure: true,
@@ -43,6 +43,6 @@ export const actions: Actions = {
       }
     );
 
-    throw redirect(303, '/enter-code?type=reset');
+    throw redirect(303, '/enter-code?type=forgot');
   }
 };

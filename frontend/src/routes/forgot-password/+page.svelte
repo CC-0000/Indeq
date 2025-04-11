@@ -28,14 +28,14 @@
         <Card.Header class="space-y-1">
           <Card.Title class="text-2xl">Forgot your password?</Card.Title>
           <Card.Description>
-            Enter your email address and we'll send you a 6-digit code.
+            No worries, we'll send you reset instructions.
           </Card.Description>
         </Card.Header>
         <form method="POST" use:enhance>
           <Card.Content class="grid gap-4">
             <div class="grid gap-2">
               <Label for="email">Email</Label>
-              <Input id="email" name="email" type="email" required />
+              <Input id="email" name="email" type="email" placeholder="Enter your email" required />
             </div>
   
             {#if form?.error}
