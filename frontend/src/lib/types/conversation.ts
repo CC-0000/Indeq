@@ -17,6 +17,7 @@ export interface ConversationMessage {
   sender: 'user' | 'model';
   text: string;
   sources?: ConversationSources[];
+  reasoning?: string[];
 }
 
 export interface Conversation {

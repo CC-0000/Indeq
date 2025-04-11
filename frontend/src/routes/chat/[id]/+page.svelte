@@ -4,6 +4,7 @@
   import { processReasoningMessage, processOutputMessage, toggleReasoning, processSource } from '$lib/utils/chat';
   import { desktopIntegration } from '$lib/stores/desktopIntegration';
   import { renderLatex, renderContent } from '$lib/utils/katex';
+  import "katex/dist/katex.min.css";
   
   import { isIntegrated } from "$lib/utils/integration";
   import { CheckIcon, ChevronDownIcon, FileIcon, FileTextIcon, HardDriveIcon, SendIcon } from "svelte-feather-icons";
@@ -18,8 +19,6 @@
     integrations: string[], 
     newConversation: boolean
   };
-
-  console.log('modelStore', $modelStore);
   
   let messages: ChatMessage[] = [];
   let userQuery: string = '';
@@ -43,7 +42,7 @@
           messages = [...messages, { text: "", sender: "bot", reasoning: [], reasoningSectionCollapsed: false, sources: [] }];
           streamResponse();
         } else {
-          messages = data.conversation;
+          messages = data.conversation;          
         }
       }
     }
@@ -215,6 +214,8 @@
     });
   }
 
+  
+
   // Handle cleanup when component is destroyed
   onMount(() => {
     return () => {
@@ -232,7 +233,7 @@
 
 <main class="min-h-[calc(100vh-60px)] flex flex-col items-center justify-center px-6">
   <div class="flex-1 flex flex-col w-full max-w-3xl h-screen">
-    <div class="conversation-container flex-1 overflow-y-auto !overflow-x-hidden p-4 space-y-6 pb-32 max-w-full" style="height: calc(100vh - 100px);">
+    <div class="conversation-container flex-1 overflow-y-auto !overflow-x-hidden p-4 space-y-6 pb-32 max-w-full w-full" style="height: calc(100vh - 100px);">
       {#each messages as message, messageIndex}
         <div class="space-y-4">
           <div class="prose max-w-3xl mx-auto prose-lg w-full overflow-x-hidden">
@@ -348,7 +349,7 @@
 
                   {#if !message.reasoningSectionCollapsed}
                     {#each message.reasoning as thought, reasoningIndex}
-                      <div class="rounded-lg pl-3 py-2 mb-3 w-full">
+                      <div class="pl-3 py-2 mb-3 w-full">
                         <div class="flex items-start w-full">
                           <div class="flex justify-between items-start gap-2 w-full">
                             <div class="flex items-start gap-2 flex-1 min-w-0">
@@ -413,7 +414,7 @@
     <!-- Chat Input -->
     <div class="sticky bottom-0 left-0 right-0 flex justify-center z-10 opacity-95 focus-within:opacity-100 chat-input-container">
       <div class="w-full max-w-3xl p-4 pt-0">
-        <div class="relative bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+        <div class="relative bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden w-full">
           <textarea
             bind:value={userQuery}
             placeholder="Ask me anything..."
@@ -534,20 +535,21 @@
     overflow: hidden;
   }
 
-  .reasoning-content {
-    transition: all 0.3s ease;
+  .reasoning-content {  
+    overflow: hidden;
   }
 
   .reasoning-content.collapsed {
+    max-height: 1.5em;
+    text-overflow: ellipsis;
     white-space: nowrap;
     overflow: hidden;
-    text-overflow: ellipsis;
-    max-height: 1.5em;
   }
 
   .reasoning-content.expanded {
-    white-space: normal;
     max-height: 500px;
+    white-space: normal;
+    overflow: hidden;
   }
 
   .scrollbar-thin {

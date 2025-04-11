@@ -84,11 +84,10 @@ function preserveReasoningSectionState(botMessage: ChatMessage, state: ChatState
 // Function to toggle reasoning visibility
 export function toggleReasoning(messageIndex: number, reasoningIndex: number, state: ChatState) {
   const lastMessage = state.messages[messageIndex];
-  if (lastMessage.sender === 'bot') {
-    lastMessage.reasoning[reasoningIndex].collapsed =
-      !lastMessage.reasoning[reasoningIndex].collapsed;
-    state.messages = [...state.messages]; // Trigger reactivity
-  }
+  
+  lastMessage.reasoning[reasoningIndex].collapsed =
+    !lastMessage.reasoning[reasoningIndex].collapsed;
+  state.messages = [...state.messages]; // Trigger reactivity
 }
 
 // Function to parse conversation payload into ChatMessage[]
@@ -108,11 +107,25 @@ export function parseConversation(conversation: Conversation): ChatMessage[] {
         sources: []
       })
     } else {
+      const reasoning = [];
+
+      if (message.reasoning) {
+        for (const thought of message.reasoning) 
+          if (thought.length > 0 && thought !== "<think>" && thought !== "</think>") {
+            reasoning.push({
+              text: thought,
+              collapsed: true,
+            })
+          }
+      }
+
+      // Ensure text is properly processed when loading conversations
+      const text = message.text.toString();
       messages.push({
-        text: message.text,
+        text: text,
         sender: message.sender,
-        reasoning: [],
-        reasoningSectionCollapsed: false,
+        reasoning: reasoning,
+        reasoningSectionCollapsed: true,
         sources: message.sources ? message.sources.map((source) => ({
           id: source.excerpt_number,
           extension: source.extension,
