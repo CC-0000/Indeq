@@ -20,16 +20,14 @@ func createGoogleOAuthClient(ctx context.Context, accessToken string) *http.Clie
 }
 
 // GoogleCrawler crawls Google services (Drive, Gmail) based on provided scopes.
-func (s *crawlingServer) GoogleCrawler(ctx context.Context, client *http.Client, userID string, scopes []string) (ListofFiles, error) {
-	var files ListofFiles
-	var mu sync.Mutex
+func (s *crawlingServer) GoogleCrawler(ctx context.Context, client *http.Client, userID string, scopes []string) error {
 	scopeSet := make(map[string]struct{}, len(scopes))
 
 	for _, scope := range scopes {
 		scopeSet[scope] = struct{}{}
 	}
 
-	crawlers := map[string]func(context.Context, *http.Client, string) (ListofFiles, error){
+	crawlers := map[string]func(context.Context, *http.Client, string) error{
 		"https://www.googleapis.com/auth/drive.readonly": s.CrawlGoogleDrive,
 		"https://www.googleapis.com/auth/gmail.readonly": s.CrawlGmail,
 	}
@@ -44,7 +42,7 @@ func (s *crawlingServer) GoogleCrawler(ctx context.Context, client *http.Client,
 		}
 		activeCrawlers++
 		wg.Add(1)
-		go func(scope string, crawler func(context.Context, *http.Client, string) (ListofFiles, error)) {
+		go func(scope string, crawler func(context.Context, *http.Client, string) error) {
 			defer wg.Done()
 
 			select {
@@ -52,14 +50,11 @@ func (s *crawlingServer) GoogleCrawler(ctx context.Context, client *http.Client,
 				errs <- ctx.Err()
 				return
 			default:
-				processedFiles, err := crawler(ctx, client, userID)
+				err := crawler(ctx, client, userID)
 				if err != nil {
 					errs <- fmt.Errorf("%s crawl failed: %w", scope, err)
 					return
 				}
-				mu.Lock()
-				files.Files = append(files.Files, processedFiles.Files...)
-				mu.Unlock()
 				results <- scope
 			}
 		}(scope, crawler)
@@ -91,35 +86,34 @@ func (s *crawlingServer) GoogleCrawler(ctx context.Context, client *http.Client,
 	}
 
 	if len(errorList) > 0 {
-		return ListofFiles{}, fmt.Errorf("partial failure: %v", errorList)
+		return fmt.Errorf("partial failure: %v", errorList)
 	}
-	return files, nil
+	return nil
 }
 
 // UpdateCrawlGoogle goes through specific service and return the new retrieval token and processed files
-func (s *crawlingServer) UpdateCrawlGoogle(ctx context.Context, client *http.Client, service string, userID string, retrievalToken string) (string, ListofFiles, error) {
+func (s *crawlingServer) UpdateCrawlGoogle(ctx context.Context, client *http.Client, service string, userID string, retrievalToken string) (string, error) {
 	var newRetrievalToken string
-	var processedFiles ListofFiles
 	var err error
 
 	switch service {
 	case "GOOGLE_DRIVE":
-		newRetrievalToken, processedFiles, err = s.UpdateCrawlGoogleDrive(ctx, client, userID, retrievalToken)
+		newRetrievalToken, err = s.UpdateCrawlGoogleDrive(ctx, client, userID, retrievalToken)
 	case "GOOGLE_GMAIL":
-		newRetrievalToken, processedFiles, err = s.UpdateCrawlGmail(ctx, client, userID, retrievalToken)
+		newRetrievalToken, err = s.UpdateCrawlGmail(ctx, client, userID, retrievalToken)
 	default:
-		return "", ListofFiles{}, fmt.Errorf("unsupported service: %s", service)
+		return "", fmt.Errorf("unsupported service: %s", service)
 	}
 
 	if err != nil {
-		return "", ListofFiles{}, err
+		return "", err
 	}
 
 	if err := s.sendCrawlDoneSignal(ctx, userID, "GOOGLE"); err != nil {
 		log.Printf("Failed to send crawl done signal for Google %s update: %v", service, err)
 	}
 
-	return newRetrievalToken, processedFiles, nil
+	return newRetrievalToken, nil
 }
 
 // GetChunksFromGoogle retrieves chunks from Google services based on metadata

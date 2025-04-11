@@ -33,33 +33,33 @@ type cachedFolder struct {
 }
 
 // CrawlGoogleDrive retrieves and processes files from Google Drive
-func (s *crawlingServer) CrawlGoogleDrive(ctx context.Context, client *http.Client, userID string) (ListofFiles, error) {
+func (s *crawlingServer) CrawlGoogleDrive(ctx context.Context, client *http.Client, userID string) error {
 	filelist, err := GetGoogleDriveList(ctx, client, userID)
 	if err != nil {
-		return ListofFiles{}, fmt.Errorf("error retrieving Google Drive file list: %w", err)
+		return fmt.Errorf("error retrieving Google Drive file list: %w", err)
 	}
-	processedFiles, err := s.ProcessAllGoogleDriveFiles(ctx, client, filelist)
+	err = s.ProcessAllGoogleDriveFiles(ctx, client, filelist)
 	if err != nil {
-		return ListofFiles{}, fmt.Errorf("error processing Google Drive files: %w", err)
+		return fmt.Errorf("error processing Google Drive files: %w", err)
 	}
 	retrievalToken, err := GetStartPageToken(ctx, client)
 	if err != nil {
-		return ListofFiles{}, fmt.Errorf("error getting start page token: %w", err)
+		return fmt.Errorf("error getting start page token: %w", err)
 	}
 	if err := StoreGoogleDriveToken(ctx, s.db, userID, retrievalToken); err != nil {
-		return ListofFiles{}, fmt.Errorf("failed to store change token: %w", err)
+		return fmt.Errorf("failed to store change token: %w", err)
 	}
-	return processedFiles, nil
+	return nil
 }
 
 // UpdateCrawlGoogleDrive retrieves and processes changes in Google Drive
-func (s *crawlingServer) UpdateCrawlGoogleDrive(ctx context.Context, client *http.Client, userID string, changeToken string) (string, ListofFiles, error) {
+func (s *crawlingServer) UpdateCrawlGoogleDrive(ctx context.Context, client *http.Client, userID string, changeToken string) (string, error) {
 	filelist, newChangeToken, err := GetGoogleDriveChanges(ctx, client, changeToken, userID)
 	if err != nil {
-		return "", ListofFiles{}, fmt.Errorf("error retrieving Google Drive changes: %w", err)
+		return "", fmt.Errorf("error retrieving Google Drive changes: %w", err)
 	}
 	if len(filelist.Files) == 0 {
-		return changeToken, ListofFiles{}, nil
+		return changeToken, nil
 	}
 	var filePaths []string
 	for _, file := range filelist.Files {
@@ -86,11 +86,11 @@ func (s *crawlingServer) UpdateCrawlGoogleDrive(ctx context.Context, client *htt
 		}
 	}
 
-	processedFiles, err := s.ProcessAllGoogleDriveFiles(ctx, client, filelist)
+	err = s.ProcessAllGoogleDriveFiles(ctx, client, filelist)
 	if err != nil {
-		return "", ListofFiles{}, fmt.Errorf("error processing Google Drive files: %w", err)
+		return "", fmt.Errorf("error processing Google Drive files: %w", err)
 	}
-	return newChangeToken, processedFiles, nil
+	return newChangeToken, nil
 }
 
 // createGoogleFileMetadata creates metadata for a Google Drive file
@@ -270,7 +270,7 @@ func createRemovedFileEntry(userID, fileID string) File {
 }
 
 // ProcessAllGoogleDriveFiles processes all Google Drive files concurrently by MIME type
-func (s *crawlingServer) ProcessAllGoogleDriveFiles(ctx context.Context, client *http.Client, fileList ListofFiles) (ListofFiles, error) {
+func (s *crawlingServer) ProcessAllGoogleDriveFiles(ctx context.Context, client *http.Client, fileList ListofFiles) error {
 	type result struct {
 		index int
 		file  File
@@ -433,14 +433,14 @@ func (s *crawlingServer) ProcessAllGoogleDriveFiles(ctx context.Context, client 
 	chunkWg.Wait()
 
 	if len(errs) > 0 {
-		return ListofFiles{Files: processedFiles}, fmt.Errorf("some files failed to process: %v", errs)
+		return fmt.Errorf("some files failed to process: %v", errs)
 	}
 	if userID != "" {
 		log.Printf("Drive crawling complete for user %s", userID)
 	} else {
 		log.Print("No valid files found in Drive crawl")
 	}
-	return ListofFiles{Files: processedFiles}, nil
+	return nil
 }
 
 // GetStartPageToken retrieves the start page token for Google Drive changes

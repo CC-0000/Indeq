@@ -118,7 +118,7 @@ func (s *crawlingServer) StartInitialCrawler(ctx context.Context, req *pb.StartI
 			ErrorDetails: err.Error(),
 		}, nil
 	}
-	_, err = s.NewCrawler(ctx, req.UserId, req.AccessToken, platformStr, scope)
+	err = s.NewCrawler(ctx, req.UserId, req.AccessToken, platformStr, scope)
 
 	if err != nil {
 		return &pb.StartInitalCrawlerResponse{
@@ -136,60 +136,60 @@ func (s *crawlingServer) StartInitialCrawler(ctx context.Context, req *pb.StartI
 }
 
 // Things that will be crawled Google, Microsoft, Notion
-func (s *crawlingServer) NewCrawler(ctx context.Context, userID string, accessToken string, platform string, scopes []string) (ListofFiles, error) {
+func (s *crawlingServer) NewCrawler(ctx context.Context, userID string, accessToken string, platform string, scopes []string) error {
 	switch platform {
 	case "GOOGLE":
 		client := createGoogleOAuthClient(ctx, accessToken)
-		files, err := s.GoogleCrawler(ctx, client, userID, scopes)
+		err := s.GoogleCrawler(ctx, client, userID, scopes)
 		if err != nil {
 			log.Printf("Error in GoogleCrawler for user %s: %v", userID, err)
 		}
-		return files, err
+		return err
 	case "NOTION":
 		client := createNotionOAuthClient(ctx, accessToken)
-		files, err := s.NotionCrawler(ctx, client, userID)
+		err := s.NotionCrawler(ctx, client, userID)
 		if err != nil {
 			log.Printf("Error in NotionCrawler for user %s: %v", userID, err)
 		}
-		return files, err
+		return err
 	case "MICROSOFT":
 		client := createMicrosoftOAuthClient(ctx, accessToken)
-		files, err := s.MicrosoftCrawler(ctx, client, userID)
+		err := s.MicrosoftCrawler(ctx, client, userID)
 		if err != nil {
 			log.Printf("Error in MicrosoftCrawler for user %s: %v", userID, err)
 		}
-		return files, err
+		return err
 	default:
-		return ListofFiles{}, fmt.Errorf("unsupported platform: %s", platform)
+		return fmt.Errorf("unsupported platform: %s", platform)
 	}
 }
 
 // UpdateCrawler goes through specific provider and return the new retrieval token and processed files
-func (s *crawlingServer) UpdateCrawler(ctx context.Context, accessToken string, retrievalToken string, platform string, service string, userID string) (string, ListofFiles, error) {
+func (s *crawlingServer) UpdateCrawler(ctx context.Context, accessToken string, retrievalToken string, platform string, service string, userID string) (string, error) {
 	switch platform {
 	case "GOOGLE":
 		client := createGoogleOAuthClient(ctx, accessToken)
-		newRetrievalToken, processedFiles, err := s.UpdateCrawlGoogle(ctx, client, service, userID, retrievalToken)
+		newRetrievalToken, err := s.UpdateCrawlGoogle(ctx, client, service, userID, retrievalToken)
 		if err != nil {
-			return "", ListofFiles{}, fmt.Errorf("error updating Google crawl: %w", err)
+			return "", fmt.Errorf("error updating Google crawl: %w", err)
 		}
-		return newRetrievalToken, processedFiles, nil
+		return newRetrievalToken, nil
 	case "NOTION":
 		client := createNotionOAuthClient(ctx, accessToken)
-		newRetrievalToken, processedFiles, err := s.UpdateCrawlNotion(ctx, client, userID, retrievalToken)
+		newRetrievalToken, err := s.UpdateCrawlNotion(ctx, client, userID, retrievalToken)
 		if err != nil {
-			return "", ListofFiles{}, fmt.Errorf("error updating Notion crawl: %w", err)
+			return "", fmt.Errorf("error updating Notion crawl: %w", err)
 		}
-		return newRetrievalToken, processedFiles, nil
+		return newRetrievalToken, nil
 	case "MICROSOFT":
 		client := createMicrosoftOAuthClient(ctx, accessToken)
-		newRetrievalToken, processedFiles, err := s.UpdateCrawlMicrosoft(ctx, client, userID, retrievalToken)
+		newRetrievalToken, err := s.UpdateCrawlMicrosoft(ctx, client, userID, retrievalToken)
 		if err != nil {
-			return "", ListofFiles{}, fmt.Errorf("error updating Microsoft crawl: %w", err)
+			return "", fmt.Errorf("error updating Microsoft crawl: %w", err)
 		}
-		return newRetrievalToken, processedFiles, nil
+		return newRetrievalToken, nil
 	default:
-		return "", ListofFiles{}, fmt.Errorf("unsupported platform: %s", platform)
+		return "", fmt.Errorf("unsupported platform: %s", platform)
 	}
 }
 
@@ -211,12 +211,11 @@ func (s *crawlingServer) ManualCrawler(ctx context.Context, req *pb.ManualCrawle
 			continue
 		}
 
-		processedFile, err := updateCrawlerWithToken(ctx, s, req.UserId, token.Platform, token.Service, token.RetrievalToken, accessToken)
+		err = updateCrawlerWithToken(ctx, s, req.UserId, token.Platform, token.Service, token.RetrievalToken, accessToken)
 		if err != nil {
 			log.Printf("Error updating crawler: %v", err)
 			continue
 		}
-		log.Printf("Processed %d files for user %s", len(processedFile.Files), req.UserId)
 	}
 
 	return &pb.ManualCrawlerResponse{Success: true}, nil
@@ -255,7 +254,7 @@ func (s *crawlingServer) UpdateDBCrawler() {
 			log.Printf("Error retrieving access token: %v", err)
 			continue
 		}
-		_, err = updateCrawlerWithToken(ctx, s, token.UserID, token.Platform, token.Service, token.RetrievalToken, accessToken)
+		err = updateCrawlerWithToken(ctx, s, token.UserID, token.Platform, token.Service, token.RetrievalToken, accessToken)
 		if err != nil {
 			log.Printf("Error updating crawler: %v", err)
 			continue
@@ -264,39 +263,39 @@ func (s *crawlingServer) UpdateDBCrawler() {
 }
 
 // updateCrawlerWithToken updates the crawler with a new access token
-func updateCrawlerWithToken(ctx context.Context, s *crawlingServer, userID, platform, service, retrievalToken, accessToken string) (ListofFiles, error) {
+func updateCrawlerWithToken(ctx context.Context, s *crawlingServer, userID, platform, service, retrievalToken, accessToken string) error {
 	if platform == "GOOGLE" {
-		newRetrievalToken, processedFiles, err := s.UpdateCrawlGoogle(ctx, createGoogleOAuthClient(ctx, accessToken), service, userID, retrievalToken)
+		newRetrievalToken, err := s.UpdateCrawlGoogle(ctx, createGoogleOAuthClient(ctx, accessToken), service, userID, retrievalToken)
 		if err != nil {
 			log.Printf("Error updating crawler: %v", err)
-			return ListofFiles{}, err
+			return err
 		}
 		if err := storeRetrievalToken(ctx, s.db, userID, platform, service, newRetrievalToken); err != nil {
-			return ListofFiles{}, err
+			return err
 		}
-		return processedFiles, nil
+		return nil
 	} else if platform == "NOTION" {
-		newRetrievalToken, processedFiles, err := s.UpdateCrawlNotion(ctx, createNotionOAuthClient(ctx, accessToken), userID, retrievalToken)
+		newRetrievalToken, err := s.UpdateCrawlNotion(ctx, createNotionOAuthClient(ctx, accessToken), userID, retrievalToken)
 		if err != nil {
 			log.Printf("Error updating crawler: %v", err)
-			return ListofFiles{}, err
+			return err
 		}
 		if err := storeRetrievalToken(ctx, s.db, userID, platform, service, newRetrievalToken); err != nil {
-			return ListofFiles{}, err
+			return err
 		}
-		return processedFiles, nil
+		return nil
 	} else if platform == "MICROSOFT" {
-		newRetrievalToken, processedFiles, err := s.UpdateCrawlMicrosoft(ctx, createMicrosoftOAuthClient(ctx, accessToken), userID, retrievalToken)
+		newRetrievalToken, err := s.UpdateCrawlMicrosoft(ctx, createMicrosoftOAuthClient(ctx, accessToken), userID, retrievalToken)
 		if err != nil {
 			log.Printf("Error updating crawler: %v", err)
-			return ListofFiles{}, err
+			return err
 		}
 		if err := storeRetrievalToken(ctx, s.db, userID, platform, service, newRetrievalToken); err != nil {
-			return ListofFiles{}, err
+			return err
 		}
-		return processedFiles, nil
+		return nil
 	}
-	return ListofFiles{}, fmt.Errorf("unsupported platform: %s", platform)
+	return fmt.Errorf("unsupported platform: %s", platform)
 }
 
 func (s *crawlingServer) DeleteCrawlerData(ctx context.Context, req *pb.DeleteCrawlerDataRequest) (*pb.DeleteCrawlerDataResponse, error) {
@@ -411,14 +410,14 @@ func (s *crawlingServer) sendFileDoneSignal(ctx context.Context, userID, filePat
 
 	data, err := proto.Marshal(doneChunk)
 	if err != nil {
-		return fmt.Errorf("failed to serialize file done signal: %v", err)
+		return fmt.Errorf("failed to serialize file done signal: %w", err)
 	}
 
 	err = s.kafkaWriter.WriteMessages(ctx, kafka.Message{
 		Value: data,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to write file done signal: %v", err)
+		return fmt.Errorf("failed to write file done signal: %w", err)
 	}
 
 	return nil
@@ -435,14 +434,14 @@ func (s *crawlingServer) sendCrawlDoneSignal(ctx context.Context, userID string,
 
 	data, err := proto.Marshal(doneChunk)
 	if err != nil {
-		return fmt.Errorf("failed to serialize crawl done signal: %v", err)
+		return fmt.Errorf("failed to serialize crawl done signal: %w", err)
 	}
 
 	err = s.kafkaWriter.WriteMessages(ctx, kafka.Message{
 		Value: data,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to write crawl done signal: %v", err)
+		return fmt.Errorf("failed to write crawl done signal: %w", err)
 	}
 
 	return nil
@@ -557,10 +556,8 @@ func (s *crawlingServer) startCrawlingSignalReading(ctx context.Context) error {
 			}
 
 			if signal.CrawlingDone {
-				log.Printf("crawling done for user %s on platform %s", signal.UserId, platform)
 				s.markCrawlingComplete(signal.UserId, platform)
 			} else {
-				log.Printf("file done for user %s: %s on platform %s", signal.UserId, signal.FilePath, platform)
 				s.markFileProcessed(signal.UserId, signal.FilePath, platform)
 			}
 		}

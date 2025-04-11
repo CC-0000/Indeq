@@ -25,22 +25,22 @@ func createMicrosoftOAuthClient(ctx context.Context, accessToken string) *http.C
 	return oauth2.NewClient(ctx, tokenSource)
 }
 
-func (s *crawlingServer) MicrosoftCrawler(ctx context.Context, client *http.Client, userID string) (ListofFiles, error) {
+func (s *crawlingServer) MicrosoftCrawler(ctx context.Context, client *http.Client, userID string) error {
 	files, delta, err := s.GetMicrosoftDriveFiles(ctx, client, userID, "")
 	if err != nil {
-		return ListofFiles{}, err
+		return fmt.Errorf("failed to get Microsoft Drive files: %w", err)
 	}
-	processedfiles, err := s.ProcessMicrosoftDriveFiles(ctx, client, userID, files)
+	err = s.ProcessMicrosoftDriveFiles(ctx, client, userID, files)
 	if err != nil {
-		return ListofFiles{}, err
+		return fmt.Errorf("failed to process Microsoft Drive files: %w", err)
 	}
 	if err := StoreMicrosoftDriveToken(ctx, s.db, userID, delta); err != nil {
-		return ListofFiles{}, fmt.Errorf("failed to store change token: %w", err)
+		return fmt.Errorf("failed to store change token: %w", err)
 	}
 	if err := s.sendCrawlDoneSignal(ctx, userID, "MICROSOFT"); err != nil {
 		log.Printf("Failed to send crawl done signal for Microsoft services: %v", err)
 	}
-	return processedfiles, nil
+	return nil
 }
 
 func (s *crawlingServer) GetMicrosoftDriveFiles(ctx context.Context, client *http.Client, userID string, retrievalToken string) (ListofFiles, string, error) {
@@ -156,15 +156,15 @@ func isValidMicrosoftFile(mimeType string) bool {
 	return validTypes[mimeType]
 }
 
-func (s *crawlingServer) ProcessMicrosoftDriveFiles(ctx context.Context, client *http.Client, userID string, files ListofFiles) (ListofFiles, error) {
+func (s *crawlingServer) ProcessMicrosoftDriveFiles(ctx context.Context, client *http.Client, userID string, files ListofFiles) error {
 	token, err := client.Transport.(*oauth2.Transport).Source.Token()
 	if err != nil {
-		return ListofFiles{}, fmt.Errorf("failed to get access token: %w", err)
+		return fmt.Errorf("failed to get access token: %w", err)
 	}
 
 	tempDir, err := os.MkdirTemp("", "microsoft-files-*")
 	if err != nil {
-		return ListofFiles{}, fmt.Errorf("failed to create temp directory: %w", err)
+		return fmt.Errorf("failed to create temp directory: %w", err)
 	}
 	defer os.RemoveAll(tempDir)
 
@@ -281,10 +281,10 @@ func (s *crawlingServer) ProcessMicrosoftDriveFiles(ctx context.Context, client 
 	}
 
 	if len(errs) > 0 {
-		return ListofFiles{}, fmt.Errorf("some files failed to process: %v", errs)
+		return fmt.Errorf("some files failed to process: %v", errs)
 	}
 
-	return ListofFiles{Files: processedFiles}, nil
+	return nil
 }
 
 func downloadFile(itemID, accessToken, outputPath string) error {
@@ -367,19 +367,19 @@ func extractPptxText(filePath string) (string, error) {
 	return text, nil
 }
 
-func (s *crawlingServer) UpdateCrawlMicrosoft(ctx context.Context, client *http.Client, userID, retrievalToken string) (string, ListofFiles, error) {
+func (s *crawlingServer) UpdateCrawlMicrosoft(ctx context.Context, client *http.Client, userID, retrievalToken string) (string, error) {
 	files, delta, err := s.GetMicrosoftDriveFiles(ctx, client, userID, retrievalToken)
 	if err != nil {
-		return "", ListofFiles{}, err
+		return "", fmt.Errorf("failed to get Microsoft Drive files: %w", err)
 	}
-	processedfiles, err := s.ProcessMicrosoftDriveFiles(ctx, client, userID, files)
+	err = s.ProcessMicrosoftDriveFiles(ctx, client, userID, files)
 	if err != nil {
-		return "", ListofFiles{}, err
+		return "", fmt.Errorf("failed to process Microsoft Drive files: %w", err)
 	}
 	if err := s.sendCrawlDoneSignal(ctx, userID, "MICROSOFT"); err != nil {
 		log.Printf("Failed to send crawl done signal for Microsoft services: %v", err)
 	}
-	return delta, processedfiles, nil
+	return delta, nil
 }
 
 func RetrieveMicrosoftCrawler(ctx context.Context, client *http.Client, metadata Metadata) (TextChunkMessage, error) {
@@ -471,8 +471,8 @@ func RetrieveFromPptx(ctx context.Context, client *http.Client, metadata Metadat
 	}
 	defer os.RemoveAll(tempDir)
 
-	// Download file
 	localPath := filepath.Join(tempDir, filepath.Base(metadata.FilePath))
+	// Download file
 	err = downloadFile(metadata.ResourceID, token.AccessToken, localPath)
 	if err != nil {
 		return TextChunkMessage{}, fmt.Errorf("failed to download file: %w", err)

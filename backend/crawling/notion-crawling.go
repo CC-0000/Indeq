@@ -18,73 +18,43 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+const NotionVersion = "2022-06-28"
+
 // Notion API types
 type Block struct {
-	ID             string    `json:"id"`
-	Type           string    `json:"type"`
-	CreatedTime    time.Time `json:"created_time"`
-	LastEditedTime time.Time `json:"last_edited_time"`
-	HasChildren    bool      `json:"has_children"`
+	ID             string                 `json:"id"`
+	Type           string                 `json:"type"`
+	CreatedTime    time.Time              `json:"created_time"`
+	LastEditedTime time.Time              `json:"last_edited_time"`
+	HasChildren    bool                   `json:"has_children"`
+	Content        map[string]interface{} `json:"-"`
+}
 
-	Paragraph struct {
-		RichText []RichText `json:"rich_text"`
-	} `json:"paragraph"`
+func (b *Block) UnmarshalJSON(data []byte) error {
+	type Alias Block
+	aux := &struct {
+		*Alias
+	}{Alias: (*Alias)(b)}
 
-	Heading1 struct {
-		RichText []RichText `json:"rich_text"`
-	} `json:"heading_1"`
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
 
-	Heading2 struct {
-		RichText []RichText `json:"rich_text"`
-	} `json:"heading_2"`
+	// Pull out the block content dynamically
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
 
-	Heading3 struct {
-		RichText []RichText `json:"rich_text"`
-	} `json:"heading_3"`
+	if body, ok := raw[b.Type]; ok {
+		var content map[string]interface{}
+		if err := json.Unmarshal(body, &content); err != nil {
+			return err
+		}
+		b.Content = content
+	}
 
-	BulletedListItem struct {
-		RichText []RichText `json:"rich_text"`
-	} `json:"bulleted_list_item"`
-
-	NumberedListItem struct {
-		RichText []RichText `json:"rich_text"`
-	} `json:"numbered_list_item"`
-
-	ToDo struct {
-		RichText []RichText `json:"rich_text"`
-	} `json:"to_do"`
-
-	Toggle struct {
-		RichText []RichText `json:"rich_text"`
-	} `json:"toggle"`
-
-	Image struct {
-		URL string `json:"url"`
-	} `json:"image"`
-
-	Video struct {
-		URL string `json:"url"`
-	} `json:"video"`
-
-	File struct {
-		URL string `json:"url"`
-	} `json:"file"`
-
-	PDF struct {
-		URL string `json:"url"`
-	} `json:"pdf"`
-
-	Divider struct {
-		URL string `json:"url"`
-	} `json:"divider"`
-
-	ChildDatabase struct {
-		URL string `json:"url"`
-	} `json:"child_database"`
-
-	ChildPage struct {
-		URL string `json:"url"`
-	} `json:"child_page"`
+	return nil
 }
 
 type RichText struct {
@@ -164,6 +134,59 @@ type chunkResult struct {
 	err   error
 }
 
+// Utility Functions
+
+// parseChunkID parses a chunk ID string into structured values.
+func parseChunkID(chunkID string) (startBlockID string, startOffset int, endBlockID string, endOffset int, err error) {
+	parts := strings.Split(chunkID, ";")
+	chunkIDMap := make(map[string]string)
+	for _, part := range parts {
+		kv := strings.Split(part, "=")
+		if len(kv) != 2 {
+			return "", 0, "", 0, fmt.Errorf("invalid chunk ID format: malformed pair in '%s'", part)
+		}
+		chunkIDMap[kv[0]] = kv[1]
+	}
+	startBlockID = chunkIDMap["start_block"]
+	endBlockID = chunkIDMap["end_block"]
+
+	startOffset, err = strconv.Atoi(chunkIDMap["start_offset"])
+	if err != nil {
+		return "", 0, "", 0, fmt.Errorf("invalid start offset: %w", err)
+	}
+	endOffset, err = strconv.Atoi(chunkIDMap["end_offset"])
+	if err != nil {
+		return "", 0, "", 0, fmt.Errorf("invalid end offset: %w", err)
+	}
+
+	if startBlockID == "" || endBlockID == "" {
+		return "", 0, "", 0, fmt.Errorf("missing block IDs in chunk ID")
+	}
+
+	return startBlockID, startOffset, endBlockID, endOffset, nil
+}
+
+// injectMetadataBlock creates a Notion paragraph block from metadata
+func injectMetadataBlock(id, content string, createdTime, lastEditedTime time.Time) Block {
+	return Block{
+		ID:             id,
+		Type:           "paragraph",
+		CreatedTime:    createdTime,
+		LastEditedTime: lastEditedTime,
+		Content: map[string]interface{}{
+			"rich_text": []map[string]interface{}{
+				{
+					"type": "text",
+					"text": map[string]interface{}{
+						"content": content,
+					},
+					"plain_text": content,
+				},
+			},
+		},
+	}
+}
+
 // NewNotionChunker creates a new chunker
 func NewNotionChunker(chunkSize, overlap int) *NotionChunker {
 	return &NotionChunker{
@@ -180,28 +203,33 @@ func createNotionOAuthClient(ctx context.Context, accessToken string) *http.Clie
 }
 
 // NotionCrawler is the main entry point for crawling Notion content
-func (s *crawlingServer) NotionCrawler(ctx context.Context, client *http.Client, userID string) (ListofFiles, error) {
+func (s *crawlingServer) NotionCrawler(ctx context.Context, client *http.Client, userID string) error {
 	files, retrievalToken, err := s.NotionSearch(ctx, client, userID, "", true)
 	if err != nil {
-		return ListofFiles{}, fmt.Errorf("failed to search for objects: %w", err)
-	}
-	StoreNotionToken(ctx, s.db, userID, retrievalToken)
-	processedFiles, err := s.processNotionFiles(ctx, client, files)
-	if err != nil {
-		return ListofFiles{}, fmt.Errorf("failed to process files: %w", err)
-	}
-	if processedFiles.Files == nil {
-		return ListofFiles{}, nil
+		return fmt.Errorf("failed to search for objects: %w", err)
 	}
 
-	return processedFiles, nil
+	if err := StoreNotionToken(ctx, s.db, userID, retrievalToken); err != nil {
+		return fmt.Errorf("failed to store retrieval token: %w", err)
+	}
+
+	if err := s.processNotionFiles(ctx, client, files); err != nil {
+		return fmt.Errorf("failed to process files: %w", err)
+	}
+
+	if err := s.sendCrawlDoneSignal(ctx, userID, "NOTION"); err != nil {
+		return fmt.Errorf("failed to send crawl done signal: %w", err)
+	}
+
+	return nil
 }
 
-func (s *crawlingServer) UpdateCrawlNotion(ctx context.Context, client *http.Client, userID string, retrievalToken string) (string, ListofFiles, error) {
+func (s *crawlingServer) UpdateCrawlNotion(ctx context.Context, client *http.Client, userID string, retrievalToken string) (string, error) {
 	files, newToken, err := s.NotionSearch(ctx, client, userID, retrievalToken, false)
 	if err != nil {
-		return "", ListofFiles{}, fmt.Errorf("failed to search for objects: %w", err)
+		return "", fmt.Errorf("failed to search for objects: %w", err)
 	}
+
 	var filePaths []string
 	for _, file := range files.Files {
 		if len(file.File) == 0 {
@@ -212,47 +240,44 @@ func (s *crawlingServer) UpdateCrawlNotion(ctx context.Context, client *http.Cli
 		filePath := file.File[0].Metadata.FilePath
 
 		if err := s.DeleteChunkMappingsForFile(ctx, userID, "NOTION", resourceID); err != nil {
-			log.Printf("Warning: failed to delete old chunk mappings for file %s: %v", resourceID, err)
+			continue
 		}
 
 		if err := UpsertProcessingStatus(ctx, s.db, userID, resourceID, "NOTION", false); err != nil {
-			log.Printf("Warning: failed to reset processing status for file %s: %v", resourceID, err)
+			continue
 		}
 
 		filePaths = append(filePaths, filePath)
 	}
 
 	if len(filePaths) > 0 {
-		_, err = s.vectorService.DeleteFiles(ctx, &pb.VectorFileDeleteRequest{
+		if _, err = s.vectorService.DeleteFiles(ctx, &pb.VectorFileDeleteRequest{
 			UserId:    userID,
 			Platform:  pb.Platform_PLATFORM_NOTION,
 			Files:     filePaths,
 			Exclusive: false,
-		})
-		if err != nil {
-			log.Printf("Warning: failed to delete old vectors: %v", err)
+		}); err != nil {
+			return "", fmt.Errorf("failed to delete old vectors: %w", err)
 		}
 	}
 
-	processedFiles, err := s.processNotionFiles(ctx, client, files)
-	if err != nil {
+	if err := s.processNotionFiles(ctx, client, files); err != nil {
+		// Reset processing status for all files on error
 		for _, file := range files.Files {
 			if len(file.File) > 0 {
-				if err := UpsertProcessingStatus(ctx, s.db, userID, file.File[0].Metadata.ResourceID, "NOTION", false); err != nil {
-					log.Printf("Warning: failed to reset processing status after error for file %s: %v", file.File[0].Metadata.ResourceID, err)
-				}
+				_ = UpsertProcessingStatus(ctx, s.db, userID, file.File[0].Metadata.ResourceID, "NOTION", false)
 			}
 		}
-		return "", ListofFiles{}, fmt.Errorf("failed to process files: %w", err)
+		return "", fmt.Errorf("failed to process files: %w", err)
 	}
 
-	if len(processedFiles.Files) > 0 {
+	if len(files.Files) > 0 {
 		if err := s.sendCrawlDoneSignal(ctx, userID, "NOTION"); err != nil {
-			log.Printf("Warning: failed to send crawl done signal: %v", err)
+			return "", fmt.Errorf("failed to send crawl done signal: %w", err)
 		}
 	}
 
-	return newToken, processedFiles, nil
+	return newToken, nil
 }
 
 // ProcessBlocks processes the blocks from a Notion API response
@@ -264,47 +289,30 @@ func (nc *NotionChunker) ProcessBlocks(blockResponse NotionPageResponse) []Proce
 		blockContent := ""
 
 		switch block.Type {
-		case "paragraph":
-			for _, text := range block.Paragraph.RichText {
-				blockContent += text.PlainText + " "
+		case "paragraph", "heading_1", "heading_2", "heading_3", "bulleted_list_item", "numbered_list_item", "to_do", "toggle":
+			if richTextArr, ok := block.Content["rich_text"].([]interface{}); ok {
+				for _, rt := range richTextArr {
+					if rtMap, ok := rt.(map[string]interface{}); ok {
+						if plainText, ok := rtMap["plain_text"].(string); ok {
+							if block.Type == "bulleted_list_item" {
+								blockContent += "• " + plainText + "\n"
+							} else if block.Type == "numbered_list_item" || block.Type == "to_do" {
+								prefix := ""
+								if block.Type == "to_do" {
+									prefix = "☐ "
+								}
+								blockContent += prefix + plainText + "\n"
+							} else {
+								blockContent += plainText + " "
+							}
+						}
+					}
+				}
 			}
-		case "heading_1":
-			for _, text := range block.Heading1.RichText {
-				blockContent += text.PlainText + " "
+		case "image", "video", "file", "pdf":
+			if url, ok := block.Content["url"].(string); ok {
+				blockContent += fmt.Sprintf("%s: %s\n", strings.Title(block.Type), url)
 			}
-		case "heading_2":
-			for _, text := range block.Heading2.RichText {
-				blockContent += text.PlainText + " "
-			}
-		case "heading_3":
-			for _, text := range block.Heading3.RichText {
-				blockContent += text.PlainText + " "
-			}
-		case "bulleted_list_item":
-			for _, text := range block.BulletedListItem.RichText {
-				blockContent += "• " + text.PlainText + "\n"
-			}
-		case "numbered_list_item":
-			for _, text := range block.NumberedListItem.RichText {
-				blockContent += text.PlainText + "\n"
-			}
-		case "to_do":
-			blockContent += "☐ "
-			for _, text := range block.ToDo.RichText {
-				blockContent += text.PlainText + "\n"
-			}
-		case "toggle":
-			for _, text := range block.Toggle.RichText {
-				blockContent += text.PlainText + " "
-			}
-		case "image":
-			blockContent += "Image: " + block.Image.URL + "\n"
-		case "video":
-			blockContent += "Video: " + block.Video.URL + "\n"
-		case "file":
-			blockContent += "File: " + block.File.URL + "\n"
-		case "pdf":
-			blockContent += "PDF: " + block.PDF.URL + "\n"
 		case "divider":
 			blockContent += "Divider\n"
 		case "child_database":
@@ -441,6 +449,10 @@ func (s *crawlingServer) NotionSearch(ctx context.Context, client *http.Client, 
 			searchBody["start_cursor"] = nextCursor
 		}
 
+		if err := rateLimiter.Wait(ctx, "NOTION", userID); err != nil {
+			return files, retrievalToken, fmt.Errorf("rate limit wait failed: %w", err)
+		}
+
 		bodyBytes, err := json.Marshal(searchBody)
 		if err != nil {
 			return files, retrievalToken, fmt.Errorf("failed to marshal search body: %w", err)
@@ -450,7 +462,7 @@ func (s *crawlingServer) NotionSearch(ctx context.Context, client *http.Client, 
 		if err != nil {
 			return files, retrievalToken, fmt.Errorf("failed to create request: %w", err)
 		}
-		req.Header.Set("Notion-Version", "2022-06-28")
+		req.Header.Set("Notion-Version", NotionVersion)
 		req.Header.Set("Content-Type", "application/json")
 
 		resp, err := client.Do(req)
@@ -513,12 +525,12 @@ func (s *crawlingServer) NotionSearch(ctx context.Context, client *http.Client, 
 	return files, newRetrievalToken, nil
 }
 
-func (s *crawlingServer) processNotionFiles(ctx context.Context, client *http.Client, files ListofFiles) (ListofFiles, error) {
-	var processedFiles ListofFiles
+func (s *crawlingServer) processNotionFiles(ctx context.Context, client *http.Client, files ListofFiles) error {
 	if len(files.Files) == 0 {
-		return files, nil
+		return nil
 	}
 
+	var processedFiles ListofFiles
 	type processResult struct {
 		file File
 		err  error
@@ -538,8 +550,9 @@ func (s *crawlingServer) processNotionFiles(ctx context.Context, client *http.Cl
 			}
 		}
 
+		f := file
 		wg.Add(1)
-		go func(f File) {
+		go func() {
 			defer wg.Done()
 			var result processResult
 
@@ -558,9 +571,7 @@ func (s *crawlingServer) processNotionFiles(ctx context.Context, client *http.Cl
 						}
 					}
 					s.markFileProcessed(f.File[0].Metadata.UserID, f.File[0].Metadata.ResourceID, "NOTION")
-					if err := s.sendFileDoneSignal(ctx, f.File[0].Metadata.UserID, f.File[0].Metadata.FilePath, "NOTION"); err != nil {
-						log.Printf("Warning: Failed to send file done signal for page %s: %v", f.File[0].Metadata.ResourceID, err)
-					}
+					_ = s.sendFileDoneSignal(ctx, f.File[0].Metadata.UserID, f.File[0].Metadata.FilePath, "NOTION")
 					result.file = pageFile
 				}
 			case "database":
@@ -577,14 +588,14 @@ func (s *crawlingServer) processNotionFiles(ctx context.Context, client *http.Cl
 						}
 					}
 					s.markFileProcessed(f.File[0].Metadata.UserID, f.File[0].Metadata.ResourceID, "NOTION")
-					if err := s.sendFileDoneSignal(ctx, f.File[0].Metadata.UserID, f.File[0].Metadata.FilePath, "NOTION"); err != nil {
-						log.Printf("Warning: Failed to send file done signal for database %s: %v", f.File[0].Metadata.ResourceID, err)
-					}
+					_ = s.sendFileDoneSignal(ctx, f.File[0].Metadata.UserID, f.File[0].Metadata.FilePath, "NOTION")
 					result.file = dbFile
 				}
+			default:
+				result.err = fmt.Errorf("unsupported resource type: %s", f.File[0].Metadata.ResourceType)
 			}
 			resultChan <- result
-		}(file)
+		}()
 	}
 
 	go func() {
@@ -592,21 +603,57 @@ func (s *crawlingServer) processNotionFiles(ctx context.Context, client *http.Cl
 		close(resultChan)
 	}()
 
+	var errs []error
 	for result := range resultChan {
 		if result.err != nil {
-			return processedFiles, result.err
+			errs = append(errs, result.err)
+			continue
 		}
 		if len(result.file.File) > 0 {
 			processedFiles.Files = append(processedFiles.Files, result.file)
 		}
 	}
 
-	if len(processedFiles.Files) > 0 {
-		if err := s.sendCrawlDoneSignal(ctx, processedFiles.Files[0].File[0].Metadata.UserID, "NOTION"); err != nil {
-			return processedFiles, fmt.Errorf("error sending crawl done signal: %w", err)
-		}
+	if len(errs) > 0 {
+		return fmt.Errorf("some files failed to process: %v", errs)
 	}
-	return processedFiles, nil
+
+	if len(processedFiles.Files) > 0 {
+		_ = s.sendCrawlDoneSignal(ctx, processedFiles.Files[0].File[0].Metadata.UserID, "NOTION")
+	}
+	return nil
+}
+
+// fetchNotionResource makes a GET request to the Notion API and decodes the response
+func fetchNotionResource(ctx context.Context, client *http.Client, url string, result interface{}) error {
+	if err := rateLimiter.Wait(ctx, "NOTION", ""); err != nil {
+		return fmt.Errorf("rate limit wait failed: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Notion-Version", NotionVersion)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to execute request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("request failed with status %d and error reading body: %w", resp.StatusCode, err)
+		}
+		return fmt.Errorf("request failed with status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
+		return fmt.Errorf("failed to decode response: %w", err)
+	}
+	return nil
 }
 
 func (s *crawlingServer) processNotionPage(ctx context.Context, client *http.Client, file File) File {
@@ -614,21 +661,16 @@ func (s *crawlingServer) processNotionPage(ctx context.Context, client *http.Cli
 		return File{}
 	}
 	pageID := file.File[0].Metadata.ResourceID
-	pageReq, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("https://api.notion.com/v1/pages/%s", pageID), nil)
-	if err != nil {
-		fmt.Println("Error creating request:", err)
-		return File{}
-	}
-	pageReq.Header.Set("Notion-Version", "2022-06-28")
-	pageResp, err := client.Do(pageReq)
-	if err != nil {
-		fmt.Println("Error executing request:", err)
-		return File{}
-	}
-	defer pageResp.Body.Close()
 
 	var pageResponse NotionObject
-	if err := json.NewDecoder(pageResp.Body).Decode(&pageResponse); err != nil {
+	if err := fetchNotionResource(ctx, client, fmt.Sprintf("https://api.notion.com/v1/pages/%s", pageID), &pageResponse); err != nil {
+		log.Printf("Error fetching page: %v", err)
+		return File{}
+	}
+
+	var blockResponse NotionPageResponse
+	if err := fetchNotionResource(ctx, client, fmt.Sprintf("https://api.notion.com/v1/blocks/%s/children", pageID), &blockResponse); err != nil {
+		log.Printf("Error fetching blocks: %v", err)
 		return File{}
 	}
 
@@ -655,48 +697,26 @@ func (s *crawlingServer) processNotionPage(ctx context.Context, client *http.Cli
 		}
 	}
 
-	blockReq, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("https://api.notion.com/v1/blocks/%s/children", pageID), nil)
-	if err != nil {
-		fmt.Println("Error creating block request:", err)
-		return File{}
-	}
-
-	blockReq.Header.Set("Notion-Version", "2022-06-28")
-	blockResp, err := client.Do(blockReq)
-	if err != nil {
-		fmt.Println("Error executing block request:", err)
-		return File{}
-	}
-	defer blockResp.Body.Close()
-
-	var blockResponse NotionPageResponse
-	if err := json.NewDecoder(blockResp.Body).Decode(&blockResponse); err != nil {
-		return File{}
-	}
-
 	if propertiesContent != "" {
-		blockResponse.Results = append([]Block{{
-			ID:             fmt.Sprintf("%s_properties", pageID),
-			Type:           "paragraph",
-			CreatedTime:    pageResponse.CreatedTime,
-			LastEditedTime: pageResponse.LastEditedTime,
-			Paragraph: struct {
-				RichText []RichText `json:"rich_text"`
-			}{
-				RichText: []RichText{{
-					Type: "text",
-					Text: struct {
-						Content string "json:\"content\""
-						Link    *struct {
-							URL string "json:\"url\""
-						} "json:\"link\""
-					}{
-						Content: "Page Properties:\n" + propertiesContent,
+		blockResponse.Results = append([]Block{
+			{
+				ID:             fmt.Sprintf("%s_properties", pageID),
+				Type:           "paragraph",
+				CreatedTime:    pageResponse.CreatedTime,
+				LastEditedTime: pageResponse.LastEditedTime,
+				Content: map[string]interface{}{
+					"rich_text": []map[string]interface{}{
+						{
+							"type": "text",
+							"text": map[string]interface{}{
+								"content": "Page Properties:\n" + propertiesContent,
+							},
+							"plain_text": "Page Properties:\n" + propertiesContent,
+						},
 					},
-					PlainText: "Page Properties:\n" + propertiesContent,
-				}},
+				},
 			},
-		}}, blockResponse.Results...)
+		}, blockResponse.Results...)
 	}
 
 	chunker := NewNotionChunker(400, 80)
@@ -710,22 +730,9 @@ func (s *crawlingServer) processNotionPage(ctx context.Context, client *http.Cli
 func (s *crawlingServer) processNotionDatabase(ctx context.Context, client *http.Client, file File) File {
 	dbID := file.File[0].Metadata.ResourceID
 
-	dbReq, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("https://api.notion.com/v1/databases/%s", dbID), nil)
-	if err != nil {
-		fmt.Println("Error creating database request:", err)
-		return File{}
-	}
-	dbReq.Header.Set("Notion-Version", "2022-06-28")
-	dbResp, err := client.Do(dbReq)
-	if err != nil {
-		fmt.Println("Error executing database request:", err)
-		return File{}
-	}
-	defer dbResp.Body.Close()
-
 	var dbResponse NotionDatabase
-	if err := json.NewDecoder(dbResp.Body).Decode(&dbResponse); err != nil {
-		fmt.Println("Error decoding database response:", err)
+	if err := fetchNotionResource(ctx, client, fmt.Sprintf("https://api.notion.com/v1/databases/%s", dbID), &dbResponse); err != nil {
+		log.Printf("Error fetching database: %v", err)
 		return File{}
 	}
 
@@ -742,21 +749,16 @@ func (s *crawlingServer) processNotionDatabase(ctx context.Context, client *http
 			Type:           "heading_1",
 			CreatedTime:    dbResponse.CreatedTime,
 			LastEditedTime: dbResponse.LastEditedTime,
-			Heading1: struct {
-				RichText []RichText `json:"rich_text"`
-			}{
-				RichText: []RichText{{
-					Type: "text",
-					Text: struct {
-						Content string "json:\"content\""
-						Link    *struct {
-							URL string "json:\"url\""
-						} "json:\"link\""
-					}{
-						Content: dbTitle,
+			Content: map[string]interface{}{
+				"rich_text": []map[string]interface{}{
+					{
+						"type": "text",
+						"text": map[string]interface{}{
+							"content": dbTitle,
+						},
+						"plain_text": dbTitle,
 					},
-					PlainText: dbTitle,
-				}},
+				},
 			},
 		})
 	}
@@ -772,21 +774,16 @@ func (s *crawlingServer) processNotionDatabase(ctx context.Context, client *http
 				Type:           "paragraph",
 				CreatedTime:    dbResponse.CreatedTime,
 				LastEditedTime: dbResponse.LastEditedTime,
-				Paragraph: struct {
-					RichText []RichText `json:"rich_text"`
-				}{
-					RichText: []RichText{{
-						Type: "text",
-						Text: struct {
-							Content string "json:\"content\""
-							Link    *struct {
-								URL string "json:\"url\""
-							} "json:\"link\""
-						}{
-							Content: descriptionText,
+				Content: map[string]interface{}{
+					"rich_text": []map[string]interface{}{
+						{
+							"type": "text",
+							"text": map[string]interface{}{
+								"content": descriptionText,
+							},
+							"plain_text": descriptionText,
 						},
-						PlainText: descriptionText,
-					}},
+					},
 				},
 			})
 		}
@@ -802,6 +799,11 @@ func (s *crawlingServer) processNotionDatabase(ctx context.Context, client *http
 			queryBody["start_cursor"] = nextCursor
 		}
 
+		if err := rateLimiter.Wait(ctx, "NOTION", file.File[0].Metadata.UserID); err != nil {
+			fmt.Println("Rate limit wait failed:", err)
+			break
+		}
+
 		bodyBytes, err := json.Marshal(queryBody)
 		if err != nil {
 			fmt.Println("Error marshaling query body:", err)
@@ -813,7 +815,7 @@ func (s *crawlingServer) processNotionDatabase(ctx context.Context, client *http
 			fmt.Println("Error creating query request:", err)
 			break
 		}
-		queryReq.Header.Set("Notion-Version", "2022-06-28")
+		queryReq.Header.Set("Notion-Version", NotionVersion)
 		queryReq.Header.Set("Content-Type", "application/json")
 
 		queryResp, err := client.Do(queryReq)
@@ -856,28 +858,14 @@ func (s *crawlingServer) processNotionDatabase(ctx context.Context, client *http
 			}
 
 			if rowContent != "" {
-				blockResponse.Results = append(blockResponse.Results, Block{
-					ID:             fmt.Sprintf("%s_row_%d", dbID, rowCounter),
-					Type:           "paragraph",
-					CreatedTime:    dbResponse.CreatedTime,
-					LastEditedTime: dbResponse.LastEditedTime,
-					Paragraph: struct {
-						RichText []RichText `json:"rich_text"`
-					}{
-						RichText: []RichText{{
-							Type: "text",
-							Text: struct {
-								Content string "json:\"content\""
-								Link    *struct {
-									URL string "json:\"url\""
-								} "json:\"link\""
-							}{
-								Content: rowContent,
-							},
-							PlainText: rowContent,
-						}},
-					},
-				})
+				blockResponse.Results = append(blockResponse.Results,
+					injectMetadataBlock(
+						fmt.Sprintf("%s_row_%d", dbID, rowCounter),
+						rowContent,
+						dbResponse.CreatedTime,
+						dbResponse.LastEditedTime,
+					),
+				)
 			}
 		}
 
@@ -1046,13 +1034,11 @@ func (s *crawlingServer) GetChunksFromNotion(ctx context.Context, req *pb.GetChu
 
 			chunk, err := RetrieveNotionCrawler(ctx, client, internalMeta)
 			if err != nil {
-				log.Printf("Error retrieving chunk: %v", err)
-				resultChan <- chunkResult{nil, err}
+				resultChan <- chunkResult{nil, fmt.Errorf("failed to retrieve chunk: %w", err)}
 				return
 			}
 
 			chunk.Metadata.ChunkID = meta.ChunkId
-
 			pbChunk := &pb.TextChunkMessage{
 				Metadata: &pb.Metadata{
 					DateCreated:      timestamppb.New(chunk.Metadata.DateCreated),
@@ -1093,7 +1079,7 @@ func (s *crawlingServer) GetChunksFromNotion(ctx context.Context, req *pb.GetChu
 	}
 
 	if len(errors) > 0 {
-		log.Printf("Encountered %d errors while retrieving chunks: %v", len(errors), errors)
+		return nil, fmt.Errorf("failed to retrieve chunks: %v", errors)
 	}
 
 	return &pb.GetChunksFromNotionResponse{
@@ -1103,63 +1089,20 @@ func (s *crawlingServer) GetChunksFromNotion(ctx context.Context, req *pb.GetChu
 
 // retriveNotionPage retrieves a specific chunk from a Notion page
 func retriveNotionPage(ctx context.Context, client *http.Client, metadata Metadata) (TextChunkMessage, error) {
-	chunkIDParts := strings.Split(metadata.ChunkID, ";")
-	chunkIDMap := make(map[string]string)
-
-	for _, part := range chunkIDParts {
-		kv := strings.Split(part, "=")
-		if len(kv) != 2 {
-			return TextChunkMessage{}, fmt.Errorf("invalid chunk ID format: malformed key-value pair in '%s'", part)
-		}
-		chunkIDMap[kv[0]] = kv[1]
-	}
-
-	startBlockID := chunkIDMap["start_block"]
-	endBlockID := chunkIDMap["end_block"]
-	startOffset, err := strconv.Atoi(chunkIDMap["start_offset"])
+	startBlockID, startOffset, endBlockID, endOffset, err := parseChunkID(metadata.ChunkID)
 	if err != nil {
-		return TextChunkMessage{}, fmt.Errorf("invalid start offset in chunk ID: %w", err)
-	}
-	endOffset, err := strconv.Atoi(chunkIDMap["end_offset"])
-	if err != nil {
-		return TextChunkMessage{}, fmt.Errorf("invalid end offset in chunk ID: %w", err)
-	}
-
-	if startBlockID == "" || endBlockID == "" {
-		return TextChunkMessage{}, fmt.Errorf("missing block IDs in chunk ID")
+		return TextChunkMessage{}, fmt.Errorf("failed to parse chunk ID: %w", err)
 	}
 
 	pageID := metadata.ResourceID
-	pageReq, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("https://api.notion.com/v1/pages/%s", pageID), nil)
-	if err != nil {
-		return TextChunkMessage{}, fmt.Errorf("failed to create page request: %w", err)
-	}
-	pageReq.Header.Set("Notion-Version", "2022-06-28")
-	pageResp, err := client.Do(pageReq)
-	if err != nil {
-		return TextChunkMessage{}, fmt.Errorf("failed to execute page request: %w", err)
-	}
-	defer pageResp.Body.Close()
-
 	var pageResponse NotionObject
-	if err := json.NewDecoder(pageResp.Body).Decode(&pageResponse); err != nil {
-		return TextChunkMessage{}, fmt.Errorf("failed to decode page response: %w", err)
+	if err := fetchNotionResource(ctx, client, fmt.Sprintf("https://api.notion.com/v1/pages/%s", pageID), &pageResponse); err != nil {
+		return TextChunkMessage{}, fmt.Errorf("failed to fetch page: %w", err)
 	}
-
-	blockReq, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("https://api.notion.com/v1/blocks/%s/children", pageID), nil)
-	if err != nil {
-		return TextChunkMessage{}, fmt.Errorf("failed to create block request: %w", err)
-	}
-	blockReq.Header.Set("Notion-Version", "2022-06-28")
-	blockResp, err := client.Do(blockReq)
-	if err != nil {
-		return TextChunkMessage{}, fmt.Errorf("failed to execute block request: %w", err)
-	}
-	defer blockResp.Body.Close()
 
 	var blockResponse NotionPageResponse
-	if err := json.NewDecoder(blockResp.Body).Decode(&blockResponse); err != nil {
-		return TextChunkMessage{}, fmt.Errorf("failed to decode block response: %w", err)
+	if err := fetchNotionResource(ctx, client, fmt.Sprintf("https://api.notion.com/v1/blocks/%s/children", pageID), &blockResponse); err != nil {
+		return TextChunkMessage{}, fmt.Errorf("failed to fetch blocks: %w", err)
 	}
 
 	if startBlockID == fmt.Sprintf("%s_properties", pageID) ||
@@ -1183,28 +1126,14 @@ func retriveNotionPage(ctx context.Context, client *http.Client, metadata Metada
 		}
 
 		if propertiesContent != "" {
-			blockResponse.Results = append([]Block{{
-				ID:             fmt.Sprintf("%s_properties", pageID),
-				Type:           "paragraph",
-				CreatedTime:    pageResponse.CreatedTime,
-				LastEditedTime: pageResponse.LastEditedTime,
-				Paragraph: struct {
-					RichText []RichText `json:"rich_text"`
-				}{
-					RichText: []RichText{{
-						Type: "text",
-						Text: struct {
-							Content string "json:\"content\""
-							Link    *struct {
-								URL string "json:\"url\""
-							} "json:\"link\""
-						}{
-							Content: "Page Properties:\n" + propertiesContent,
-						},
-						PlainText: "Page Properties:\n" + propertiesContent,
-					}},
-				},
-			}}, blockResponse.Results...)
+			blockResponse.Results = append([]Block{
+				injectMetadataBlock(
+					fmt.Sprintf("%s_properties", pageID),
+					"Page Properties:\n"+propertiesContent,
+					pageResponse.CreatedTime,
+					pageResponse.LastEditedTime,
+				),
+			}, blockResponse.Results...)
 		}
 	}
 
@@ -1243,59 +1172,23 @@ func retriveNotionPage(ctx context.Context, client *http.Client, metadata Metada
 		}
 	}
 
-	return TextChunkMessage{
+	chunk := TextChunkMessage{
 		Metadata: metadata,
 		Content:  strings.Join(chunkWords, " "),
-	}, nil
+	}
+	return chunk, nil
 }
 
 // retriveNotionDatabase retrieves a specific chunk from a Notion database
 func retriveNotionDatabase(ctx context.Context, client *http.Client, metadata Metadata) (TextChunkMessage, error) {
-	chunkIDParts := strings.Split(metadata.ChunkID, ";")
-	chunkIDMap := make(map[string]string)
-
-	for _, part := range chunkIDParts {
-		kv := strings.Split(part, "=")
-		if len(kv) != 2 {
-			return TextChunkMessage{}, fmt.Errorf("invalid chunk ID format: malformed key-value pair in '%s'", part)
-		}
-		chunkIDMap[kv[0]] = kv[1]
-	}
-
-	startBlockID := chunkIDMap["start_block"]
-	endBlockID := chunkIDMap["end_block"]
-	startOffset, err := strconv.Atoi(chunkIDMap["start_offset"])
+	startBlockID, startOffset, endBlockID, endOffset, err := parseChunkID(metadata.ChunkID)
 	if err != nil {
-		return TextChunkMessage{}, fmt.Errorf("invalid start offset in chunk ID: %w", err)
-	}
-	endOffset, err := strconv.Atoi(chunkIDMap["end_offset"])
-	if err != nil {
-		return TextChunkMessage{}, fmt.Errorf("invalid end offset in chunk ID: %w", err)
-	}
-
-	if startBlockID == "" || endBlockID == "" {
-		return TextChunkMessage{}, fmt.Errorf("missing block IDs in chunk ID")
-	}
-
-	dbReq, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("https://api.notion.com/v1/databases/%s", metadata.ResourceID), nil)
-	if err != nil {
-		return TextChunkMessage{}, fmt.Errorf("failed to create database request: %w", err)
-	}
-	dbReq.Header.Set("Notion-Version", "2022-06-28")
-	dbResp, err := client.Do(dbReq)
-	if err != nil {
-		return TextChunkMessage{}, fmt.Errorf("failed to execute database request: %w", err)
-	}
-	defer dbResp.Body.Close()
-
-	if dbResp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(dbResp.Body)
-		return TextChunkMessage{}, fmt.Errorf("database request failed with status %d: %s", dbResp.StatusCode, string(bodyBytes))
+		return TextChunkMessage{}, fmt.Errorf("failed to parse chunk ID: %w", err)
 	}
 
 	var dbResponse NotionDatabase
-	if err := json.NewDecoder(dbResp.Body).Decode(&dbResponse); err != nil {
-		return TextChunkMessage{}, fmt.Errorf("failed to decode database response: %w", err)
+	if err := fetchNotionResource(ctx, client, fmt.Sprintf("https://api.notion.com/v1/databases/%s", metadata.ResourceID), &dbResponse); err != nil {
+		return TextChunkMessage{}, fmt.Errorf("failed to fetch database: %w", err)
 	}
 
 	var blockResponse NotionPageResponse
@@ -1310,21 +1203,16 @@ func retriveNotionDatabase(ctx context.Context, client *http.Client, metadata Me
 			Type:           "heading_1",
 			CreatedTime:    dbResponse.CreatedTime,
 			LastEditedTime: dbResponse.LastEditedTime,
-			Heading1: struct {
-				RichText []RichText `json:"rich_text"`
-			}{
-				RichText: []RichText{{
-					Type: "text",
-					Text: struct {
-						Content string "json:\"content\""
-						Link    *struct {
-							URL string "json:\"url\""
-						} "json:\"link\""
-					}{
-						Content: dbTitle,
+			Content: map[string]interface{}{
+				"rich_text": []map[string]interface{}{
+					{
+						"type": "text",
+						"text": map[string]interface{}{
+							"content": dbTitle,
+						},
+						"plain_text": dbTitle,
 					},
-					PlainText: dbTitle,
-				}},
+				},
 			},
 		})
 	}
@@ -1340,21 +1228,16 @@ func retriveNotionDatabase(ctx context.Context, client *http.Client, metadata Me
 				Type:           "paragraph",
 				CreatedTime:    dbResponse.CreatedTime,
 				LastEditedTime: dbResponse.LastEditedTime,
-				Paragraph: struct {
-					RichText []RichText `json:"rich_text"`
-				}{
-					RichText: []RichText{{
-						Type: "text",
-						Text: struct {
-							Content string "json:\"content\""
-							Link    *struct {
-								URL string "json:\"url\""
-							} "json:\"link\""
-						}{
-							Content: descriptionText,
+				Content: map[string]interface{}{
+					"rich_text": []map[string]interface{}{
+						{
+							"type": "text",
+							"text": map[string]interface{}{
+								"content": descriptionText,
+							},
+							"plain_text": descriptionText,
 						},
-						PlainText: descriptionText,
-					}},
+					},
 				},
 			})
 		}
@@ -1372,7 +1255,7 @@ func retriveNotionDatabase(ctx context.Context, client *http.Client, metadata Me
 	if err != nil {
 		return TextChunkMessage{}, fmt.Errorf("failed to create query request: %w", err)
 	}
-	queryReq.Header.Set("Notion-Version", "2022-06-28")
+	queryReq.Header.Set("Notion-Version", NotionVersion)
 	queryReq.Header.Set("Content-Type", "application/json")
 
 	queryResp, err := client.Do(queryReq)
@@ -1413,28 +1296,14 @@ func retriveNotionDatabase(ctx context.Context, client *http.Client, metadata Me
 		}
 
 		if rowContent != "" {
-			blockResponse.Results = append(blockResponse.Results, Block{
-				ID:             fmt.Sprintf("%s_row_%d", metadata.ResourceID, rowCounter),
-				Type:           "paragraph",
-				CreatedTime:    dbResponse.CreatedTime,
-				LastEditedTime: dbResponse.LastEditedTime,
-				Paragraph: struct {
-					RichText []RichText `json:"rich_text"`
-				}{
-					RichText: []RichText{{
-						Type: "text",
-						Text: struct {
-							Content string "json:\"content\""
-							Link    *struct {
-								URL string "json:\"url\""
-							} "json:\"link\""
-						}{
-							Content: rowContent,
-						},
-						PlainText: rowContent,
-					}},
-				},
-			})
+			blockResponse.Results = append(blockResponse.Results,
+				injectMetadataBlock(
+					fmt.Sprintf("%s_row_%d", metadata.ResourceID, rowCounter),
+					rowContent,
+					dbResponse.CreatedTime,
+					dbResponse.LastEditedTime,
+				),
+			)
 		}
 	}
 
@@ -1473,8 +1342,9 @@ func retriveNotionDatabase(ctx context.Context, client *http.Client, metadata Me
 		}
 	}
 
-	return TextChunkMessage{
+	chunk := TextChunkMessage{
 		Metadata: metadata,
 		Content:  strings.Join(chunkWords, " "),
-	}, nil
+	}
+	return chunk, nil
 }

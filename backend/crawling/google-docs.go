@@ -372,75 +372,8 @@ func (dp *DocProcessor) ExtractDocsChunk(doc *docs.Document, startPos, endPos Po
 		return nil, err
 	}
 
-	isBefore := func(a, b Position) bool {
-		if a.ElementType != b.ElementType {
-			if a.ElementType == ElementTypeHeader && (b.ElementType != ElementTypeHeader) {
-				return true
-			}
-			if a.ElementType == ElementTypeFooter && (b.ElementType != ElementTypeFooter) {
-				return false
-			}
-			if b.ElementType == ElementTypeFooter && (a.ElementType != ElementTypeFooter) {
-				return true
-			}
-			if b.ElementType == ElementTypeHeader && (a.ElementType != ElementTypeHeader) {
-				return false
-			}
-		}
-
-		if a.SectionID != b.SectionID {
-			return a.SectionID < b.SectionID
-		}
-
-		if (a.ElementType == ElementTypeTable) != (b.ElementType == ElementTypeTable) {
-			return a.ElementType != ElementTypeTable // Paragraphs come before tables
-		}
-
-		if a.ElementType == ElementTypeTable && b.ElementType == ElementTypeTable {
-			if a.TableIndex != b.TableIndex {
-				return a.TableIndex < b.TableIndex
-			}
-			if a.RowIndex != b.RowIndex {
-				return a.RowIndex < b.RowIndex
-			}
-			if a.CellIndex != b.CellIndex {
-				return a.CellIndex < b.CellIndex
-			}
-			if a.ParaIndex != b.ParaIndex {
-				return a.ParaIndex < b.ParaIndex
-			}
-		} else {
-			if a.ParaIndex != b.ParaIndex {
-				return a.ParaIndex < b.ParaIndex
-			}
-		}
-
-		return a.Offset < b.Offset
-	}
-
-	isInRange := func(pos Position) bool {
-		afterStart := !isBefore(pos, startPos) ||
-			(pos.ElementType == startPos.ElementType &&
-				pos.SectionID == startPos.SectionID &&
-				pos.ParaIndex == startPos.ParaIndex &&
-				pos.TableIndex == startPos.TableIndex &&
-				pos.RowIndex == startPos.RowIndex &&
-				pos.CellIndex == startPos.CellIndex &&
-				pos.Offset >= startPos.Offset)
-
-		beforeEnd := isBefore(pos, endPos) ||
-			(pos.ElementType == endPos.ElementType &&
-				pos.SectionID == endPos.SectionID &&
-				pos.ParaIndex == endPos.ParaIndex &&
-				pos.TableIndex == endPos.TableIndex &&
-				pos.RowIndex == endPos.RowIndex &&
-				pos.CellIndex == endPos.CellIndex &&
-				pos.Offset <= endPos.Offset)
-
-		return afterStart && beforeEnd
-	}
 	for _, wordInfo := range allWords {
-		if isInRange(wordInfo.Position) {
+		if wordInfo.Position.InRange(startPos, endPos) {
 			chunkWords = append(chunkWords, wordInfo.Word)
 		}
 	}
@@ -448,6 +381,76 @@ func (dp *DocProcessor) ExtractDocsChunk(doc *docs.Document, startPos, endPos Po
 		return nil, fmt.Errorf("no content found between specified positions")
 	}
 	return chunkWords, nil
+}
+
+// InRange checks if this position is within the range defined by start and end positions
+func (pos Position) InRange(startPos, endPos Position) bool {
+	afterStart := !pos.Before(startPos) ||
+		(pos.ElementType == startPos.ElementType &&
+			pos.SectionID == startPos.SectionID &&
+			pos.ParaIndex == startPos.ParaIndex &&
+			pos.TableIndex == startPos.TableIndex &&
+			pos.RowIndex == startPos.RowIndex &&
+			pos.CellIndex == startPos.CellIndex &&
+			pos.Offset >= startPos.Offset)
+
+	beforeEnd := pos.Before(endPos) ||
+		(pos.ElementType == endPos.ElementType &&
+			pos.SectionID == endPos.SectionID &&
+			pos.ParaIndex == endPos.ParaIndex &&
+			pos.TableIndex == endPos.TableIndex &&
+			pos.RowIndex == endPos.RowIndex &&
+			pos.CellIndex == endPos.CellIndex &&
+			pos.Offset <= endPos.Offset)
+
+	return afterStart && beforeEnd
+}
+
+// Before determines if this position comes before another position in the document
+func (a Position) Before(b Position) bool {
+	if a.ElementType != b.ElementType {
+		if a.ElementType == ElementTypeHeader && (b.ElementType != ElementTypeHeader) {
+			return true
+		}
+		if a.ElementType == ElementTypeFooter && (b.ElementType != ElementTypeFooter) {
+			return false
+		}
+		if b.ElementType == ElementTypeFooter && (a.ElementType != ElementTypeFooter) {
+			return true
+		}
+		if b.ElementType == ElementTypeHeader && (a.ElementType != ElementTypeHeader) {
+			return false
+		}
+	}
+
+	if a.SectionID != b.SectionID {
+		return a.SectionID < b.SectionID
+	}
+
+	if (a.ElementType == ElementTypeTable) != (b.ElementType == ElementTypeTable) {
+		return a.ElementType != ElementTypeTable
+	}
+
+	if a.ElementType == ElementTypeTable && b.ElementType == ElementTypeTable {
+		if a.TableIndex != b.TableIndex {
+			return a.TableIndex < b.TableIndex
+		}
+		if a.RowIndex != b.RowIndex {
+			return a.RowIndex < b.RowIndex
+		}
+		if a.CellIndex != b.CellIndex {
+			return a.CellIndex < b.CellIndex
+		}
+		if a.ParaIndex != b.ParaIndex {
+			return a.ParaIndex < b.ParaIndex
+		}
+	} else {
+		if a.ParaIndex != b.ParaIndex {
+			return a.ParaIndex < b.ParaIndex
+		}
+	}
+
+	return a.Offset < b.Offset
 }
 
 // ProcessGoogleDoc is used to process a Google Doc
