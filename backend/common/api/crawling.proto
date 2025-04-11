@@ -12,6 +12,8 @@ service CrawlingService {
     rpc ManualCrawler (ManualCrawlerRequest) returns (ManualCrawlerResponse);
     rpc DeleteCrawlerData (DeleteCrawlerDataRequest) returns (DeleteCrawlerDataResponse);
     rpc GetChunksFromGoogle (GetChunksFromGoogleRequest) returns (GetChunksFromGoogleResponse);
+    rpc GetChunksFromNotion (GetChunksFromNotionRequest) returns (GetChunksFromNotionResponse);
+    rpc GetChunksFromMicrosoft (GetChunksFromMicrosoftRequest) returns (GetChunksFromMicrosoftResponse);
 }
 
 message StartInitalCrawlerRequest {
@@ -56,6 +58,28 @@ message GetChunksFromGoogleRequest {
 }
 
 message GetChunksFromGoogleResponse {
+    int64 numChunks = 1;
+    repeated TextChunkMessage chunks = 2;
+}
+
+message GetChunksFromNotionRequest {
+    string user_id = 1;
+    repeated Metadata metadatas = 2;
+    uint32 ttl = 3; 
+}
+
+message GetChunksFromNotionResponse {
+    int64 numChunks = 1;
+    repeated TextChunkMessage chunks = 2;
+}
+
+message GetChunksFromMicrosoftRequest {
+    string user_id = 1;
+    repeated Metadata metadatas = 2;
+    uint32 ttl = 3; 
+}
+
+message GetChunksFromMicrosoftResponse {
     int64 numChunks = 1;
     repeated TextChunkMessage chunks = 2;
 }
